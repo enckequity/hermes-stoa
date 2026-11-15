@@ -669,6 +669,35 @@ def report_act(report_id: str, body: dict = Body(...)) -> dict:
     return result
 
 
+@router.get("/files")
+def files() -> dict:
+    """The files the talk box handed to Hermes that are still on this machine, when each goes, and how much Hermes
+    holds in its two folders (counts and sizes; no file of another chat is named)."""
+    return desk().handed.listing()
+
+
+@router.post("/files/handed")
+def files_handed(body: dict = Body(...)) -> dict:
+    """The page says Hermes has just kept a copy of a file its talk box handed over, at the path Hermes gave back.
+    It is listed only if it is a plain file in this profile's attachments or images folder."""
+    return desk().handed.note(body.get("path"), body.get("name"), body.get("lane"))
+
+
+@router.post("/files/remove")
+def files_remove(body: Optional[dict] = Body(None)) -> dict:
+    """Remove the listed files now: all of them, or the ones named by id. Only a file on the list, and only while
+    it is still the file that was handed over."""
+    d = desk()
+    result = d.handed.remove((body or {}).get("ids"))
+    return dict(d.handed.listing(), ok=True, removed_now=result["removed"], left=result["left"])
+
+
+@router.post("/files/keep")
+def files_keep(body: dict = Body(...)) -> dict:
+    """Set after how many days a handed file is removed (0: never by itself)."""
+    return desk().handed.set_keep_days(body.get("days"))
+
+
 @router.post("/notes/check")
 def notes_check(body: dict = Body(...)) -> dict:
     """Is this a folder Stoa could read call notes from? Counts the notes in it; opens none."""

@@ -8,10 +8,23 @@
   adds them together except "what needs me today". `/gtm` and `!gtm`, and a scheduled job that does
   not name a pipeline, are about the first one. A market map drawn inside a chat shows only while
   the page is on that map's pipeline.
+- **A file dropped in the talk box is copied by Hermes, and Stoa clears only its own.** Hermes keeps
+  the copy in its `attachments` (or `images`) folder on the machine it runs on, outside Stoa's data
+  folder, so it is not in Stoa's export or daily copies and does not go when a record or a
+  conversation does. Stoa removes the copies its talk box caused after seven days (change it, or
+  remove them at once, under **Setup → Your data**). It cannot tell which other files in those
+  folders are whose: ones attached in Hermes's own chat box, or dropped in Stoa before 0.24.1, stay
+  until you clear them. After a copy is removed, Hermes cannot read that file again in the
+  conversation it was dropped in; drop it again if you need to. A file sent to Hermes in Slack is a
+  different matter: Hermes clears those itself within a day.
 - **Reports count and add up; they do not do sums of your own.** A report is records or their value,
   grouped one way, over one set of records. There is no formula, no average of a field, and no
   report across pipelines. A bar coloured by how its records ended shows its win rate beside the
   count; other ratios you read off the parts. Money that came in is on the Cash tab, not here.
+- **"Where records come from" needs a source on each record.** Stoa marks the ones from a market map,
+  a list or an import; the rest have one only if you or Hermes gave it. A desk that never recorded
+  sources shows one bar, **Not recorded**, until they are filled in (from the report itself, or on
+  each record).
 - **Time in stage knows what the desk saw.** How long records now in a stage have been there is
   exact. How long the ones that left had stayed is read from the ledger, so a record imported
   half-way through its life starts counting on the day it was imported.

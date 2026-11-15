@@ -296,7 +296,13 @@ What the figures rest on:
 - **Time in stage** for records there now is days since each reached the stage. The "left after"
   figure reads the ledger, so it only knows moves made on the desk since they were made here; a
   move made within a minute of the one before is taken as a correction and left out.
-- **Source** is the record's own source field. A record with none is counted under **Not recorded**.
+- **Source** is the record's own source field, and the report is only as good as it is filled in. A
+  market-map record, a list and an import are marked by Stoa; any other record has a source only if
+  someone gave one. So the new-record form has a **Source** box that suggests the names already in
+  use, and when Hermes adds a record without one the tool tells it so, and it asks you once. A record
+  with none is counted under **Not recorded**; when two in five or more are, the card says so in
+  place of a comparison. Open the report, press **Not recorded**, and type each one's source in the
+  list: it is saved on the record, which moves to its own bar.
 - **What Hermes did** counts proposals, which are what a scheduled job leaves for your approval.
   What you ask Hermes to do in a chat is done at once and is not a proposal.
 
@@ -518,6 +524,21 @@ use is reported with its row number and the rest still come in.
 Due dates are stored as dates. Say "tomorrow", "Friday" or "+3d" and the desk works it out; say
 something it cannot read and it tells you, and nothing is saved.
 
+### Files dropped in the talk box
+
+Drop a PDF, a Word file or a picture on the page and it goes to Hermes with your next message.
+Hermes keeps a copy of its own to read from, in the profile's `attachments` folder (a picture in
+`images`), and has no clean-up for those folders. Stoa keeps a list of the copies its talk box
+caused and removes each **after seven days**.
+
+Under **Setup → Your data**, **Files dropped in the talk box** shows the copies still there, how
+big each is and when it goes; lets you change the days (a day, 7, 30, or never); and has **Remove
+them now**. It also says how many other files Hermes holds in those folders, which Stoa does not
+touch. The setting is `files_keep_days`; 0 means never by itself.
+
+Only a file on Stoa's list is removed, and only while it is still the file Hermes saved: a plain
+file in one of those two folders, the same size and age. Your original is never touched.
+
 ## Settings
 
 All optional. Set them in the Desktop app under **Settings → Plugins → Stoa**, or in
@@ -531,6 +552,7 @@ All optional. Set them in the Desktop app under **Settings → Plugins → Stoa*
 | `import_dir` | empty | A folder the agent may read CSV files from by path, besides the plugin's own `imports/` folder and the working directory |
 | `notes_dir` | empty | Folder of call notes to watch |
 | `notes_days` | `7` | How far back the notes inbox looks |
+| `files_keep_days` | `7` | Days before Stoa removes Hermes's copy of a file dropped in the talk box (0 = until you remove it under Setup) |
 | `pdl_monthly_cap` | `50` | Most paid lookups per calendar month (0 = no cap) |
 | `PDL_API_KEY` (secret) | empty | Turns on enrichment and buyer lookup |
 | `EXA_API_KEY` (secret) | empty | Lets the market map search for companies directly |

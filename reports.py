@@ -184,7 +184,7 @@ class Reports:
                 "periods": [list(item) for item in PERIODS],
                 "status": [["", "Any"], ["open", "Open"], ["won", playbook.won["label"]], ["lost", playbook.lost["label"]]],
                 "owners": sorted({d["owner"] for d in deals if d["owner"]}),
-                "sources": sorted({origin(d, sample) for d in deals}),
+                "sources": sorted({origin(d, sample) for d in deals}), "sources_in_use": self.desk.sources_in_use(20),
                 "stages": [[s["id"], s["label"]] for s in playbook.stages]}
 
     def clean(self, raw: Any) -> tuple:
@@ -485,6 +485,11 @@ class Reports:
         if spec["split"] == "furthest" and spec["count"] == "records" and self._mid(playbook) < len(playbook.stages):
             mid = playbook.stages[self._mid(playbook)]["label"].lower()
             reached = lambda row: sum(part["count"] for part in row["parts"] if part["k"] in ("won", "late"))     # noqa: E731
+            blank = next((row for row in named if spec["by"] == "source" and row["key"] == "not recorded"), None)
+            if blank and blank["count"] * 5 >= len(deals) * 2:           # two in five or more: the picture is mostly a gap
+                return ["%d of %d have no source, so this says little yet." % (blank["count"], len(deals)),
+                        "Open the report and press Not recorded to fill them in."]
+            named = [row for row in named if row is not blank] or named       # a gap is not a source to compare the others with
             big = max(named, key=lambda row: row["count"])
             able = [row for row in named if row["count"] >= 3]
             if able and any(reached(row) for row in able):

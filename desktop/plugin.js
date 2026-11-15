@@ -406,6 +406,10 @@ const readAsDataUrl = file => new Promise((resolve, reject) => {
     stages a picture and answers with its path and type, and the message must then carry them (seen on a real run:
     without that the model is told nothing of the picture). An older gateway queues the picture itself and answers
     with no type, and then there is nothing to carry. */
+// Hermes keeps its own copy of a file it is handed, and nothing of Hermes's clears it. The page tells the backend
+// the path Hermes gave back, so the copy is on Stoa's list and goes after the days set (Setup, Your data).
+const noteHanded = (path, name) => { if (path) rest('/files/handed', { method: 'POST', body: { path: String(path), name, lane: talking.lane } }).catch(() => {}) }
+
 async function handOver(sessionId, files) {
   const refs = [], pictures = []
   for (const item of files) {
@@ -415,10 +419,12 @@ async function handOver(sessionId, files) {
       const got = await host.request('image.attach_bytes', { session_id: sessionId, content_base64: url.replace(/^data:[^,]*,/, ''), filename: item.name }, 120000)
       if (!got || got.attached === false) throw new Error((got && got.message) || 'Hermes did not take ' + item.name)
       if (got.path && got.mime) pictures.push({ path: String(got.path), mime: String(got.mime) })
+      noteHanded(got.path, item.name)
     } else {
       const got = await host.request('file.attach', { session_id: sessionId, data_url: url, name: item.name }, 120000)
       if (!got || !got.ref_text) throw new Error((got && got.message) || 'Hermes did not take ' + item.name)
       refs.push(got.ref_text)
+      noteHanded(got.path, item.name)
     }
   }
   return { refs, pictures }
@@ -1754,9 +1760,12 @@ function Edit({ deal, state, done }) {
 }
 
 /** Put someone or something new on the desk by hand. */
+// The sources people have typed, for a box to suggest: not the marks Stoa puts there itself (a map, a list, an import, a sample).
+const typedSources = deals => uniq(deals.map(deal => String(deal.source || '').trim()).filter(source => source && source !== 'stoa-demo' && !/^(market map|intake:|import$)/i.test(source)))
+
 function NewRecord({ state, close, opened, preset }) {
   const pb = state.playbook, terms = pb.terms
-  const [v, setV] = useState({ name: '', company: '', group: '', stage: pb.stages[0] ? pb.stages[0].id : '', value: '', owner: '', email: '', phone: '', next_step: '', next_due: '', ...(preset || {}) })
+  const [v, setV] = useState({ name: '', company: '', group: '', stage: pb.stages[0] ? pb.stages[0].id : '', value: '', owner: '', email: '', phone: '', source: '', next_step: '', next_due: '', ...(preset || {}) })
   const [busy, setBusy] = useState(false)
   const set = key => event => setV({ ...v, [key]: event.target.value })
   const save = () => {
@@ -1791,10 +1800,12 @@ function NewRecord({ state, close, opened, preset }) {
       h(Field, { label: cap(terms.owner), list: 'stoa-new-owners', value: v.owner, onChange: set('owner') }),
       h(Field, { label: 'Email', type: 'email', value: v.email, onChange: set('email') }),
       h(Field, { label: 'Phone', type: 'tel', value: v.phone, onChange: set('phone') }),
+      h(Field, { label: 'Source', wide: true, list: 'stoa-new-sources', placeholder: 'Where they came from: a referral, LinkedIn, an event…', value: v.source, onChange: set('source') }),
       h(Field, { label: 'Next step', wide: true, value: v.next_step, onChange: set('next_step') }),
       h(Field, { label: 'Due', type: 'date', value: v.next_due, onChange: set('next_due') })),
     h('datalist', { id: 'stoa-new-groups' }, uniq(state.deals.map(deal => deal.group)).map(name => h('option', { key: name, value: name }))),
     h('datalist', { id: 'stoa-new-owners' }, uniq(state.deals.map(deal => deal.owner)).map(name => h('option', { key: name, value: name }))),
+    h('datalist', { id: 'stoa-new-sources' }, typedSources(state.deals).map(name => h('option', { key: name, value: name }))),
     h('div', { className: 'stoa-btns' },
       h(Btn, { kind: 'primary', disabled: busy || !v.name.trim(), onClick: save }, 'Add to the desk'),
       h(Btn, { kind: 'quiet', disabled: busy, onClick: close }, 'Cancel')))
@@ -3050,6 +3061,60 @@ function NotesSources({ setup }) {
 }
 
 /** A schedule in words where it is one of the plain kinds ("30 8 * * 1-5" is weekdays at 8:30); otherwise as Hermes shows it. */
+const fileSize = bytes => (bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + ' MB' : bytes >= 1024 ? Math.round(bytes / 1024) + ' KB' : bytes + ' bytes')
+
+/** The copies Hermes keeps of files dropped in the talk box: which are still there, when each goes, and removing them now. */
+function HandedFiles() {
+  const KEY = ['stoa', 'files']
+  const query = useQuery({ queryKey: KEY, queryFn: () => rest('/files'), staleTime: 3000 })
+  const [busy, setBusy] = useState(false)
+  const [sure, setSure] = useState(false)
+  const data = query.data
+  if (!data) return null
+  const send = async (path, body, done) => {
+    setBusy(true)
+    try {
+      const out = await rest(path, { method: 'POST', body })
+      if (out && out.ok === false) host.notify({ kind: 'warning', message: out.error || 'That could not be done.' })
+      else { queryClient.setQueryData(KEY, out); if (done) done(out) }
+    } catch (error) {
+      host.notifyError(error, 'Stoa could not do that')
+    }
+    setBusy(false)
+    setSure(false)
+  }
+  const days = data.keep_days
+  const choices = [[1, 'a day'], [7, '7 days'], [30, '30 days'], [0, 'never, I will remove them']].concat([1, 7, 30, 0].includes(days) ? [] : [[days, days + ' days']])
+  const all = data.folders.reduce((sum, folder) => sum + folder.files, 0), others = all - data.files.length
+  const where = data.folders.length ? data.folders[0].path : ''
+  const removed = out => host.notify({ kind: out.left && out.left.length ? 'warning' : 'success',
+    message: plural(out.removed_now, 'file', 'files') + ' removed.' + (out.left && out.left.length ? ' Left: ' + out.left.map(item => item.name + ' (' + item.why + ')').join('; ') + '.' : '') })
+  return h('div', { style: { marginTop: 14, paddingTop: 12, borderTop: '1px dotted var(--ui-stroke-primary)' } },
+    h('small', { className: 'stoa-eyebrow', style: { display: 'block', marginBottom: 6 } }, 'Files dropped in the talk box'),
+    h('div', { className: 'stoa-sub', style: { overflowWrap: 'anywhere' } },
+      'Hermes keeps its own copy of a file you drop here, on the computer it runs on' + (where ? ' (' + where + ')' : '') + ', and nothing of Hermes\'s clears it. Stoa removes the copies its talk box caused after ',
+      h('select', { className: 'stoa-select', style: { height: 24, padding: '0 6px', margin: '0 2px' }, 'aria-label': 'Remove dropped files after', value: String(days), disabled: busy || !data.can_save,
+        onChange: event => send('/files/keep', { days: Number(event.target.value) }) }, choices.map(item => h('option', { key: item[0], value: String(item[0]) }, item[1]))),
+      data.can_save ? '.' : '. Change it in Stoa\'s settings.', ' Your own file, where you had it, is never touched.'),
+    data.files.length
+      ? h('div', { style: { marginTop: 8 } }, data.files.slice(0, 8).map(file => h('div', { key: file.id, className: 'stoa-setrow', style: { alignItems: 'baseline', justifyContent: 'space-between' } },
+        h('span', { style: { overflowWrap: 'anywhere' } }, file.name),
+        h('span', { className: 'stoa-sub', style: { whiteSpace: 'nowrap' } }, fileSize(file.bytes) + ' · ' + ago(file.at) + (file.changed ? ' · changed since, left alone'
+          : file.days_left === null ? '' : file.days_left <= 0 ? ' · goes today' : ' · goes in ' + plural(file.days_left, 'day', 'days'))))),
+      data.files.length > 8 ? h('div', { className: 'stoa-sub', style: { marginTop: 4 } }, 'and ' + (data.files.length - 8) + ' more') : null,
+      h('div', { className: 'stoa-btns' },
+        sure ? h(Btn, { disabled: busy, onClick: () => send('/files/remove', {}, removed) }, 'Yes, remove ' + (data.files.length === 1 ? 'it' : 'all ' + data.files.length))
+          : h(Btn, { disabled: busy, onClick: () => setSure(true) }, data.files.length === 1 ? 'Remove it now' : 'Remove them now'),
+        sure ? h(Btn, { kind: 'quiet', onClick: () => setSure(false) }, 'Keep them') : null),
+      sure ? h('div', { className: 'stoa-sub', style: { marginTop: 6 } }, 'Hermes will not be able to read ' + (data.files.length === 1 ? 'it' : 'them') + ' again in the conversation ' + (data.files.length === 1 ? 'it was' : 'they were') + ' dropped in.') : null)
+      : h('div', { className: 'stoa-sub', style: { marginTop: 6 } }, 'None are there now.' + (data.removed ? ' ' + plural(data.removed, 'copy has', 'copies have') + ' been removed so far.' : '')),
+    others > 0 ? h('div', { className: 'stoa-sub', style: { marginTop: 6, overflowWrap: 'anywhere' } },
+      plural(others, 'other file is', 'other files are') + ' in Hermes\'s folders (' + data.folders.filter(folder => folder.files).map(folder => folder.files + ' in ' + folder.name + ', ' + fileSize(folder.bytes)).join('; ')
+      + ' in all): from other chats, or dropped here before Stoa kept a list. Stoa does not touch those. Clear them yourself if they should not stay.') : null,
+    data.elsewhere ? h('div', { className: 'stoa-sub', style: { marginTop: 6 } },
+      plural(data.elsewhere, 'file', 'files') + ' went where Stoa does not reach (this profile keeps attachments in each conversation\'s workspace), so ' + (data.elsewhere === 1 ? 'it is' : 'they are') + ' not on the list.') : null)
+}
+
 function scheduleWords(text) {
   const parts = String(text || '').trim().split(/\s+/)
   if (parts.length !== 5 || parts[2] !== '*' || parts[3] !== '*' || !/^\d+$/.test(parts[0]) || !/^\d+(,\d+)*$/.test(parts[1])) return String(text || '')
@@ -3186,6 +3251,7 @@ function Setup({ state, go }) {
           : 'A copy of the file is kept each day once there is something on the desk, the last fourteen, in a backups folder beside it.'),
         h('div', { className: 'stoa-btns' }, h(Btn, { disabled: busy, onClick: exportAll }, setup.tour ? 'Export the sample data as CSV' : 'Export everything as CSV'),
           setup.tour ? h(Btn, { kind: 'primary', disabled: busy, onClick: () => wait(tour('leave')) }, 'Leave the tour') : null),
+        h(HandedFiles),
         data.samples && !setup.tour ? h('div', { style: { marginTop: 10 } },
           h('div', { className: 'stoa-sub' }, plural(data.samples, 'sample record is', 'sample records are') + ' mixed into your own desk (an earlier version of Stoa put them there).'),
           h('div', { className: 'stoa-btns', style: { marginTop: 6 } }, h(Btn, { disabled: busy, onClick: () => wait(tour('tidy')) }, 'Remove them from my desk'))) : null),
@@ -5294,23 +5360,42 @@ function RepBuilder({ choices, start, pb, busy, onSave, onCancel, saveLabel }) {
       onCancel ? h(Btn, { kind: 'quiet', onClick: onCancel }, 'Cancel') : null))
 }
 
-function RecordsBehind({ result, row, pb, openRecord }) {
+/** One record's missing source, typed in the report itself. Saved on Enter or on leaving the box; the record then moves to its own bar. */
+function SourceBox({ record }) {
+  const [value, setValue] = useState('')
+  const [busy, setBusy] = useState(false)
+  const save = async () => {
+    const text = value.trim()
+    if (!text || busy) return
+    setBusy(true)
+    await act(record.id, { verb: 'update', source: text })
+    setBusy(false)
+  }
+  return h('input', { className: 'stoa-field', style: { marginTop: 0, minWidth: 130 }, list: 'stoa-rep-sources', 'aria-label': 'Where ' + record.name + ' came from', placeholder: 'Referral, an event…',
+    value, disabled: busy, onChange: event => setValue(event.target.value), onBlur: save, onKeyDown: event => { if (event.key === 'Enter') { event.preventDefault(); save() } } })
+}
+
+function RecordsBehind({ result, row, pb, openRecord, sources }) {
   const records = row.records || []
   const days = result.unit === 'days'
+  // The bar of records with no source is the one place to give them one, without opening each.
+  const fill = Boolean(result.spec) && result.spec.by === 'source' && row.key === 'not recorded'
   const save = () => download('stoa-' + fileName(result.title + ' ' + row.label) + '.csv', csvText(
     ['Name', 'Company', cap(pb.terms.group), 'Stage', 'Value', 'Entered', 'Closed', 'Owner', 'Reason'],
     records.map(r => [r.name, r.company, r.group, r.stage, r.value, r.entered, r.closed, r.owner, r.reason])), 'text/csv')
   return h(Section, { title: 'The ' + plural(records.length, pb.terms.deal, pb.terms.deals) + ' behind ' + row.label,
     aside: h(Btn, { kind: 'quiet', onClick: save }, 'Download these') },
+  fill ? h('p', { className: 'stoa-sub', style: { margin: '0 0 8px' } }, 'Type where each came from and press Enter. It is saved on the ' + pb.terms.deal + ', which then moves to its own bar; the change can be undone.') : null,
+  fill ? h('datalist', { id: 'stoa-rep-sources' }, (sources || []).map(name => h('option', { key: name, value: name }))) : null,
   h('div', { className: 'stoa-repscroll' }, h('table', { className: 'stoa-reptable' },
     h('thead', null, h('tr', null, h('th', null, cap(pb.terms.deal)), h('th', null, 'Stage'), h('th', { 'data-num': '1' }, 'Value'),
-      h('th', null, days ? 'In the stage' : 'Entered'), h('th', null, 'Owner'))),
+      h('th', null, days ? 'In the stage' : 'Entered'), h('th', null, fill ? 'Source' : 'Owner'))),
     h('tbody', null, records.map(r => h('tr', { key: r.id },
       h('td', null, h('button', { type: 'button', className: 'stoa-proplink stoa-name', onClick: () => openRecord(r.id) }, r.name), h('small', null, r.company || r.group)),
       h('td', null, h('i', { 'data-k': r.k || '' }), r.stage, r.reason ? h('small', null, r.reason) : null),
       h('td', { 'data-num': '1' }, money(r.value, pb.currency) || '–'),
       h('td', { 'data-num': days ? '1' : '0' }, days ? r.days + 'd' : shortDate(r.entered)),
-      h('td', null, r.owner || '–')))))))
+      h('td', null, fill ? h(SourceBox, { record: r }) : r.owner || '–')))))))
 }
 
 function ReportOpen({ id, state, choices, back, openRecord }) {
@@ -5388,7 +5473,7 @@ function ReportOpen({ id, state, choices, back, openRecord }) {
         h(RepSays, { says: result.says })),
         result.draw === 'rate' && !result.empty ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } }, result.rows.filter(item => (item.records || []).length).map(item =>
           h(Btn, { key: item.key, kind: sel === item.key ? 'go' : '', onClick: () => setSel(sel === item.key ? '' : item.key) }, 'The ' + item.count + ' ' + item.label.toLowerCase()))) : null,
-        row && row.records && row.records.length && shape !== 'time' ? h(RecordsBehind, { result, row, pb, openRecord }) : null),
+        row && row.records && row.records.length && shape !== 'time' ? h(RecordsBehind, { result, row, pb, openRecord, sources: choices.sources_in_use }) : null),
       h('div', null,
         h(Section, { title: 'How this report is made', aside: result.custom && !result.draft && !editing ? h(Btn, { kind: 'quiet', onClick: () => setEditing(true) }, 'Change') : null },
           editing && result.custom ? h(RepBuilder, { choices, start: result, pb, busy, saveLabel: 'Save', onCancel: () => setEditing(false),

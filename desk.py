@@ -22,6 +22,7 @@ from typing import Any, Callable, Optional
 
 from . import cards, demo, sources
 from . import store as st
+from .files import Handed
 from .intake import Intake
 from .market import Markets
 from .reports import Reports
@@ -194,6 +195,7 @@ class Desk:
         self.markets = Markets(self)
         self.intake = Intake(self)
         self.reports = Reports(self)
+        self.handed = Handed(self)            # the files the talk box handed to Hermes, and removing them
 
     # -- host services --------------------------------------------------------------------------
     @property
@@ -224,7 +226,14 @@ class Desk:
                 store.snapshot(self.data_dir / "backups")
             except Exception as exc:
                 log.warning("stoa: could not keep today's copy of the desk: %s", exc)
+            self.handed.sweep()             # and the files handed to Hermes that have been kept long enough go
         return store
+
+    def _handed_summary(self) -> dict:
+        """The files the talk box handed to Hermes that are still there, in one line's worth, for Setup."""
+        listing = self.handed.listing()
+        return {"count": len(listing["files"]), "bytes": listing["bytes"], "keep_days": listing["keep_days"],
+                "folder": listing["folders"][0]["path"] if listing["folders"] else ""}
 
     def backups(self) -> dict:
         """The daily copies there are of the pipeline in hand: how many, the newest, and where."""
@@ -1154,7 +1163,8 @@ class Desk:
                      "lost": tally["lost"], "samples": tally["samples"], "activities": tally["activities"], "maps": tally["maps"],
                      "people": tally["people"], "ledger": tally["ledger"], "archived": tally["archived"],
                      "lists_waiting": tally["lists_waiting"], "exports": str(self.data_dir / "exports"),
-                     "backups": read("the daily copies", self.backups, {"folder": "", "count": 0, "newest": ""})},
+                     "backups": read("the daily copies", self.backups, {"folder": "", "count": 0, "newest": ""}),
+                     "files": read("the files handed to Hermes", self._handed_summary, {"count": 0, "bytes": 0, "keep_days": 7, "folder": ""})},
             "playbook_sets": {
                 "words": "%s, %s" % (terms["deal"], terms["group"]),
                 "stages": [s["label"] for s in own.stages] + [own.won["label"]],
@@ -1639,7 +1649,29 @@ class Desk:
             notes=str(args.get("notes") or "").strip()[:NOTES_MAX], phone=str(args.get("phone") or "").strip()[:60], fields=args.get("fields") if isinstance(args.get("fields"), dict) else None)
         if args.get("note"):
             self.store.log(deal["id"], "note", str(args["note"])[:4000], actor=actor)
-        return {"ok": True, "action": "add", "deal": self.view(self.store.get(deal["id"]), playbook)}
+        out = {"ok": True, "action": "add", "deal": self.view(self.store.get(deal["id"]), playbook)}
+        if not deal["source"] and actor != "dashboard":          # the page has its own Source box; this is for the agent
+            out["source_missing"] = {
+                "in_use": self.sources_in_use(),
+                "note": "Nothing says where this one came from, and the report of where %s come from counts on it. If the person "
+                        "has already said (a referral, an event, inbound, a list, an advert), set it now with action='update' "
+                        "and `source`, in a word or two, using a name from in_use where one fits. If they have not, ask once, in "
+                        "the same line as anything else you need from them. On a scheduled run, set it only if what you read "
+                        "says so." % playbook.terms["deals"]}
+        return out
+
+    def sources_in_use(self, most: int = 8) -> list:
+        """The sources people have given their records, the most used first, as they were typed (not the marks
+        Stoa puts there itself: a market map, a list, an import, sample data)."""
+        counts: dict = {}
+        for deal in self.store.list(status="all"):
+            source = deal["source"].strip()
+            low = source.lower()
+            if not source or source == demo.SOURCE or low == "import" or low.startswith(("market map", "intake:")):
+                continue
+            entry = counts.setdefault(low, [source, 0])
+            entry[1] += 1
+        return [name for name, _ in sorted(counts.values(), key=lambda item: (-item[1], item[0].lower()))[:most]]
 
     def _move(self, deal: dict, stage: str, playbook: Playbook, actor: str, reason: str = "") -> Optional[dict]:
         """Move a record from the stage it was read at. ``None`` means someone else moved it first."""

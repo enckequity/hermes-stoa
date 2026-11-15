@@ -60,7 +60,7 @@ GTM_DEAL = {
             "owner": {"type": "string"},
             "email": {"type": "string"},
             "linkedin": {"type": "string"},
-            "source": {"type": "string", "description": "Where the record came from (referral, inbound, event…)."},
+            "source": {"type": "string", "description": "Where the record came from, in a word or two (Referral, Inbound, LinkedIn, an event's or a list's name). The sources report groups by it: set it whenever it is known, and reuse a name already in use."},
             "next_step": {"type": "string", "description": "The single next action. Pass an empty string to clear it."},
             "next_due": {"type": "string", "description": "Due date for the next step: YYYY-MM-DD (tomorrow, friday and +3d also work; '' clears it)."},
             "close_on": {"type": "string", "description": "add/update: when the record is expected to close, as a date (the forecast is bucketed by it; '' clears it)."},

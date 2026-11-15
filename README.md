@@ -186,8 +186,14 @@ What the plugin does that you would want to know before installing it:
   when you pick it or drop it on the page: a CSV's text goes to the plugin's backend to be held as a
   review; a small text file goes to the agent inside your message; and any other file (a PDF, a Word
   file, a picture, up to 25 MB) is handed to Hermes with your next message through the gateway's own
-  attach calls, the ones the app's chat box uses (`file.attach` puts it in that conversation's
-  workspace, `image.attach_bytes` stages a picture), so it is Hermes that stores and reads it. The model
+  attach calls, the ones the app's chat box uses (`file.attach` for a file, `image.attach_bytes` for
+  a picture), so it is Hermes that stores and reads it: Hermes keeps its own copy in the profile's
+  home folder, in `attachments/` (a picture in `images/`), and nothing of Hermes's clears those two
+  folders. So the page tells the plugin's backend the path Hermes gave back, the plugin keeps a list
+  of those copies (`handed-files.json` in its data folder: paths, names and sizes, no contents), and
+  it removes each after seven days, or the number you set under **Setup → Your data**
+  (`files_keep_days`; 0 keeps them until you press **Remove them now** there). The tidy-up runs once
+  a day, the first time the desk is opened, like the daily copy. The model
   menu is the app's own (`ModelCatalogMenu`), and a thinking level picked in it is set on that
   conversation with `config.set reasoning`. The picture at the head of the page is drawn in the browser from a grid of
   dots that ships with the plugin (`desktop/art.json`), and a name you type under Setup is kept in the
@@ -268,6 +274,11 @@ What the plugin does that you would want to know before installing it:
   list it is.
 - **What runs without you.** A scheduled job reaches the desk only if you list `cron` in
   `channels`, and then changes only what the autonomy setting allows; the rest is held for you.
+- **The only files it deletes outside its own data folder** are those copies: a file is removed
+  only if it is on that list, is a plain file directly in this profile's `attachments/` or `images/`
+  folder, and is still the size and age it was when Hermes handed back its path. A file from another
+  chat is never on the list; one that has changed since is left alone and marked. Your own file,
+  where you had it, is never touched.
 - **No shell commands, no background processes, no self-updates, no Python dependencies.**
 
 ## License

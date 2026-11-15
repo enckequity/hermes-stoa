@@ -4890,6 +4890,29 @@ class ReportTests(unittest.TestCase):
         self.assertIsNone(months["before"])                                     # a month is not set against "the same month before"
         self.assertTrue(all("before" not in row for row in months["rows"]))
 
+    def test_a_record_with_no_source_is_asked_about_and_the_report_says_when_most_have_none(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        desk = make_desk(tmp.name, playbook="b2b-sales")
+        first = desk.deal({"action": "add", "name": "Ada Okoro", "company": "Lumen", "source": "Referral"})
+        self.assertNotIn("source_missing", first)
+        desk.deal({"action": "add", "name": "Ben Ito", "company": "Fathom", "source": "referral"})
+        desk.deal({"action": "add", "name": "Cy Vance", "company": "Quill", "source": "SaaStr"})
+        desk.store.update(desk.store.find("Cy Vance")["id"], source="market map: Brokers")      # a mark Stoa put there, not a name to suggest
+        asked = desk.deal({"action": "add", "name": "Di Marsh", "company": "Tide"})
+        self.assertEqual(asked["source_missing"]["in_use"], ["Referral"])                # as first typed, the most used first
+        self.assertIn("ask once", asked["source_missing"]["note"])
+        self.assertNotIn("source_missing", desk.deal({"action": "add", "name": "Eve Lund", "company": "Pine"}, actor="dashboard"))     # the page has its own box
+        self.assertIn("reuse a name already in use", schemas.GTM_DEAL["parameters"]["properties"]["source"]["description"])
+        result = desk.reports.run("sources", full=True)                                  # 2 of 5 have none
+        self.assertEqual(result["says"], ["2 of 5 have no source, so this says little yet.", "Open the report and press Not recorded to fill them in."])
+        self.assertEqual(desk.reports.dashboard()["choices"]["sources_in_use"], ["Referral"])
+        blank = next(row for row in result["rows"] if row["key"] == "not recorded")
+        desk.store.update(blank["records"][0]["id"], source="Referral")                  # filled in from the report: it moves to its own bar
+        after = desk.reports.run("sources")
+        self.assertEqual({row["label"]: row["count"] for row in after["rows"]}, {"Referral": 3, "Market map": 1, "Not recorded": 1})
+        self.assertIn("Referral sends the most", after["says"][0])                       # one in five: the others are compared, the gap is not
+
     def test_a_report_made_here_is_checked_and_says_what_it_takes_when_it_is_wrong(self):
         clean = self.reports.clean
         self.assertEqual(clean({"by": "owner"})[0], {"count": "records", "by": "owner", "when": "entered", "split": "none", "only": {}})
@@ -5117,6 +5140,146 @@ class ReportTests(unittest.TestCase):
         self.assertIn("Pipeline by stage", api.reports_page()["html"])
         self.assertTrue(api.report_act(made["id"], {"verb": "remove"})["ok"])
         self.assertEqual(len(api.reports()["reports"]), 9)
+
+
+class HandedFilesTests(unittest.TestCase):
+    """Hermes keeps a copy of a file dropped in the talk box. Stoa lists the copies it caused and removes them:
+    after the days set, or on a press. Nothing else in Hermes's folders is ever touched."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name).resolve() / "home"
+        data = self.home / "plugin-data" / "stoa"
+        data.mkdir(parents=True)
+        (self.home / "attachments").mkdir()
+        (self.home / "images").mkdir()
+        self.settings = {}
+        self.desk = make_desk(str(data), config=self.settings)
+        self.desk._set_config = self.settings.__setitem__
+        self.desk._get_config = lambda key, default=None: self.settings.get(key, default)
+        self.desk.home = self.home
+        self.handed = self.desk.handed
+
+    def put(self, folder, name, text="resume"):
+        path = self.home / folder / name
+        path.write_text(text)
+        return path
+
+    def age(self, days):
+        """Make every listed file look as if it was handed over so many days ago."""
+        path = self.desk.data_dir / "handed-files.json"
+        data = json.loads(path.read_text())
+        stamp = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        for entry in data["files"]:
+            entry["at"] = stamp
+        path.write_text(json.dumps(data))
+
+    def test_only_a_plain_file_in_hermes_own_two_folders_is_listed(self):
+        resume = self.put("attachments", "dana-resume.pdf")
+        photo = self.put("images", "badge.png")
+        self.assertTrue(self.handed.note(str(resume), "Dana resume.pdf", "desk")["listed"])
+        self.assertTrue(self.handed.note(str(photo))["listed"])
+        outside = Path(self.tmp.name) / "taxes.pdf"
+        outside.write_text("mine")
+        link = self.home / "attachments" / "link.pdf"
+        link.symlink_to(outside)
+        (self.home / "attachments" / "folder").mkdir()
+        for bad in (str(outside), "attachments/dana-resume.pdf", str(link), str(self.home / "attachments" / "folder"),
+                    str(self.home / "attachments" / ".." / ".." / "taxes.pdf"), str(self.home / "attachments" / "nothing.pdf"), "", None,
+                    str(self.home / "plugin-data" / "stoa" / "desk.db")):
+            self.assertFalse(self.handed.note(bad).get("listed"), bad)
+        listing = self.handed.listing()
+        self.assertEqual(sorted((f["name"], f["kind"]) for f in listing["files"]), [("Dana resume.pdf", "attachments"), ("badge.png", "images")])
+        self.assertEqual(listing["elsewhere"], 7)                      # every path given that was not one of Hermes's copies (an empty one is not counted)
+        self.assertEqual({f["days_left"] for f in listing["files"]}, {7})
+        self.assertEqual(listing["keep_days"], 7)
+        self.assertTrue(outside.exists())
+
+    def test_removing_takes_only_what_is_listed_and_is_still_the_same_file(self):
+        mine = self.put("attachments", "offer.pdf")
+        swapped = self.put("attachments", "notes.docx")
+        other = self.put("attachments", "from-another-chat.pdf")
+        for path in (mine, swapped):
+            self.handed.note(str(path))
+        time.sleep(0.01)
+        swapped.write_text("something else now, written by someone else")
+        folders = {f["name"]: f for f in self.handed.listing()["folders"]}
+        self.assertEqual((folders["attachments"]["files"], folders["attachments"]["from_here"]), (3, 2))
+        self.assertNotIn("from-another-chat", json.dumps(self.handed.listing()))       # counted, never named
+        out = self.handed.remove()
+        self.assertEqual(out["removed"], 1)
+        self.assertEqual([item["name"] for item in out["left"]], ["notes.docx"])
+        self.assertFalse(mine.exists())
+        self.assertTrue(swapped.exists() and other.exists())
+        listing = self.handed.listing()
+        self.assertEqual([(f["name"], f["changed"], f["days_left"]) for f in listing["files"]], [("notes.docx", True, None)])
+        self.assertEqual(listing["removed"], 1)
+        # one by id; and a file someone already deleted is simply forgotten
+        again = self.put("attachments", "again.pdf")
+        gone = self.put("attachments", "gone.pdf")
+        ref = self.handed.note(str(again))["id"]
+        self.handed.note(str(gone))
+        gone.unlink()
+        self.assertEqual(self.handed.remove(["nope"])["removed"], 0)
+        self.assertTrue(again.exists())
+        self.assertEqual(self.handed.remove([ref])["removed"], 1)
+        self.assertEqual([f["name"] for f in self.handed.listing()["files"]], ["notes.docx"])
+
+    def test_a_listed_path_that_became_a_link_is_never_followed(self):
+        target = Path(self.tmp.name) / "keep-me.txt"
+        target.write_text("resume")
+        listed = self.put("attachments", "cv.pdf")
+        self.handed.note(str(listed))
+        listed.unlink()
+        listed.symlink_to(target)
+        self.assertEqual(self.handed.remove()["removed"], 0)
+        self.assertTrue(target.exists() and listed.is_symlink())
+
+    def test_files_go_by_themselves_after_the_days_set_once_a_day(self):
+        old = self.put("attachments", "old.pdf")
+        self.handed.note(str(old))
+        self.age(6.5)
+        self.assertEqual(self.handed.sweep()["removed"], 0)
+        self.assertEqual(self.handed.listing()["files"][0]["days_left"], 1)
+        self.age(7.2)
+        self.desk._copied.clear()                  # a new day: the first time the desk is opened
+        self.desk.own_store
+        self.assertFalse(old.exists())
+        self.assertEqual(self.handed.listing()["files"], [])
+        kept = self.put("attachments", "kept.pdf")
+        self.settings["files_keep_days"] = 0       # never by itself
+        self.handed.note(str(kept))
+        self.age(400)
+        self.assertEqual(self.handed.sweep()["removed"], 0)
+        self.assertIsNone(self.handed.listing()["files"][0]["days_left"])
+        out = self.handed.set_keep_days(30)        # shortened: what is already older goes at once
+        self.assertTrue(out["ok"] and out["keep_days"] == 30 and out["files"] == [])
+        self.assertFalse(kept.exists())
+        self.assertFalse(self.handed.set_keep_days(-1)["ok"])
+        self.assertFalse(self.handed.set_keep_days("soon")["ok"])
+        self.desk.can_configure = False
+        self.assertIn("files_keep_days", self.handed.set_keep_days(1)["error"])
+
+    def test_setup_and_the_routes_show_and_remove_them(self):
+        try:
+            import fastapi  # noqa: F401
+        except ImportError:
+            self.skipTest("fastapi is not installed here; Hermes provides it")
+        spec = importlib.util.spec_from_file_location("stoa_dash_api_files", ROOT / "dashboard" / "plugin_api.py")
+        api = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(api)
+        api._profile_desk = lambda: self.desk
+        resume = self.put("attachments", "resume.pdf", "x" * 2048)
+        self.assertTrue(api.files_handed({"path": str(resume), "name": "resume.pdf", "lane": "desk"})["listed"])
+        self.assertFalse(api.files_handed({"path": "/etc/hosts"}).get("listed"))
+        self.assertEqual(self.desk.setup()["data"]["files"], {"count": 1, "bytes": 2048, "keep_days": 7, "folder": str(self.home / "attachments")})
+        self.assertEqual(api.files()["files"][0]["name"], "resume.pdf")
+        self.assertEqual(api.files_keep({"days": 1})["keep_days"], 1)
+        out = api.files_remove({})
+        self.assertEqual((out["removed_now"], out["files"], out["left"]), (1, [], []))
+        self.assertFalse(resume.exists())
+        self.assertEqual(api.files_remove(None)["removed_now"], 0)
 
 
 if __name__ == "__main__":

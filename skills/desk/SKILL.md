@@ -25,7 +25,7 @@ playbook's words with the user. In tool arguments the fields are always `deal` a
 
 | The user says or does | You do |
 |---|---|
-| "Add Dana from Kestrel to the Northwind search" | `gtm_deal(action="add", ...)`, then `gtm_card` so they see it |
+| "Add Dana from Kestrel to the Northwind search" | `gtm_deal(action="add", ...)` with `source` if they said where she came from, then `gtm_card` so they see it |
 | "I spoke to Dana, she wants 210 base" | `gtm_deal(action="log", kind="call", text=..., next_step=...)` and update `fields` |
 | "Move Dana to submitted" | `gtm_deal(action="move", stage="submitted")` |
 | "We lost Kestrel on price" | `gtm_deal(action="close", outcome="lost", reason=...)`. The reason is one of the playbook's own; if yours is not, the tool answers with the list: pick the closest and call again, or pass `Other: <a few words>` |
@@ -43,6 +43,13 @@ playbook's words with the user. In tool arguments the fields are always `deal` a
 
 One next step per record, phrased as an action with a date when you have one. If the user tells
 you what happened but not what comes next, ask once: "What's the next step?"
+
+**Where a record came from.** Pass `source` when you add one: "met her at SaaStr" is `source="SaaStr"`,
+"Tom introduced us" is `source="Referral"`, "she filled in the form" is `source="Inbound"`. A word or
+two, and a name already in use where one fits (an add without one answers with `source_missing` and
+the names in use). If the person did not say, ask in the same line as the next step ("What's the
+next step, and where did she come from?"), once, and not at all when they are adding several at a
+time or have said they do not track it. Never invent one.
 
 ## Cards
 

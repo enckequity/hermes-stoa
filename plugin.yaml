@@ -1,5 +1,5 @@
 name: stoa
-version: 0.24.0
+version: 0.24.1
 manifest_version: 2
 api_version: 1
 description: >-
@@ -70,6 +70,11 @@ config_schema:
     default: 7
     label: Notes look-back (days)
     description: "How far back the notes inbox looks."
+  files_keep_days:
+    type: int
+    default: 7
+    label: Keep dropped files for (days)
+    description: "A file dropped in the Stoa talk box is copied by Hermes into its own attachments folder. Stoa removes that copy after this many days. 0 keeps it until you remove it under Setup."
   pdl_monthly_cap:
     type: int
     default: 50
