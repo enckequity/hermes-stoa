@@ -446,6 +446,17 @@ def _email(name: str, company: str) -> str:
     return "%s.%s@%s.example" % (slug(first), slug(last) or "x", slug(company) or "company")
 
 
+def _origin(note: str, number: int) -> str:
+    """A made-up answer to "where did this one come from", read off the sample's own note where it says, so the
+    tour's reports have sources to compare. Kept out of sight in the record's fields; `source` stays the sample mark."""
+    low = note.lower()
+    for words, name in ((("referred", "referral", "introduced"), "Referral"), (("conference", "met at", "event", "meetup"), "Event"),
+                        (("inbound", "webinar", "downloaded", "pricing page", "asked whether", "came in", "applied", "reached out"), "Inbound")):
+        if any(word in low for word in words):
+            return name
+    return ("Outbound", "Referral", "Outbound", "Inbound")[number % 4]
+
+
 def load_market(desk, which: str = "") -> int:
     example = EXAMPLES[which or which_for(desk.playbook())]
     markets, name = desk.markets, example["market"]["name"]
@@ -479,7 +490,8 @@ def load(desk, which: str = "") -> int:
         start = last if stage == "won" else stage[1] if isinstance(stage, tuple) else stage
         deal = store.add(name, playbook.stages[min(start, last)]["id"], actor="demo", company=company, grp=group, value=value,
                          owner=owner, next_step=step, next_due=(today + dt.timedelta(days=due)).isoformat() if due is not None else "",
-                         source=SOURCE, email=_email(name, company), fields={k: v for k, v in fields.items() if k in keys})
+                         source=SOURCE, email=_email(name, company),
+                         fields=dict({k: v for k, v in fields.items() if k in keys}, _origin=_origin(note, count)))
         store.log(deal["id"], "note", note, actor="demo")
         if closing:
             end = playbook.won if stage == "won" else playbook.lost

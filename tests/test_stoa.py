@@ -3320,7 +3320,7 @@ class RegisterTests(unittest.TestCase):
 
     def test_everything_the_manifest_promises_is_registered(self):
         self.assertEqual(sorted(self.ctx.tools), ["gtm_card", "gtm_contact", "gtm_deal", "gtm_enrich", "gtm_export", "gtm_group", "gtm_intake", "gtm_invoice", "gtm_market",
-                                                  "gtm_notes", "gtm_pipeline", "gtm_playbook"])
+                                                  "gtm_notes", "gtm_pipeline", "gtm_playbook", "gtm_report"])
         self.assertEqual(sorted(self.ctx.blueprints), ["activity-sweep", "friday-review", "market-watch", "morning-brief",
                                                        "notes-sweep", "sheet-mirror", "sheet-pull"])
         self.assertEqual(sorted(self.ctx.skills), ["desk", "market-map", "playbook-authoring"])
@@ -4790,6 +4790,333 @@ class CommandTests(unittest.TestCase):
         for blueprint in BLUEPRINTS:
             self.assertIn("`stoa:%s`" % blueprint["name"], self.skill)
         self.assertIn("nothing to do with the playbook", self.skill)
+
+
+class ReportTests(unittest.TestCase):
+    """Reports are counted by the plugin from the desk's own records: no model, the same answer every time."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.desk = make_desk(self.tmp.name)
+        fixture.load(self.desk)
+        self.reports = self.desk.reports
+        self.id = lambda name: self.desk.store.find(name)["id"]
+
+    def age(self, name, days, column="stage_at"):
+        """Set when a record was made, or reached its stage, to so many days ago (a test's stand-in for time passing)."""
+        stamp = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        with self.desk.store._conn() as conn:
+            conn.execute("UPDATE deals SET %s = ? WHERE id = ?" % column, (stamp, self.id(name)))
+
+    def row(self, result, label):
+        return next(row for row in result["rows"] if row["label"] == label)
+
+    def test_a_period_is_a_stretch_of_days_and_the_same_stretch_before_it(self):
+        from stoa.reports import inside, window
+        day = dt.date(2026, 11, 15)
+        ninety = window("90", day)
+        self.assertEqual((ninety["from"], ninety["to"]), ("2026-08-18", "2026-11-15"))
+        self.assertEqual((ninety["before"]["from"], ninety["before"]["to"]), ("2026-05-20", "2026-08-17"))
+        quarter = window("quarter", day)
+        self.assertEqual((quarter["from"], quarter["before"]["from"], quarter["before"]["to"]), ("2026-10-01", "2026-07-01", "2026-09-30"))
+        self.assertEqual(window("year", dt.date(2026, 1, 3))["before"], {"label": "last year", "from": "2025-01-01", "to": "2025-12-31"})
+        self.assertIsNone(window("all", day)["before"])
+        self.assertEqual(window("nonsense", day)["id"], "all")
+        self.assertTrue(inside("2026-08-18T00:00:01Z", ninety) and inside("2026-11-15T23:59:59Z", ninety))
+        self.assertFalse(inside("2026-08-17T23:59:59Z", ninety) or inside("", ninety) or inside("2026-11-01T00:00:00Z", None))
+
+    def test_a_desk_starts_with_nine_reports_seven_of_them_on_the_dashboard(self):
+        listed = self.reports.catalog()
+        self.assertEqual([entry["id"] for entry in listed], ["stages", "winrate", "time", "sources", "lost", "map", "hermes", "owners", "months"])
+        self.assertEqual([entry["id"] for entry in listed if entry["pinned"]], ["stages", "winrate", "time", "sources", "lost", "map", "hermes"])
+        self.assertEqual(self.reports.find("sources")["title"], "Where candidates come from")       # in the playbook's own words
+        self.assertEqual(self.reports.find("lost")["title"], "Passed, and why")
+        self.assertEqual(self.reports.find("win ra")["id"], "winrate")                              # a clear part of a title finds it
+        self.assertIsNone(self.reports.find("w"))                                                   # several match: none is guessed
+        data = self.reports.dashboard()
+        self.assertEqual([card["id"] for card in data["cards"]], ["stages", "winrate", "time", "sources", "lost", "map", "hermes"])
+        self.assertTrue(all(card["ok"] for card in data["cards"]))
+        self.assertEqual(data["period"], {"id": "90", "label": "Last 90 days", "before": "the 90 days before"})
+
+    def test_pipeline_by_stage_counts_what_is_open_and_what_it_is_worth(self):
+        result = self.reports.run("stages", full=True)
+        self.assertEqual([(row["label"], row["count"]) for row in result["rows"]],
+                         [("Sourced", 1), ("Contacted", 2), ("Screened", 1), ("Submitted", 1), ("Client interview", 1), ("Offer", 1)])
+        self.assertEqual(result["total"], {"count": 7, "value": 299000.0})
+        self.assertEqual(self.row(result, "Contacted")["value"], 97000.0)
+        self.assertEqual(sorted(r["name"] for r in self.row(result, "Contacted")["records"]), ["Callum Reyes", "Marcus Oyelaran"])
+        self.assertEqual(result["says"][0], "7 open, $299k in play.")
+        self.assertEqual(result["says"][1], "Just over half of the money ($172k) is in the 4 candidates at screened or later.")
+        self.desk.deal({"action": "close", "deal": self.id("Wei-Lin Chao"), "outcome": "won"})
+        self.assertEqual(self.reports.run("stages")["total"]["count"], 6)      # a closed record is no longer in play
+
+    def test_win_rate_is_what_closed_in_the_period_set_against_the_stretch_before(self):
+        self.assertEqual(self.reports.run("winrate")["figure"]["text"], "–")           # nothing has closed: no rate, not 0%
+        for name, outcome in (("Wei-Lin Chao", "won"), ("Priya Raman", "won"), ("Marcus Oyelaran", "lost"), ("Tomás Ibarra", "lost"), ("Callum Reyes", "lost")):
+            self.desk.deal({"action": "close", "deal": self.id(name), "outcome": outcome, "reason": "Timing"})
+        self.age("Tomás Ibarra", 120)             # closed in the 90 days before
+        self.age("Callum Reyes", 400)             # closed too long ago to be in either
+        result = self.reports.run("winrate", full=True)
+        self.assertEqual(result["figure"], {"text": "67%", "label": "2 of 3 closed", "change": "up 67 points", "up": True})
+        self.assertEqual(result["says"], ["Placed $100k, passed $42k.", "The 90 days before: 0% (0 of 1)."])
+        self.assertEqual([(m["won"], m["lost"]) for m in result["months"]], [(2, 1)])
+        self.assertEqual([r["name"] for r in self.row(result, "Passed")["records"]], ["Marcus Oyelaran"])
+        self.assertEqual(self.reports.run("winrate", period="all")["figure"]["label"], "2 of 5 closed")
+        self.assertEqual(self.reports.run("winrate", compare=False)["figure"]["change"], "")
+
+    def test_where_records_come_from_counts_each_source_and_how_far_its_records_got(self):
+        store = self.desk.store
+        for name, source in (("Dana Whitfield", "Referral"), ("Marcus Oyelaran", "Referral"), ("Priya Raman", "referral"), ("Tomás Ibarra", "LinkedIn"),
+                             ("Ingrid Solberg", "LinkedIn"), ("Wei-Lin Chao", "market map: Brokers"), ("Callum Reyes", "")):
+            store.update(self.id(name), source=source)
+        self.desk.deal({"action": "close", "deal": self.id("Priya Raman"), "outcome": "won"})
+        self.desk.deal({"action": "close", "deal": self.id("Marcus Oyelaran"), "outcome": "lost", "reason": "Timing"})
+        self.age("Tomás Ibarra", 100, "created_at")
+        result = self.reports.run("sources", full=True)
+        self.assertEqual([(row["label"], row["count"]) for row in result["rows"]], [("Referral", 3), ("LinkedIn", 1), ("Market map", 1), ("Not recorded", 1)])
+        self.assertEqual([item["label"] for item in result["legend"]], ["placed", "reached submitted", "earlier"])
+        # Referral: Priya was placed, Dana is at screened and Marcus was passed at contacted: both short of submitted
+        self.assertEqual({part["k"]: part["count"] for part in self.row(result, "Referral")["parts"]}, {"won": 1, "late": 0, "early": 2})
+        self.assertEqual({part["k"]: part["count"] for part in self.row(result, "Market map")["parts"]}, {"won": 0, "late": 1, "early": 0})
+        self.assertEqual(self.row(result, "LinkedIn")["before"]["count"], 1)                   # Tomás entered in the stretch before
+        self.assertEqual(self.row(result, "Referral")["before"]["count"], 0)
+        self.assertEqual([r["name"] for r in self.row(result, "Referral")["records"]][0], "Priya Raman")     # the ones that got furthest first
+        self.assertEqual(self.row(result, "Referral")["records"][2]["stage"], "Passed at contacted")
+        self.assertEqual(result["says"][0], "Referral sends the most candidates and the largest share to submitted (33%).")
+        self.assertEqual([row["label"] for row in result["over"]], [dt.date.today().strftime("%b %Y")])      # the same records, month by month
+        self.assertEqual(result["line"], "candidates · by source · entered in the last 90 days · coloured by the furthest stage reached")
+        months = self.reports.run("months")
+        self.assertIsNone(months["before"])                                     # a month is not set against "the same month before"
+        self.assertTrue(all("before" not in row for row in months["rows"]))
+
+    def test_a_report_made_here_is_checked_and_says_what_it_takes_when_it_is_wrong(self):
+        clean = self.reports.clean
+        self.assertEqual(clean({"by": "owner"})[0], {"count": "records", "by": "owner", "when": "entered", "split": "none", "only": {}})
+        self.assertIn("by is one of: source, owner", clean({"by": "colour"})[1])
+        self.assertIn("title", clean({"by": "colour"})[1])                          # and names this pipeline's own fields
+        self.assertEqual(clean({"by": "field:Location"})[0]["by"], "field:location")          # a field by its label
+        self.assertIn("no field called 'shoe size'", clean({"by": "field:shoe size"})[1])
+        self.assertEqual(clean({"by": "reason"})[0]["only"], {"status": "lost"})              # a reason is a lost record's
+        self.assertEqual(clean({"by": "owner", "only": {"status": "Placed", "min_value": "40k", "owner": ""}})[0]["only"], {"status": "won", "min_value": 40000.0})
+        self.assertIn("only takes", clean({"by": "owner", "only": {"mood": "good"}})[1])
+        self.assertIn("open now", clean({"by": "owner", "when": "open", "only": {"status": "won"}})[1])
+        self.assertEqual(clean({"by": "owner", "when": "open", "split": "outcome"})[0]["split"], "none")
+        self.assertIn("count is one of", clean({"by": "owner", "count": "revenue"})[1])
+        self.assertIsNone(clean("owner")[0])
+
+    def test_a_report_of_ones_own_groups_filters_and_folds_a_long_tail(self):
+        store = self.desk.store
+        out = self.reports.save({"title": "Value by owner", "count": "value", "by": "owner", "when": "open"}, by="dashboard")
+        self.assertTrue(out["ok"] and out["saved"] and not out["draft"])
+        result = self.reports.run(out["id"])
+        self.assertEqual((result["unit"], result["period"], result["before"]), ("money", None, None))       # open now: no period to set it against
+        self.assertEqual(result["rows"][0]["n"], sum(row["n"] for row in result["rows"]) and result["rows"][0]["n"])
+        self.assertIn("holds the most", result["says"][0])
+        big = self.reports.save({"title": "Big ones by stage", "by": "stage", "when": "open", "only": {"min_value": 45000}}, by="dashboard")
+        self.assertEqual([(row["label"], row["count"]) for row in self.reports.run(big["id"])["rows"]], [("Contacted", 1), ("Client interview", 1), ("Offer", 1)])
+        for number in range(15):
+            store.add("Person %d" % number, "sourced", company="Company %02d" % number, value=0)
+        companies = self.reports.save({"title": "By company", "by": "company", "when": "open"}, by="dashboard")
+        rows = self.reports.run(companies["id"], full=True)["rows"]
+        self.assertEqual((len(rows), rows[-1]["label"], rows[-1]["count"]), (12, "11 others", 11))          # 22 companies: eleven named, the rest folded
+        self.assertEqual(sum(row["count"] for row in rows), 22)
+        self.assertEqual(len(rows[-1]["records"]), 11)
+        with store._conn() as conn:
+            conn.execute("UPDATE deals SET value = 0, value_cents = 0")
+        nothing = self.reports.run(out["id"])
+        self.assertEqual(nothing["unit"], "records")                                           # nothing carries a value: they are counted
+        self.assertIn("so they are counted", " ".join(nothing["says"]))
+        location = self.reports.save({"title": "Where they live", "by": "field:location", "when": "open"}, by="dashboard")
+        self.assertIn("Not set", [row["label"] for row in self.reports.run(location["id"])["rows"]])
+        self.assertFalse(self.reports.save({"by": "owner"}, by="dashboard")["ok"])              # a report needs a title
+
+    def test_why_records_were_lost_names_the_reason_and_the_stage(self):
+        for name, reason in (("Marcus Oyelaran", "Timing"), ("Callum Reyes", "Timing"), ("Dana Whitfield", "Comp mismatch")):
+            self.desk.deal({"action": "close", "deal": self.id(name), "outcome": "lost", "reason": reason})
+        result = self.reports.run("lost")
+        self.assertEqual([(row["label"], row["count"]) for row in result["rows"]], [("Timing", 2), ("Comp mismatch", 1)])
+        self.assertEqual(result["says"], ["3 passed.", "Both “Timing” were at contacted."])
+        self.assertEqual(result["line"], "candidates · by reason lost · closed in the last 90 days")
+
+    def test_time_in_stage_is_how_long_open_records_have_sat_against_the_quiet_mark(self):
+        self.age("Marcus Oyelaran", 12)
+        self.age("Callum Reyes", 8)
+        self.reports.stays = lambda win=None: {"contacted": [2.0, 4.0]}          # the ledger's part, tested below
+        result = self.reports.run("time", full=True)
+        row = self.row(result, "Contacted")
+        self.assertEqual((row["n"], row["mark"], row["tone"], row["count"]), (10.0, 5, "bad", 2))
+        self.assertEqual(row["left"], {"count": 2, "days": 3.0})
+        self.assertEqual([(r["name"], r["days"]) for r in row["records"]], [("Marcus Oyelaran", 12), ("Callum Reyes", 8)])
+        self.assertEqual(result["says"][0], "Contacted runs 5 days past its quiet mark.")
+        self.assertIsNone(self.row(self.reports.run("time"), "Contacted").get("records"))
+        header, rows = self.reports.csv_rows(result)
+        self.assertEqual(header[:4], ["Stage", "Open now", "Average days there", "Quiet mark (days)"])
+        self.assertEqual(rows[1][:4], ["Contacted", 2, 10.0, 5])
+
+    def test_a_stay_is_read_from_the_ledger_and_a_move_taken_back_is_not_one(self):
+        from stoa.reports import Reports
+        store, dana = self.desk.store, self.id("Dana Whitfield")
+        self.desk.deal({"action": "move", "deal": dana, "stage": "submitted"})
+        self.desk.deal({"action": "move", "deal": dana, "stage": "client_interview"})
+        store.undo(dana)                                                         # the second move is taken back
+        mine = [change["stage"] for change in store.stage_changes() if change["deal_id"] == dana]
+        self.assertEqual(mine, ["screened", "submitted"])                        # as made, then the one move that stood
+        self.assertEqual(Reports(self.desk).stays(), {})                         # moved within the minute: a correction, not a stay
+        changes = [{"deal_id": "a", "at": "2026-11-01T09:00:00Z", "stage": "sourced"}, {"deal_id": "a", "at": "2026-11-04T09:00:00Z", "stage": "contacted"},
+                   {"deal_id": "a", "at": "2026-11-04T09:00:20Z", "stage": "screened"}, {"deal_id": "a", "at": "2026-11-10T21:00:20Z", "stage": "submitted"},
+                   {"deal_id": "b", "at": "2026-06-01T09:00:00Z", "stage": "sourced"}, {"deal_id": "b", "at": "2026-06-03T09:00:00Z", "stage": "contacted"}]
+        store.stage_changes = lambda: changes
+        self.assertEqual(Reports(self.desk).stays(), {"sourced": [3.0, 2.0], "screened": [6.5]})
+        from stoa.reports import window
+        self.assertEqual(Reports(self.desk).stays(window("30", dt.date(2026, 11, 15))), {"sourced": [3.0], "screened": [6.5]})     # only stays that ended in the period
+
+    def test_what_the_map_turned_into_follows_its_companies_into_the_pipeline(self):
+        bare = tempfile.TemporaryDirectory()
+        self.addCleanup(bare.cleanup)
+        self.assertEqual(make_desk(bare.name).reports.run("map")["empty"], "No market map yet. Make one on the Market map tab.")
+        market = self.desk.markets.list_markets()[0]
+        self.assertEqual(self.reports.run("map")["says"][0], "Nothing from the map is in the pipeline yet.")
+        self.desk.market({"action": "track", "targets": ["Brightside Freight", "Tidewater Logistics"]})
+        self.desk.market({"action": "dismiss", "targets": ["Ostrava Lines"]})
+        tracked = [t for t in self.desk.markets.targets(market["id"]) if t["status"] == "tracked"]
+        self.desk.deal({"action": "close", "deal": tracked[0]["deal_id"], "outcome": "won"})
+        self.desk.store.bump("map:%s:cost" % market["id"], 1_500_000)
+        self.desk.store.bump("map:%s:pdl" % market["id"], 3)
+        result = self.reports.run("map", full=True)
+        counts = {row["key"]: row["count"] for row in result["rows"]}
+        self.assertEqual((counts["pipeline"], counts["late"], counts["won"]), (2, 1, 1))
+        self.assertEqual(counts["mapped"], len([t for t in self.desk.markets.targets(market["id"]) if t["status"] != "dismissed"]))
+        self.assertEqual([figure["label"] for figure in result["figures"]][-2:], ["Hermes's research, estimated", "paid lookups"])
+        self.assertEqual(result["says"], ["About $0.75 of research for each candidate the map put in the pipeline", "plus 3 paid lookups."])
+        self.assertEqual(len(self.row(result, "In the pipeline")["records"]), 2)
+
+    def test_what_hermes_did_counts_its_proposals_and_what_became_of_them(self):
+        dana, marcus = self.id("Dana Whitfield"), self.id("Marcus Oyelaran")
+        out = self.desk.intake.propose({"kind": "proposal", "source": "activity sweep", "rows": [
+            {"record": dana, "stage": "submitted", "why": "She asked to be put forward."},
+            {"record": marcus, "next_step": "Send the comp range", "next_due": "+2d", "why": "He asked twice."},
+            {"record": marcus, "stage": "screened", "why": "They spoke."}]}, {})
+        self.desk.intake.decide(out["id"], 1, "decline")
+        self.desk.intake.decide(out["id"], 2, "approve")
+        self.desk.store.mark_note("granola:1", dana)
+        self.desk.store.mark_note("granola:2", "")              # skipped: not filed
+        self.desk.store.mark_note("same:abc", dana)             # a content mark is not a note
+        result = self.reports.run("hermes")
+        self.assertEqual([(figure["text"], figure["label"]) for figure in result["figures"]],
+                         [("3", "changes proposed"), ("1", "approved by you"), ("1", "declined"), ("1", "waiting for you"), ("1", "call notes filed")])
+        self.assertEqual({part["k"]: part["n"] for part in result["strip"]}, {"approved": 1, "declined": 1, "waiting": 1})
+        self.assertEqual(result["says"][0], "The one you declined was a stage move.")
+        with self.desk.store._conn() as conn:
+            conn.execute("UPDATE intakes SET at = '2020-01-01T00:00:00Z'")
+        self.assertEqual(self.reports.run("hermes")["figures"][0]["text"], "0")           # outside the period
+        self.assertEqual(self.reports.run("hermes", period="all")["figures"][0]["text"], "3")
+
+    def test_a_report_hermes_makes_waits_as_a_draft_until_it_is_kept(self):
+        tool = self.reports.tool
+        listed = tool({"action": "list"})
+        self.assertEqual(len(listed["reports"]), 9)
+        bad = tool({"action": "save", "title": "By mood", "by": "mood"})
+        self.assertFalse(bad["ok"])
+        self.assertIn("field:<key>", bad["choices"]["by"])                       # told what it does take
+        made = tool({"action": "save", "title": "Open value by owner", "count": "value", "by": "owner", "when": "open", "asked": "who is carrying what"})
+        self.assertTrue(made["ok"] and made["draft"])
+        self.assertIn("draft", made["note"])
+        self.assertTrue(made["rows"] and "records" not in made["rows"][0])       # the figures, not the list of people
+        entry = self.reports.find(made["id"])
+        self.assertEqual((entry["draft"], entry["asked"], entry["by"]), (True, "who is carrying what", "tester"))
+        self.assertNotIn(made["id"], [card["id"] for card in self.reports.dashboard()["cards"]])
+        self.assertTrue(self.reports.act(made["id"], "keep")["ok"])
+        self.assertFalse(self.reports.find(made["id"])["draft"])
+        self.reports.act(made["id"], "pin")
+        self.assertEqual(self.reports.dashboard()["cards"][-1]["id"], made["id"])
+        # a change comes as a new version, and keeping it takes the old one's place, pin and all
+        again = tool({"action": "save", "title": "Open value by owner, big ones", "count": "value", "by": "owner", "when": "open",
+                      "only": {"min_value": 40000}, "replaces": "Open value by owner"})
+        self.assertEqual(self.reports.find(again["id"])["replaces"], made["id"])
+        self.assertEqual(self.reports.act(again["id"], "keep"), {"ok": True, "id": made["id"]})
+        kept = self.reports.find(made["id"])
+        self.assertEqual((kept["title"], kept["spec"]["only"], kept["pinned"]), ("Open value by owner, big ones", {"min_value": 40000.0}, True))
+        self.assertIsNone(self.reports.find(again["id"]))
+        self.assertFalse(tool({"action": "save", "title": "x", "by": "owner", "replaces": "Win rate"})["ok"])       # the desk's own are not rewritten
+        read = tool({"action": "read", "report": "win rate", "period": "all"})
+        self.assertEqual((read["title"], read["period"]), ("Win rate", "All time"))
+        self.assertFalse(tool({"action": "read", "report": "no such"})["ok"])
+        self.assertFalse(tool({"action": "remove", "report": "Win rate"})["ok"])
+        self.assertEqual(tool({"action": "remove", "report": made["id"]})["removed"], "Open value by owner, big ones")
+        self.assertEqual(len(self.reports.catalog()), 9)
+        self.assertFalse(tool({"action": "burn"})["ok"])
+
+    def test_the_dashboard_is_the_persons_to_arrange_and_a_scheduled_job_cannot_change_it(self):
+        self.reports.act("hermes", "unpin")
+        self.reports.act("owners", "pin")
+        self.reports.act("owners", "up")
+        self.assertEqual([card["id"] for card in self.reports.dashboard()["cards"]], ["stages", "winrate", "time", "sources", "lost", "owners", "map"])
+        self.assertFalse(self.reports.act("stages", "remove")["ok"])             # the desk's own can be unpinned, never removed
+        self.assertFalse(self.reports.act("nope", "pin")["ok"])
+        cron = {"platform": "cron"}
+        self.assertFalse(self.desk.guard("gtm_report", {"action": "save", "title": "x", "by": "owner"}, cron)["ok"])
+        self.assertFalse(self.desk.guard("gtm_report", {"action": "remove", "report": "owners"}, cron)["ok"])
+        self.assertIsNone(self.desk.guard("gtm_report", {"action": "read", "report": "winrate"}, cron))
+        self.assertIsNone(self.desk.guard("gtm_report", {"action": "save", "title": "x", "by": "owner"}, {"platform": "slack"}))
+        # each pipeline keeps its own
+        with self.desk.store._conn() as conn:
+            self.assertIn("owners", conn.execute("SELECT v FROM meta WHERE k = 'reports'").fetchone()[0])
+
+    def test_the_page_to_send_is_one_file_that_asks_nothing_of_the_network(self):
+        self.desk.deal({"action": "close", "deal": self.id("Priya Raman"), "outcome": "won"})
+        self.desk.store.update(self.id("Dana Whitfield"), source="<b>Referral</b>")
+        page = self.reports.page(self.reports.dashboard()["cards"], "Recruiting: reports")
+        for banned in ("<script", "http://", "https://", "url(", "@import", "<link", "<img", "fetch("):
+            self.assertNotIn(banned, page)
+        self.assertIn("Where candidates come from", page)
+        self.assertIn("&lt;b&gt;Referral&lt;/b&gt;", page)                       # what a person typed is text, never markup
+        self.assertNotIn("<b>Referral</b>", page)
+        self.assertNotIn("Dana Whitfield", page)                                 # figures only: no record is named on it
+
+    def test_a_sample_record_says_where_it_came_from_without_losing_its_sample_mark(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        desk = make_desk(tmp.name, playbook="b2b-sales")
+        demo.load(desk)
+        deals = desk.store.list(status="all")
+        self.assertTrue(all(deal["source"] == demo.SOURCE and deal["fields"].get("_origin") for deal in deals))
+        labels = {row["label"] for row in desk.reports.run("sources")["rows"]}
+        self.assertTrue({"Inbound", "Referral", "Outbound"} <= labels)
+        self.assertNotIn("Sample data", labels)
+        header, rows = desk.export_rows()
+        self.assertNotIn("_origin", header)
+        self.assertNotIn("_origin", json.dumps(desk.view(deals[0])))
+        self.assertEqual(demo.clear(desk), len(deals))                           # still found, and removed, as samples
+
+    def test_the_routes_hand_the_page_a_dashboard_a_report_with_its_records_and_a_file(self):
+        try:
+            import fastapi  # noqa: F401
+        except ImportError:
+            self.skipTest("fastapi is not installed here; Hermes provides it")
+        spec = importlib.util.spec_from_file_location("stoa_dash_api_reports", ROOT / "dashboard" / "plugin_api.py")
+        api = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(api)
+        api._profile_desk = lambda: self.desk
+        data = api.reports("30", 0)
+        self.assertEqual((data["period"]["id"], data["compare"], len(data["cards"]), len(data["reports"])), ("30", False, 7, 9))
+        self.assertIn(["field:location", "Location"], data["choices"]["by"])
+        one = api.report("stages")
+        self.assertEqual(one["csv"]["header"], ["", "Records", "Value"])
+        self.assertEqual(one["csv"]["rows"][1], ["Contacted", 2, 97000.0])
+        self.assertTrue(one["rows"][1]["records"])
+        with self.assertRaises(fastapi.HTTPException):
+            api.report("nope")
+        made = api.report_new({"title": "By owner", "by": "owner", "when": "open", "draft": True, "replaces": "stages"})
+        self.assertTrue(made["ok"] and not made["draft"])                        # a person's own is kept at once
+        self.assertTrue(api.report_act(made["id"], {"verb": "pin"})["ok"])
+        changed = api.report_act(made["id"], {"verb": "save", "title": "By owner, value", "count": "value", "by": "owner", "when": "open"})
+        self.assertEqual(changed["title"], "By owner, value")
+        self.assertEqual(api.reports()["cards"][-1]["unit"], "money")
+        self.assertIn("<h2>By owner, value</h2>", api.report_page(made["id"])["html"])
+        self.assertIn("Pipeline by stage", api.reports_page()["html"])
+        self.assertTrue(api.report_act(made["id"], {"verb": "remove"})["ok"])
+        self.assertEqual(len(api.reports()["reports"]), 9)
 
 
 if __name__ == "__main__":

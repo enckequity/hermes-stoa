@@ -546,6 +546,48 @@ class Store:
             out.append(entry)
         return out
 
+    # -- what the ledger adds up to (for reports) ------------------------------------------------
+    def stage_changes(self) -> list:
+        """Every time a record was put in a stage and it stood, oldest first: ``{at, deal_id, stage}``. A move
+        that was taken back, and the entry that took it back, are both left out: neither is a stay."""
+        with self._conn() as conn:
+            rows = conn.execute("SELECT seq, at, deal_id, after, reverts FROM ledger WHERE entity = 'deal' AND op IN ('insert', 'update') "
+                                "AND after LIKE '%\"stage\"%' ORDER BY seq").fetchall()
+        undone = {row["reverts"] for row in rows if row["reverts"] is not None}
+        out = []
+        for row in rows:
+            if row["reverts"] is not None or row["seq"] in undone:
+                continue
+            try:
+                stage = json.loads(row["after"] or "{}").get("stage")
+            except ValueError:
+                stage = None
+            if stage:
+                out.append({"at": row["at"], "deal_id": row["deal_id"], "stage": str(stage)})
+        return out
+
+    def actions_between(self, start: str, end: str) -> dict:
+        """How many actions (one batch each) each actor took between two timestamps, and how many were ones that
+        took an earlier action back: ``{"by": {actor: count}, "taken_back": count}``."""
+        with self._conn() as conn:
+            by = {row[0]: row[1] for row in conn.execute(
+                "SELECT actor, count(DISTINCT batch) FROM ledger WHERE at >= ? AND at <= ? AND reverts IS NULL GROUP BY actor", (start, end))}
+            back = conn.execute("SELECT count(DISTINCT batch) FROM ledger WHERE at >= ? AND at <= ? AND reverts IS NOT NULL",
+                                (start, end)).fetchone()[0]
+        return {"by": by, "taken_back": back}
+
+    def intakes_between(self, start: str, end: str, origin: str = "proposal") -> list:
+        """Lists and proposals made between two timestamps, whatever became of them, oldest first."""
+        with self._conn() as conn:
+            rows = conn.execute("SELECT * FROM intakes WHERE origin = ? AND at >= ? AND at <= ? ORDER BY at, rowid", (origin, start, end)).fetchall()
+        return [self._intake(row) for row in rows]
+
+    def notes_between(self, start: str, end: str) -> list:
+        """Call notes filed or skipped between two timestamps: ``{id, at, deal_id}``. Content marks are left out."""
+        with self._conn() as conn:
+            rows = conn.execute("SELECT id, at, deal_id FROM notes_seen WHERE at >= ? AND at <= ? AND id NOT LIKE 'same:%'", (start, end)).fetchall()
+        return [{"id": r[0], "at": r[1], "deal_id": r[2]} for r in rows]
+
     # -- deals ----------------------------------------------------------------------------------
     @staticmethod
     def _deal(row) -> dict:

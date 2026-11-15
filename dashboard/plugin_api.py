@@ -611,6 +611,64 @@ def overview() -> dict:
     return desk().overview()
 
 
+@router.get("/reports")
+def reports(period: str = "", compare: int = 1) -> dict:
+    """The Reports tab: the reports on the dashboard, worked out, and the list of every report this pipeline has.
+    Counted by the plugin from its own database; no model and no outside service is asked anything."""
+    return desk().reports.dashboard(period, bool(compare))
+
+
+@router.get("/reports/page")
+def reports_page(period: str = "", compare: int = 1) -> dict:
+    """The dashboard as one self-contained web page, for the page to hand to the browser as a download."""
+    d = desk()
+    data = d.reports.dashboard(period, bool(compare))
+    return {"filename": "stoa-reports.html", "html": d.reports.page(data["cards"], "%s: reports" % d.playbook().title)}
+
+
+@router.post("/reports")
+def report_new(body: dict = Body(...)) -> dict:
+    """A person makes a report from the choices on the page. It is theirs, so it is kept at once (not a draft)."""
+    d = desk()
+    result = d.reports.save(dict(body or {}, id="", replaces=""), by="dashboard", draft=False)
+    d.announce()
+    return result
+
+
+@router.get("/reports/{report_id}")
+def report(report_id: str, period: str = "", compare: int = 1) -> dict:
+    """One report worked out, with the records behind each bar and its rows for a spreadsheet."""
+    d = desk()
+    result = d.reports.run(report_id, period, bool(compare), full=True)
+    if not result.get("ok"):
+        raise HTTPException(404, result.get("error") or "no such report")
+    header, rows = d.reports.csv_rows(result)
+    return dict(result, csv={"header": header, "rows": rows})
+
+
+@router.get("/reports/{report_id}/page")
+def report_page(report_id: str, period: str = "", compare: int = 1) -> dict:
+    """One report as a self-contained web page."""
+    d = desk()
+    result = d.reports.run(report_id, period, bool(compare))
+    if not result.get("ok"):
+        raise HTTPException(404, result.get("error") or "no such report")
+    return {"filename": "stoa-%s.html" % result["id"], "html": d.reports.page([result], result["title"])}
+
+
+@router.post("/reports/{report_id}")
+def report_act(report_id: str, body: dict = Body(...)) -> dict:
+    """A press on a report: pin, unpin, up, down, keep or discard a draft, remove one made here, or save its choices."""
+    d = desk()
+    verb = str((body or {}).get("verb") or "")
+    if verb == "save":
+        result = d.reports.save(dict(body or {}, id=report_id, replaces=""), by="dashboard")
+    else:
+        result = d.reports.act(report_id, verb)
+    d.announce()
+    return result
+
+
 @router.post("/notes/check")
 def notes_check(body: dict = Body(...)) -> dict:
     """Is this a folder Stoa could read call notes from? Counts the notes in it; opens none."""

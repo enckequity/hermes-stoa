@@ -6,7 +6,8 @@ Every part of Stoa, and its settings. For how a day on the desk goes, see [the g
 
 | | |
 |---|---|
-| **12 tools** | `gtm_market`, `gtm_pipeline`, `gtm_deal`, `gtm_group`, `gtm_contact`, `gtm_invoice`, `gtm_card`, `gtm_intake`, `gtm_enrich`, `gtm_notes`, `gtm_playbook`, `gtm_export` |
+| **13 tools** | `gtm_market`, `gtm_pipeline`, `gtm_deal`, `gtm_group`, `gtm_contact`, `gtm_invoice`, `gtm_card`, `gtm_intake`, `gtm_enrich`, `gtm_notes`, `gtm_playbook`, `gtm_export`, `gtm_report` |
+| **Reports** | A dashboard and nine reports counted by the plugin from your records, with no model: pipeline by stage, win rate, time in stage, sources, losses, what the map turned into, what Hermes did. Make your own from a few choices, or ask Hermes for one in words |
 | **Pipelines** | Several side by side on one desk, each with its own records and its own playbook: your own sales beside the work you do for clients |
 | **Searches, accounts, clients** | The group a record is in is a thing of its own: who the client is, where it stands, its terms, and the people on the client's side |
 | **Cash** | Invoices on a record in whole cents, what is owed and overdue, won work that was never billed, a delivery lane after the win, and a forecast weighted by stage |
@@ -16,7 +17,7 @@ Every part of Stoa, and its settings. For how a day on the desk goes, see [the g
 | **Intake** | Send a list in any form; review what is new and what would change; apply what you tick |
 | **Market maps** | Segments, fit scores, evidence and sources, with an **Add to pipeline** button per company |
 | **Slack cards** | Advance, Draft follow-up, Enrich, close with a reason, snooze, reopen |
-| **Desktop app and Webapp** | A live pane beside the chat, a Stoa page (Today, pipeline, searches or accounts, companies, cash, market map, activity, setup), and cards and maps drawn inside the conversation |
+| **Desktop app and Webapp** | A live pane beside the chat, a Stoa page (Today, pipeline, searches or accounts, companies, cash, market map, reports, activity, setup), and cards and maps drawn inside the conversation |
 | **Web dashboard tab** | Setup and status: the six set-up steps with how to do each from the dashboard, what the desk holds in totals, each pipeline and map, the month's paid work, the rules in force and your data |
 | **`/gtm`** | The board, today, cash, the brief, a map or one record, on every surface Hermes runs on (CLI, Telegram, Desktop…). In Slack, `!gtm`, where a record or a map arrives with its buttons |
 | **`hermes stoa`** | Status, board, brief, map, the ledger (`history`), autonomy, sample data, CSV import and export from a terminal |
@@ -232,6 +233,72 @@ In a chat you are there, so Hermes does what you ask. The rest is for when you a
   what stands in the way (*"Deal size is now $60k; that action left it at $50k"*). An earlier
   action whose values are untouched still goes back, whatever was logged after it. Undoing an add
   takes the record off the desk, and it can be put back.
+
+### Reports
+
+The **Reports** tab is the desk added up. Every figure on it is counted by the plugin from the
+pipeline's own file, so a report costs nothing to open, reads the same every time, and never
+depends on a model getting the sum right. Reports belong to a pipeline: each one has its own.
+
+![The Reports dashboard](desktop-reports.jpg)
+
+**The dashboard** shows the reports you have pinned, each with one sentence on what its figures
+say. Seven are on it to begin with:
+
+| Report | What it counts |
+|---|---|
+| **Pipeline by stage** | What is open now at each stage, and what it is worth |
+| **Win rate** | Of the records that closed in the period, the share that were won, one square for each, month by month, against the same stretch before |
+| **Time in stage** | How long the open records have sat in each stage, on average, against that stage's quiet mark; and from the ledger, how long the ones that left it had stayed |
+| **Where records come from** | The records that entered in the period, by source, coloured by how far each got. Every market map counts as one source |
+| **Why we lost** | The records closed as lost in the period, by reason, and the stage most were lost at |
+| **What the map turned into** | Companies mapped, how many went into the pipeline, how far those got, what was won, and what Hermes's research on the maps is estimated to have cost |
+| **What Hermes did** | What a scheduled job proposed in the period, what you approved and declined, what is waiting, and the call notes filed |
+
+Two more are under **All reports**, ready to pin: **Who holds what** (open value by owner) and
+**New records by month**. The period (30 days, 90 days, this quarter, this year, all time) and
+**Against the … before** apply to every report that has a period; a report of what is open now
+has none.
+
+![One report, with the records behind a bar](desktop-report-open.jpg)
+
+**Open** a report to see it large: press a bar and the records behind it are listed, each one a
+press away. **Table** shows the same rows as numbers, **Over time** the same records month by
+month. **How this report is made** says, in plain lines, what it counts and over which records.
+**Download** saves it as a page (one file, no script, figures only: it names no record) or as a
+spreadsheet.
+
+**Your own reports.** **+ New report** makes one from a few choices, on the page, with no model:
+what it counts (records, or what they are worth), what the bars are (source, owner, stage,
+group, company, reason lost, month, or one of the pipeline's own fields), which records (entered
+in the period, closed in the period, or open now), what colours each bar (the furthest stage
+reached, or how it ended), and a narrowing (a status, an owner, a least value). Open it and press
+**Change** to alter the choices later.
+
+**Or ask in words.** *"Win rate by owner this quarter."* Typed into **Ask for a report**, or said
+to Hermes in any chat, the agent turns the words into the same few choices with `gtm_report` and
+saves the result **as a draft**: it opens on the page for you to keep or discard. **Change it in
+words** on a report of your own does the same and offers the new version in place of the old.
+Hermes is used once, to make the report; after that Stoa works it out.
+
+*"How is the pipeline doing?"*, *"what's our win rate?"*, *"where do our best leads come from?"*:
+in a chat the agent reads the matching report (`gtm_report(action="read")`) and says what it
+shows; it does not add records up itself. A scheduled job can read reports and cannot add or
+remove one.
+
+What the figures rest on:
+
+- **When a record closed** is when it was moved to won or lost; **when it entered** is when it was
+  added to the desk (for an import, the day of the import).
+- **How far a record got**: an open one, its stage; a won one, all the way; a lost one, the stage
+  it was closed from. "Reached" a stage means that stage or later. The stage that opens the second
+  half of your pipeline is the one a source is judged by (for five stages, the fourth).
+- **Time in stage** for records there now is days since each reached the stage. The "left after"
+  figure reads the ledger, so it only knows moves made on the desk since they were made here; a
+  move made within a minute of the one before is taken as a correction and left out.
+- **Source** is the record's own source field. A record with none is counted under **Not recorded**.
+- **What Hermes did** counts proposals, which are what a scheduled job leaves for your approval.
+  What you ask Hermes to do in a chat is done at once and is not a proposal.
 
 ### Cash: invoices, delivery and the forecast
 

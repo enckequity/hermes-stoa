@@ -53,7 +53,7 @@ function matches(deal, f) {
 }
 const STATE = ['stoa', 'state']
 const refresh = () => queryClient.invalidateQueries({ queryKey: ['stoa'] })
-const $tab = atom('today') // the page's tab: today | pipeline | cash | market | activity | setup
+const $tab = atom('today') // the page's tab: today | pipeline | cash | market | reports | activity | setup
 const $draft = atom('') // words put in the dock for the person to finish and send
 let onPage = false // the Stoa page is what is on screen: a click that calls for writing goes to its dock
 const $onPage = atom(false) // the same, for the pane to watch: beside the open desk it shows other things
@@ -1269,6 +1269,105 @@ const CSS = `
 .stoa-billtotal b { display: block; font-family: var(--stoa-mono); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .stoa-crow[data-cols="6"] { grid-template-columns: minmax(0, 1.6fr) 84px minmax(0, 1fr) 70px minmax(0, 1.3fr) 96px; }
 .stoa-stagehead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding-bottom: 2px; border-bottom: 1px dotted var(--ui-stroke-primary); }
+/* reports: every quantity is drawn in dots, like the funnel. A colour is set once, as --c, by what a mark stands for. */
+.stoa-rep { --c: var(--stoa-h2); }
+.stoa-rep [data-heat="0"] { --c: var(--stoa-h1); } .stoa-rep [data-heat="1"] { --c: var(--stoa-h2); } .stoa-rep [data-heat="2"] { --c: var(--stoa-h3); }
+.stoa-rep [data-heat="3"] { --c: var(--stoa-h4); } .stoa-rep [data-heat="4"] { --c: var(--stoa-h5); } .stoa-rep [data-heat="5"] { --c: var(--stoa-h6); } .stoa-rep [data-heat="6"] { --c: var(--stoa-h7); }
+.stoa-rep [data-tone="bad"] { --c: var(--stoa-h6); }
+.stoa-rep [data-k="won"] { --c: var(--ui-text-primary); } .stoa-rep [data-k="late"] { --c: var(--stoa-h4); }
+.stoa-rep [data-k="early"], .stoa-rep [data-k="open"], .stoa-rep [data-k="approved"] { --c: var(--stoa-h2); }
+.stoa-rep [data-k="lost"], .stoa-rep [data-k="declined"] { --c: var(--ui-text-quaternary); } .stoa-rep [data-k="waiting"] { --c: var(--stoa-h5); }
+.stoa-repbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin: 0 0 14px; }
+.stoa-repbar > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.stoa-repbar .stoa-tabs { margin: 0; }
+.stoa-repbar .stoa-tab { height: 26px; padding: 0 11px; font-size: 12px; }
+.stoa-repgrid { display: flex; flex-wrap: wrap; gap: 14px; }
+.stoa-repcard { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 12px; padding: 14px 16px 12px; border: 1px solid var(--ui-stroke-secondary); border-radius: var(--stoa-r); background: var(--ui-bg-card); }
+.stoa-repcard[data-wide="1"] { flex: 2 1 500px; }
+.stoa-rephead { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.stoa-rephead h3 { margin: 0; color: var(--ui-text-secondary); font-weight: 600; letter-spacing: .12em; }
+.stoa-rephead h3::before { content: "░▒▓"; margin-right: 8px; letter-spacing: 0; font-weight: 400; color: var(--stoa-accent-text); }
+.stoa-repsays { margin: auto 0 0; padding-top: 10px; border-top: 1px dotted var(--ui-stroke-primary); font-size: 12.5px; line-height: 1.5; color: var(--ui-text-secondary); }
+.stoa-repsays b { color: var(--ui-text-primary); font-weight: 600; }
+.stoa-reprows { display: grid; grid-template-columns: fit-content(44%) minmax(0, 1fr) auto; gap: 9px 12px; }
+.stoa-reprow { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; row-gap: 4px; align-items: center; }
+.stoa-reprows[data-big="1"] { row-gap: 0; column-gap: 16px; }
+.stoa-reprows[data-big="1"] .stoa-reprow { padding: 11px 10px; margin: 0 -10px; border: 1px solid transparent; border-bottom: 1px dotted var(--ui-stroke-primary); }
+.stoa-reprows[data-big="1"] .stoa-reprow:last-child { border-bottom: 0; }
+.stoa-reprows[data-big="1"] .stoa-reprow[data-on="1"] { border: 1px solid var(--stoa-accent-line); background: var(--stoa-accent-soft); }
+.stoa-replabel { min-width: 0; padding: 0; border: 0; background: none; text-align: left; font-family: var(--stoa-mono); font-size: 11px; color: var(--ui-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stoa-reprows[data-big="1"] .stoa-replabel { font-family: inherit; font-size: 13px; color: var(--ui-text-primary); }
+button.stoa-replabel { cursor: pointer; } button.stoa-replabel:hover { text-decoration: underline; text-underline-offset: 3px; }
+.stoa-reprow[data-on="1"] .stoa-replabel { font-weight: 600; }
+.stoa-reptrack { position: relative; display: flex; min-width: 0; height: 12px; }
+.stoa-reprows[data-big="1"] .stoa-reptrack { height: 18px; }
+.stoa-reptrack > i, .stoa-repsq { display: block; flex: none; height: 100%; background: conic-gradient(from 90deg at 2px 2px, var(--c) 90deg, #0000 0) 0 0 / 6px 6px round; }
+.stoa-reptrack > i.stoa-repfill { min-width: 6px; animation: stoa-repgrow .5s ease both; }
+.stoa-reptrack > i.stoa-represt { flex: 1 1 0; min-width: 0; --c: color-mix(in srgb, var(--ui-text-primary) 10%, transparent); }
+.stoa-repmark { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--ui-text-primary); }
+.stoa-repsqs { display: flex; min-width: 0; overflow: hidden; }
+.stoa-repsq { height: 10px; background: conic-gradient(from 90deg at 3px 3px, var(--c) 90deg, #0000 0) 0 0 / 10px 10px; }
+.stoa-reprows[data-big="1"] .stoa-repsq, .stoa-repstrip .stoa-repsq { height: 14px; background: conic-gradient(from 90deg at 4px 4px, var(--c) 90deg, #0000 0) 0 0 / 14px 14px; }
+.stoa-repnum { font-family: var(--stoa-mono); font-size: 11.5px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; color: var(--ui-text-secondary); }
+.stoa-repnum b { font-size: 13px; font-weight: 600; color: var(--ui-text-primary); }
+.stoa-reprow[data-tone="bad"] .stoa-repnum b { color: var(--stoa-h6); }
+.stoa-repwas { grid-column: 2 / -1; font-family: var(--stoa-mono); font-size: 10.5px; color: var(--ui-text-tertiary); }
+.stoa-replegend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-family: var(--stoa-mono); font-size: 10.5px; color: var(--ui-text-secondary); }
+.stoa-replegend span { display: inline-flex; align-items: center; gap: 6px; }
+.stoa-replegend i { display: block; width: 9px; height: 9px; background: var(--c); }
+.stoa-replegend i[data-k="lost"] { background: none; box-shadow: inset 0 0 0 1px var(--ui-text-tertiary); }
+.stoa-replegend u { display: block; width: 2px; height: 12px; background: var(--ui-text-primary); }
+.stoa-repfig { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 14px; }
+.stoa-repbig { font-family: var(--stoa-mono); font-size: 44px; font-weight: 600; letter-spacing: -.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+.stoa-repfig span { display: flex; flex-direction: column; gap: 2px; padding-bottom: 3px; font-family: var(--stoa-mono); font-size: 11.5px; color: var(--ui-text-secondary); }
+.stoa-repfig small[data-tone="good"] { color: var(--stoa-h4); } .stoa-repfig small[data-tone="bad"] { color: var(--stoa-h6); }
+.stoa-repmonths { display: flex; flex-wrap: wrap; gap: 12px 22px; margin-top: 14px; }
+.stoa-repmonths > div { display: flex; flex-direction: column; gap: 6px; }
+.stoa-repdots { display: flex; flex-wrap: wrap; gap: 4px; max-width: 180px; }
+.stoa-repdots i { display: block; width: 14px; height: 14px; background: var(--c); }
+.stoa-repdots i[data-k="lost"] { background: none; box-shadow: inset 0 0 0 1px var(--ui-text-tertiary); }
+.stoa-reptiles { display: flex; flex-wrap: wrap; gap: 10px 26px; }
+.stoa-reptiles b { display: block; font-family: var(--stoa-mono); font-size: 24px; font-weight: 600; letter-spacing: -.02em; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.stoa-reptiles div[data-tone="mute"] b { color: var(--ui-text-tertiary); } .stoa-reptiles div[data-tone="warn"] b { color: var(--stoa-h5); }
+.stoa-reptiles small { font-size: 12px; color: var(--ui-text-secondary); }
+.stoa-repstrip { display: flex; flex-wrap: wrap; margin-top: 12px; }
+.stoa-repask { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding: 14px 16px; border: 1px dotted var(--ui-stroke-primary); border-radius: var(--stoa-r); }
+.stoa-repask form { display: flex; flex-wrap: wrap; gap: 8px; }
+.stoa-repask .stoa-field { flex: 1 1 280px; width: auto; height: 32px; margin-top: 0; font-family: var(--stoa-mono); font-size: 12.5px; }
+.stoa-repask .stoa-btn { height: 32px; }
+.stoa-repchips { display: flex; flex-wrap: wrap; gap: 8px; }
+.stoa-repchips .stoa-btn { height: 24px; padding: 0 9px; font-size: 11px; border-color: var(--ui-stroke-secondary); color: var(--ui-text-secondary); }
+.stoa-replist { border-top: 1px solid var(--ui-stroke-secondary); }
+.stoa-repitem { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 11px 2px; border-bottom: 1px dotted var(--ui-stroke-primary); }
+.stoa-repitem > div:first-child { flex: 1 1 320px; min-width: 0; }
+.stoa-repitem > div:last-child { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.stoa-repitem .stoa-sub { display: block; font-family: var(--stoa-mono); font-size: 11px; }
+.stoa-repopen { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+.stoa-repopen > div:first-child { flex: 999 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.stoa-repopen > div:last-child { flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.stoa-reptitle { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; margin: 4px 0 16px; }
+.stoa-reptitle h2 { margin: 4px 0 4px; font-size: 24px; font-weight: 600; letter-spacing: -.01em; line-height: 1.2; }
+.stoa-reptitle p { margin: 0; font-family: var(--stoa-mono); font-size: 11.5px; color: var(--ui-text-secondary); }
+.stoa-reptitle > div:last-child { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.stoa-repmade { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px 12px; margin: 0; font-size: 13px; }
+.stoa-repmade dt { padding-top: 2px; font-family: var(--stoa-mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--ui-text-tertiary); }
+.stoa-repmade dd { margin: 0; overflow-wrap: anywhere; }
+.stoa-repform { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 12px; }
+.stoa-repform label[data-wide="1"] { grid-column: 1 / -1; }
+.stoa-repform .stoa-select { display: block; width: 100%; max-width: 100%; margin-top: 3px; }
+.stoa-reptable { width: 100%; min-width: 520px; border-collapse: collapse; font-size: 13px; }
+.stoa-reptable th { padding: 6px 12px 6px 0; border-bottom: 1px solid var(--ui-stroke-secondary); text-align: left; font-family: var(--stoa-mono); font-size: 10px; font-weight: 400; letter-spacing: .1em; text-transform: uppercase; color: var(--ui-text-tertiary); white-space: nowrap; }
+.stoa-reptable td { padding: 8px 12px 8px 0; border-bottom: 1px dotted var(--ui-stroke-primary); vertical-align: top; }
+.stoa-reptable tr:last-child td { border-bottom: 0; }
+.stoa-reptable [data-num="1"] { text-align: right; font-family: var(--stoa-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.stoa-reptable td small { display: block; font-size: 12px; color: var(--ui-text-secondary); }
+.stoa-reptable td i { display: inline-block; width: 8px; height: 8px; margin-right: 8px; background: var(--c); }
+.stoa-reptable td i[data-k=""] { display: none; }
+.stoa-repscroll { overflow-x: auto; }
+.stoa-repdraft { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; padding: 10px 14px; border: 1px dotted var(--stoa-accent-line); border-radius: var(--stoa-r); background: var(--stoa-accent-soft); }
+.stoa-repdraft > div { display: flex; flex-wrap: wrap; gap: 8px; }
+@keyframes stoa-repgrow { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+@media (prefers-reduced-motion: reduce) { .stoa-reptrack > i.stoa-repfill { animation: none; } }
 `
 
 const Style = () => h('style', null, CSS)
@@ -5038,6 +5137,368 @@ function Market({ market, sessionId, compact }) {
           h('span', { className: 'stoa-num' }, hold.share + '%')))) : null))
 }
 
+// -- reports ----------------------------------------------------------------------------------------
+// Every figure on this tab is counted by the plugin from the desk's own records (/reports): nothing here asks a
+// model for a number. Hermes comes into it only on a press: "Ask for a report" and "Change it in words" (it saves
+// one from your words, as a draft you keep or discard) and "Ask Hermes about it".
+const $rep = atom({ period: '90', compare: true, list: false, open: '', making: false })
+const setRep = patch => {
+  const next = { ...$rep.get(), ...patch }
+  $rep.set(next)
+  if (storage && ('period' in patch || 'compare' in patch)) storage.set('reports', { period: next.period, compare: next.compare })
+}
+const repQuery = rep => '?period=' + encodeURIComponent(rep.period) + '&compare=' + (rep.compare ? 1 : 0)
+// A cell that a spreadsheet would run as a formula is handed over as text.
+const csvCell = cell => {
+  let text = cell === null || cell === undefined ? '' : String(cell)
+  if (/^[=+\-@]/.test(text) && isNaN(Number(text))) text = "'" + text
+  return /[",\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text
+}
+const csvText = (header, rows) => [header].concat(rows).map(row => row.map(csvCell).join(',')).join('\n') + '\n'
+const fileName = text => String(text || 'report').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'report'
+const reached = row => (row.parts || []).filter(part => part.k === 'won' || part.k === 'late').reduce((sum, part) => sum + part.count, 0)
+
+async function repAct(id, body, done) {
+  try {
+    const out = await rest('/reports/' + encodeURIComponent(id), { method: 'POST', body })
+    if (out && out.ok === false) host.notify({ kind: 'warning', message: out.error || 'That could not be done.' })
+    else if (done) done(out)
+    refresh()
+    return out
+  } catch (error) {
+    host.notifyError(error, 'Stoa could not change the report')
+    return null
+  }
+}
+
+/** A report's rows as dotted bars. With few enough records each one is a square of its own; `big` is the opened report. */
+function RepBars({ result, pb, big, sel, onPick, rows }) {
+  const list = rows || result.rows || []
+  const most = Math.max(1, ...list.map(row => Math.max(row.n || 0, row.mark || 0)))
+  const pitch = big ? 14 : 10
+  const squares = Boolean(result.squares) && result.unit === 'records' && Math.max(0, ...list.map(row => row.count || 0)) <= (big ? 36 : 20)
+  const late = (result.legend || []).find(item => item.k === 'late')
+  const ended = (result.legend || []).some(item => item.k === 'lost') ? (result.legend || []).find(item => item.k === 'won') : null
+  const right = row => {
+    if (result.unit === 'days') return h('b', null, row.n === null || row.n === undefined ? '–' : Math.round(row.n) + 'd')
+    if (result.unit === 'money') return h('b', null, money(row.n, pb.currency) || '0')
+    // A bar coloured by how far its records got says what share got somewhere; one coloured by how they ended, its win rate.
+    const count = k => ((row.parts || []).find(part => part.k === k) || { count: 0 }).count
+    const closed = ended ? count('won') + count('lost') : 0
+    const share = late && row.count ? Math.round((100 * reached(row)) / row.count) : closed ? Math.round((100 * count('won')) / closed) : null
+    return [h('b', { key: 'n' }, String(row.count)),
+      result.staged && row.value ? ' · ' + money(row.value, pb.currency) : '',
+      share !== null ? h('span', { key: 's', title: late ? 'The share that ' + late.label : 'Of the ' + closed + ' that closed, the share that were ' + ended.label }, ' · ' + share + '%') : null]
+  }
+  const was = row => {
+    if (!big || !row.before || !result.before) return null
+    const parts = (row.before.parts || []).filter(part => part.count).map(part => part.count + ' ' + ((result.legend || []).find(item => item.k === part.k) || { label: part.k }).label)
+    return h('small', { className: 'stoa-repwas' }, result.before.label + ': ' + (row.before.count
+      ? (result.unit === 'money' ? money(row.before.n, pb.currency) : plural(row.before.count, pb.terms.deal, pb.terms.deals)) + (parts.length ? ' · ' + parts.join(' · ') : '') : 'none'))
+  }
+  const about = row => {
+    if (!big || result.unit !== 'days') return null
+    const bits = [plural(row.count, pb.terms.deal, pb.terms.deals) + ' here now', 'quiet after ' + row.mark + 'd']
+    if (row.quiet) bits.push(row.quiet + ' gone quiet')
+    if (row.left) bits.push('left after ' + Math.round(row.left.days) + 'd on average (' + row.left.count + ')')
+    return h('small', { className: 'stoa-repwas' }, bits.join(' · '))
+  }
+  return h('div', { className: 'stoa-reprows', 'data-big': big ? '1' : '0' }, list.map(row => {
+    const parts = row.parts && row.parts.length ? row.parts.filter(part => part.n > 0) : [{ k: '', n: row.n || 0, count: row.count || 0 }]
+    const picked = Boolean(sel) && sel === row.key
+    const can = Boolean(onPick) && Boolean(row.records) && row.records.length > 0
+    const track = squares
+      ? h('div', { className: 'stoa-repsqs' }, parts.map(part => h('i', { key: part.k, className: 'stoa-repsq', 'data-k': part.k || undefined, style: { width: part.count * pitch } })))
+      : h('div', { className: 'stoa-reptrack' },
+        parts.filter(part => part.n > 0).map(part => h('i', { key: part.k, className: 'stoa-repfill', 'data-k': part.k || undefined, style: { width: (100 * part.n) / most + '%' } })),
+        h('i', { className: 'stoa-represt' }),
+        row.mark ? h('u', { className: 'stoa-repmark', style: { left: Math.min(100, (100 * row.mark) / most) + '%' }, title: 'Quiet after ' + row.mark + ' days' }) : null)
+    return h('div', { key: row.key, className: 'stoa-reprow', 'data-on': picked ? '1' : '0', 'data-tone': row.tone || '', 'data-heat': row.heat === undefined ? undefined : Math.min(6, row.heat) },
+      can ? h('button', { type: 'button', className: 'stoa-replabel', 'aria-pressed': picked, title: 'See the ' + pb.terms.deals + ' behind ' + row.label, onClick: () => onPick(picked ? '' : row.key) }, row.label)
+        : h('span', { className: 'stoa-replabel', title: row.label }, row.label),
+      track, h('span', { className: 'stoa-repnum' }, right(row)), was(row), about(row))
+  }))
+}
+
+function RepLegend({ result }) {
+  const items = (result.legend || []).map(item => h('span', { key: item.k }, h('i', { 'data-k': item.k }), item.label))
+  if (result.unit === 'days') items.push(h('span', { key: 'mark' }, h('u', null), 'the stage\'s quiet mark'))
+  return items.length ? h('div', { className: 'stoa-replegend' }, items) : null
+}
+
+/** Win rate: the figure, how it moved, and one square for each record that closed, month by month. */
+function RepRate({ result }) {
+  const figure = result.figure
+  const dots = (count, k, title) => Array.from({ length: Math.min(count, 48) }, (_, index) => h('i', { key: k + index, 'data-k': k, title }))
+  return h('div', null,
+    h('div', { className: 'stoa-repfig' }, h('b', { className: 'stoa-repbig' }, figure.text),
+      h('span', null, h('small', null, figure.label), figure.change ? h('small', { 'data-tone': figure.up ? 'good' : 'bad' }, figure.change) : null)),
+    (result.months || []).length ? h('div', { className: 'stoa-repmonths' }, result.months.map(month => h('div', { key: month.key },
+      h('div', { className: 'stoa-repdots' }, dots(month.won, 'won', result.rows[0].label), dots(month.lost, 'lost', result.rows[1].label)),
+      h('small', { className: 'stoa-eyebrow' }, month.label)))) : null)
+}
+
+function RepTiles({ figures }) {
+  return h('div', { className: 'stoa-reptiles' }, figures.map(figure => h('div', { key: figure.label, 'data-tone': figure.tone || '' }, h('b', null, figure.text), h('small', null, figure.label))))
+}
+
+function RepBody({ result, pb, big, sel, onPick }) {
+  if (result.draw === 'rate') return h(RepRate, { result })
+  if (result.draw === 'figures') {
+    const strip = (result.strip || []).filter(part => part.n > 0), total = strip.reduce((sum, part) => sum + part.n, 0)
+    return h('div', null, h(RepTiles, { figures: result.figures || [] }),
+      total ? h('div', { className: 'stoa-repstrip', role: 'img', 'aria-label': strip.map(part => part.n + ' ' + part.label).join(', ') },
+        strip.map(part => h('i', { key: part.k, className: 'stoa-repsq', 'data-k': part.k, title: part.n + ' ' + part.label, style: { width: Math.min(part.n, 60) * 14 } }))) : null)
+  }
+  return h('div', null, h(RepBars, { result, pb, big, sel, onPick }),
+    (result.figures || []).length ? h('div', { style: { marginTop: 14 } }, h(RepTiles, { figures: result.figures })) : null)
+}
+
+const RepSays = ({ says }) => (says && (says[0] || says[1]) ? h('p', { className: 'stoa-repsays' }, h('b', null, says[0]), says[1] ? (says[0] ? ' ' : '') + says[1] : '') : null)
+
+function ReportCard({ card, pb, open }) {
+  if (!card.ok) {
+    return h('section', { className: 'stoa-repcard' }, h('div', { className: 'stoa-rephead' }, h('h3', { className: 'stoa-eyebrow' }, card.title)),
+      h('p', { className: 'stoa-sub' }, 'This one could not be worked out: ' + card.error))
+  }
+  const wide = card.draw === 'figures' || card.id === 'stages' || (card.legend || []).length > 0
+  return h('section', { className: 'stoa-repcard', 'data-wide': wide ? '1' : '0' },
+    h('div', { className: 'stoa-rephead' }, h('h3', { className: 'stoa-eyebrow' }, card.title),
+      h('button', { type: 'button', className: 'stoa-proplink stoa-sub', title: 'Open it: the ' + pb.terms.deals + ' behind each figure, and how it is made', onClick: () => open(card.id) }, 'Open ›')),
+    card.empty ? h('p', { className: 'stoa-sub', style: { margin: 0 } }, card.empty) : h(RepBody, { result: card, pb }),
+    card.empty ? null : h(RepLegend, { result: card }),
+    h(RepSays, { says: card.says }))
+}
+
+/** The few choices a report is made from. A person sets them here with no model involved. */
+function RepBuilder({ choices, start, pb, busy, onSave, onCancel, saveLabel }) {
+  const spec = (start && start.spec) || { count: 'records', by: 'source', when: 'entered', split: 'none', only: {} }
+  const [form, setForm] = useState(() => ({ title: (start && start.title) || '', count: spec.count, by: spec.by, when: spec.when, split: spec.split,
+    status: (spec.only || {}).status || '', owner: (spec.only || {}).owner || '', min: (spec.only || {}).min_value ? String((spec.only || {}).min_value) : '' }))
+  const set = (key, value) => setForm(now => ({ ...now, [key]: value }))
+  const pick = (key, options, label, wide) => h(Field, { label, wide }, h('select', { className: 'stoa-select', value: form[key], onChange: event => set(key, event.target.value) },
+    options.map(option => h('option', { key: option[0], value: option[0] }, option[1]))))
+  const lostOnly = form.by === 'reason', openOnly = form.when === 'open'
+  const save = () => onSave({ title: form.title.trim(), count: form.count, by: form.by, when: form.when, split: openOnly && form.split === 'outcome' ? 'none' : form.split,
+    only: { ...(spec.only || {}), status: lostOnly ? 'lost' : form.status, owner: form.owner, min_value: form.min } })
+  return h('div', null,
+    h('div', { className: 'stoa-repform' },
+      h(Field, { label: 'Title', wide: true, value: form.title, placeholder: 'Win rate by owner', maxLength: 80, onChange: event => set('title', event.target.value) }),
+      pick('count', choices.count, 'Counts'), pick('by', choices.by, 'Grouped by'), pick('when', choices.when, 'Which ' + pb.terms.deals),
+      pick('split', openOnly ? choices.split.filter(option => option[0] !== 'outcome') : choices.split, 'Coloured by'),
+      lostOnly ? null : pick('status', openOnly ? choices.status.filter(option => option[0] === '' || option[0] === 'open') : choices.status, 'Only'),
+      (choices.owners || []).length > 1 ? pick('owner', [['', 'Anyone']].concat(choices.owners.map(name => [name, name])), 'Only owner') : null,
+      h(Field, { label: 'Only worth at least', value: form.min, placeholder: '50k', inputMode: 'decimal', onChange: event => set('min', event.target.value) })),
+    h('div', { className: 'stoa-actions', style: { marginTop: 12, display: 'flex', gap: 8, flexWrap: 'wrap' } },
+      h(Btn, { kind: 'go', disabled: busy || !form.title.trim(), onClick: save }, saveLabel || 'Save'),
+      onCancel ? h(Btn, { kind: 'quiet', onClick: onCancel }, 'Cancel') : null))
+}
+
+function RecordsBehind({ result, row, pb, openRecord }) {
+  const records = row.records || []
+  const days = result.unit === 'days'
+  const save = () => download('stoa-' + fileName(result.title + ' ' + row.label) + '.csv', csvText(
+    ['Name', 'Company', cap(pb.terms.group), 'Stage', 'Value', 'Entered', 'Closed', 'Owner', 'Reason'],
+    records.map(r => [r.name, r.company, r.group, r.stage, r.value, r.entered, r.closed, r.owner, r.reason])), 'text/csv')
+  return h(Section, { title: 'The ' + plural(records.length, pb.terms.deal, pb.terms.deals) + ' behind ' + row.label,
+    aside: h(Btn, { kind: 'quiet', onClick: save }, 'Download these') },
+  h('div', { className: 'stoa-repscroll' }, h('table', { className: 'stoa-reptable' },
+    h('thead', null, h('tr', null, h('th', null, cap(pb.terms.deal)), h('th', null, 'Stage'), h('th', { 'data-num': '1' }, 'Value'),
+      h('th', null, days ? 'In the stage' : 'Entered'), h('th', null, 'Owner'))),
+    h('tbody', null, records.map(r => h('tr', { key: r.id },
+      h('td', null, h('button', { type: 'button', className: 'stoa-proplink stoa-name', onClick: () => openRecord(r.id) }, r.name), h('small', null, r.company || r.group)),
+      h('td', null, h('i', { 'data-k': r.k || '' }), r.stage, r.reason ? h('small', null, r.reason) : null),
+      h('td', { 'data-num': '1' }, money(r.value, pb.currency) || '–'),
+      h('td', { 'data-num': days ? '1' : '0' }, days ? r.days + 'd' : shortDate(r.entered)),
+      h('td', null, r.owner || '–')))))))
+}
+
+function ReportOpen({ id, state, choices, back, openRecord }) {
+  const rep = useValue($rep), pb = state.playbook
+  const query = useQuery({ queryKey: ['stoa', 'report', state.pipeline || '', id, rep.period, rep.compare],
+    queryFn: () => rest('/reports/' + encodeURIComponent(id) + repQuery(rep)), staleTime: 1500 })
+  const [sel, setSel] = useState('')
+  const [shape, setShape] = useState('bars')
+  const [editing, setEditing] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [words, setWords] = useState('')
+  const [removing, setRemoving] = useState(false)
+  const result = query.data
+  // The first bar with records behind it is picked out, so the page opens showing what a bar is made of.
+  useEffect(() => {
+    if (!result || sel) return
+    const first = (result.rows || []).find(row => row.records && row.records.length)
+    if (first && result.draw === 'bars') setSel(first.key)
+  }, [Boolean(result), id])
+  if (query.error && !result) return h('div', { className: 'stoa-rep' }, h(BackRow, { back, label: 'Reports' }), h('p', { className: 'stoa-sub' }, 'That report is not here any more.'))
+  if (!result) return h('div', { className: 'stoa-rep' }, h(BackRow, { back, label: 'Reports' }), h('p', { className: 'stoa-sub' }, 'Working it out…'))
+  const row = (result.rows || []).find(item => item.key === sel) || null
+  const run = async (body, done) => { setBusy(true); await repAct(result.id, body, done); setBusy(false) }
+  const savePage = () => rest('/reports/' + encodeURIComponent(result.id) + '/page' + repQuery(rep))
+    .then(file => { download(file.filename, file.html, 'text/html'); host.notify({ kind: 'success', message: 'Saved the report as one web page. It names no ' + pb.terms.deal + ', only the figures.' }) })
+    .catch(error => host.notifyError(error, 'Stoa could not save the page'))
+  const saveCsv = () => download('stoa-' + fileName(result.title) + '.csv', csvText(result.csv.header, result.csv.rows), 'text/csv')
+  const askAbout = () => toChat('Read the Stoa report "' + result.title + '" with gtm_report (action "read", report "' + result.id + '", period "' + rep.period
+    + '") and tell me what stands out and what you would do about it.')
+  const change = event => {
+    event.preventDefault()
+    const text = words.trim()
+    if (!text) return
+    const sent = toChat(result.custom
+      ? 'Change the Stoa report "' + result.title + '" like this: "' + text + '". Use gtm_report with action "save" and `replaces` set to "' + result.id + '", then tell me in a line what changed.'
+      : 'Make a Stoa report like "' + result.title + '" but: "' + text + '". Use gtm_report with action "save" (a short title, and my words as `asked`), then tell me in a line what it shows.')
+    if (sent) { setWords(''); host.notify({ kind: 'info', message: 'Hermes is on it. What it makes shows up here as a draft for you to keep or discard.' }) }
+  }
+  const views = [['bars', 'Bars'], ['table', 'Table']].concat(result.over && result.over.length > 1 ? [['time', 'Over time']] : [])
+  const table = () => h('div', { className: 'stoa-repscroll' }, h('table', { className: 'stoa-reptable' },
+    h('thead', null, h('tr', null, result.csv.header.map((name, index) => h('th', { key: index, 'data-num': index ? '1' : '0' }, name)))),
+    h('tbody', null, result.csv.rows.map((cells, index) => h('tr', { key: index }, cells.map((cell, at) => h('td', { key: at, 'data-num': at ? '1' : '0' },
+      at && result.csv.header[at] === 'Value' ? money(cell, pb.currency) || '–' : cell === '' || cell === null ? '–' : String(cell))))))))
+  return h('div', { className: 'stoa-rep' },
+    h(BackRow, { back, label: 'Reports' }),
+    result.draft ? h('div', { className: 'stoa-repdraft', role: 'status' },
+      h('span', null, h('b', null, result.replaces ? 'Hermes made a new version of a report.' : 'Hermes made this report.'),
+        result.asked ? ' You asked: “' + result.asked + '”.' : '', ' It is a draft until you keep it.'),
+      h('div', null, h(Btn, { kind: 'go', disabled: busy, onClick: () => run({ verb: 'keep' }, out => setRep({ open: (out && out.id) || result.id })) }, result.replaces ? 'Keep it in place of the old one' : 'Keep it'),
+        h(Btn, { disabled: busy, onClick: () => run({ verb: 'discard' }, back) }, 'Discard'))) : null,
+    h('div', { className: 'stoa-reptitle' },
+      h('div', { style: { minWidth: 0 } }, h('div', { className: 'stoa-eyebrow' }, 'Report'), h('h2', null, result.title), h('p', null, result.line),
+        h('div', { style: { display: 'flex', gap: 12, marginTop: 6, flexWrap: 'wrap' } },
+          result.pinned ? h(Chip, { tone: 'good' }, 'on the dashboard') : null, result.custom && !result.draft ? h(Chip, null, 'made here') : null,
+          result.draft ? h(Chip, { tone: 'warn' }, 'draft from Hermes') : null)),
+      h('div', null,
+        result.period ? h('select', { className: 'stoa-select', 'aria-label': 'Period', value: rep.period, onChange: event => setRep({ period: event.target.value }) },
+          choices.periods.map(option => h('option', { key: option[0], value: option[0] }, option[1]))) : null,
+        result.draw === 'bars' ? h('div', { className: 'stoa-tabs', style: { margin: 0 }, role: 'group', 'aria-label': 'How it is shown' }, views.map(item =>
+          h('button', { type: 'button', key: item[0], className: 'stoa-tab', style: { height: 26, padding: '0 11px', fontSize: 12 }, 'data-on': shape === item[0] ? '1' : '0',
+            'aria-pressed': shape === item[0], onClick: () => setShape(item[0]) }, item[1]))) : null,
+        result.draft ? null : h(Btn, { disabled: busy, onClick: () => run({ verb: result.pinned ? 'unpin' : 'pin' }) }, result.pinned ? 'Take off the dashboard' : 'Put on the dashboard'),
+        h(Menu, { label: 'Download', right: true },
+          h(MenuItem, { title: 'As a page', sub: 'One file that opens in any browser and prints. Figures only.', onClick: savePage }),
+          h(MenuItem, { title: 'As a spreadsheet', sub: 'The rows of this report, as a CSV.', onClick: saveCsv })))),
+    h('div', { className: 'stoa-repopen' },
+      h('div', null,
+        h(Section, { title: result.draw === 'bars' && result.squares && result.unit === 'records' && shape === 'bars' ? plural(result.total.count, pb.terms.deal, pb.terms.deals) + ' · one square each' : 'What it shows',
+          aside: shape === 'bars' || result.draw !== 'bars' ? h(RepLegend, { result }) : null },
+        result.empty ? h('p', { className: 'stoa-sub' }, result.empty)
+          : result.draw !== 'bars' ? h(RepBody, { result, pb, big: true })
+            : shape === 'table' ? table()
+              : shape === 'time' ? h(RepBars, { result, pb, big: true, rows: result.over })
+                : h(RepBody, { result, pb, big: true, sel, onPick: setSel }),
+        h(RepSays, { says: result.says })),
+        result.draw === 'rate' && !result.empty ? h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } }, result.rows.filter(item => (item.records || []).length).map(item =>
+          h(Btn, { key: item.key, kind: sel === item.key ? 'go' : '', onClick: () => setSel(sel === item.key ? '' : item.key) }, 'The ' + item.count + ' ' + item.label.toLowerCase()))) : null,
+        row && row.records && row.records.length && shape !== 'time' ? h(RecordsBehind, { result, row, pb, openRecord }) : null),
+      h('div', null,
+        h(Section, { title: 'How this report is made', aside: result.custom && !result.draft && !editing ? h(Btn, { kind: 'quiet', onClick: () => setEditing(true) }, 'Change') : null },
+          editing && result.custom ? h(RepBuilder, { choices, start: result, pb, busy, saveLabel: 'Save', onCancel: () => setEditing(false),
+            onSave: body => run({ ...body, verb: 'save' }, () => setEditing(false)) })
+            : h('dl', { className: 'stoa-repmade' }, (result.made || []).flatMap(line => [h('dt', { key: line[0] + 'k' }, line[0]), h('dd', { key: line[0] + 'v' }, line[1])])
+              .concat(result.asked ? [h('dt', { key: 'ak' }, 'Asked as'), h('dd', { key: 'av', style: { color: 'var(--ui-text-secondary)' } }, '“' + result.asked + '”')] : [])),
+          h('p', { className: 'stoa-repsays', style: { marginTop: 12 } }, 'Stoa works this out from your desk each time you open it. No model is asked, and nothing is sent anywhere.')),
+        result.draft ? null : h(Section, { title: result.custom ? 'Change it in words' : 'Ask for one like it' },
+          h('form', { onSubmit: change },
+            h('textarea', { className: 'stoa-field', style: { height: 'auto', padding: '7px 8px', fontFamily: 'var(--stoa-mono)', lineHeight: 1.5, resize: 'vertical' }, rows: 3, value: words,
+              'aria-label': result.custom ? 'How to change this report' : 'What the new report should show', placeholder: 'Split it by owner. Or: only ' + pb.terms.deals + ' over 50k.', onChange: event => setWords(event.target.value) }),
+            h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', justifyContent: 'space-between', marginTop: 8 } },
+              h('span', { className: 'stoa-sub', style: { flex: '1 1 160px' } }, 'This one goes to Hermes. What it makes waits here as a draft: you keep it or discard it.'),
+              h(Btn, { type: 'submit', disabled: !words.trim() }, result.custom ? 'Change' : 'Make it')))),
+        h(Section, { title: 'More' },
+          h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 8 } },
+            h(Btn, { onClick: askAbout, title: 'Sends these figures to Hermes, in the talk box below' }, 'Ask Hermes about it'),
+            result.custom && !result.draft && !removing ? h(Btn, { disabled: busy, onClick: () => setRemoving(true) }, 'Remove this report') : null,
+            removing ? h(Btn, { disabled: busy, onClick: () => run({ verb: 'remove' }, back) }, 'Yes, remove it') : null,
+            removing ? h(Btn, { kind: 'quiet', onClick: () => setRemoving(false) }, 'Keep it') : null),
+          removing ? h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'Only the report goes. No ' + pb.terms.deal + ' is touched.') : null))))
+}
+
+function Reports({ state, openRecord }) {
+  const rep = useValue($rep), pb = state.playbook
+  const query = useQuery({ queryKey: ['stoa', 'reports', state.pipeline || '', rep.period, rep.compare], queryFn: () => rest('/reports' + repQuery(rep)), refetchInterval: 20000, staleTime: 1500 })
+  const [busy, setBusy] = useState(false)
+  const [ask, setAsk] = useState('')
+  const data = query.data
+  // A draft that was not there a moment ago (Hermes has just made it) is the one to show.
+  const draftIds = data ? data.reports.filter(item => item.draft).map(item => item.id).join('|') : null
+  const known = useRef(null)
+  useEffect(() => {
+    if (draftIds === null) return
+    const ids = draftIds ? draftIds.split('|') : []
+    if (known.current) { const fresh = ids.find(id => !known.current.includes(id)); if (fresh) setRep({ open: fresh, making: false }) }
+    known.current = ids
+  }, [draftIds])
+  // Another pipeline has its own reports: one opened here does not follow you there.
+  const pipe = state.pipeline || ''
+  const lastPipe = useRef(pipe)
+  useEffect(() => { if (lastPipe.current !== pipe) { lastPipe.current = pipe; setRep({ open: '', making: false }) } }, [pipe])
+  if (!data) return h('div', { className: 'stoa-rep' }, h('p', { className: 'stoa-sub' }, query.error ? 'The reports could not be loaded. Restart Hermes if you have just updated Stoa.' : 'Working them out…'))
+  if (rep.open && data.reports.some(item => item.id === rep.open)) {
+    return h(ReportOpen, { key: rep.open, id: rep.open, state, choices: data.choices, back: () => setRep({ open: '' }), openRecord })
+  }
+  const open = id => setRep({ open: id, making: false })
+  const drafts = data.reports.filter(item => item.draft)
+  const savePage = () => rest('/reports/page' + repQuery(rep))
+    .then(file => { download(file.filename, file.html, 'text/html'); host.notify({ kind: 'success', message: 'Saved the dashboard as one web page. It names no ' + pb.terms.deal + ', only the figures.' }) })
+    .catch(error => host.notifyError(error, 'Stoa could not save the page'))
+  const make = async body => {
+    setBusy(true)
+    try {
+      const out = await rest('/reports', { method: 'POST', body })
+      if (out && out.ok === false) host.notify({ kind: 'warning', message: out.error || 'That could not be saved.' })
+      else { refresh(); await query.refetch(); setRep({ open: out.id, making: false }) }
+    } catch (error) {
+      host.notifyError(error, 'Stoa could not save the report')
+    }
+    setBusy(false)
+  }
+  const send = event => {
+    event.preventDefault()
+    const text = ask.trim()
+    if (!text) return
+    const sent = toChat('Make a report on the Stoa desk for this: "' + text + '". Use gtm_report with action "save" (give it a short title, and pass my words as `asked`), then tell me in a line what it shows.')
+    if (sent) { setAsk(''); host.notify({ kind: 'info', message: 'Hermes is on it. The report shows up here as a draft for you to keep or discard.' }) }
+  }
+  const hints = ['Value of open ' + pb.terms.deals + ' by owner', 'Lost ' + pb.terms.deals + ' by stage', 'New ' + pb.terms.deals + ' each month, and how they ended']
+  return h('div', { className: 'stoa-rep' },
+    h('div', { className: 'stoa-repbar' },
+      h('div', null, h('div', { className: 'stoa-tabs', role: 'group', 'aria-label': 'Reports' },
+        h('button', { type: 'button', className: 'stoa-tab', 'data-on': rep.list ? '0' : '1', 'aria-pressed': !rep.list, onClick: () => setRep({ list: false }) }, 'Dashboard'),
+        h('button', { type: 'button', className: 'stoa-tab', 'data-on': rep.list ? '1' : '0', 'aria-pressed': rep.list, onClick: () => setRep({ list: true }) }, 'All reports', h('small', null, String(data.reports.length))))),
+      h('div', null,
+        h('select', { className: 'stoa-select', 'aria-label': 'Period', value: rep.period, onChange: event => setRep({ period: event.target.value }) },
+          data.choices.periods.map(option => h('option', { key: option[0], value: option[0] }, option[1]))),
+        data.period.before ? h(Btn, { kind: rep.compare ? 'go' : '', 'aria-pressed': rep.compare, title: 'Set each figure against the same stretch of time before it', onClick: () => setRep({ compare: !rep.compare }) },
+          'Against ' + data.period.before) : null,
+        h(Btn, { onClick: savePage, title: 'The dashboard as one web page: figures only, no ' + pb.terms.deal + ' is named' }, 'Download'),
+        h(Btn, { onClick: () => setRep({ making: !rep.making }) }, '+  New report'))),
+    drafts.length ? h('div', { className: 'stoa-repdraft', role: 'status' },
+      h('span', null, h('b', null, drafts.length === 1 ? 'Hermes made a report: ' + drafts[0].title + '.' : 'Hermes made ' + drafts.length + ' reports.'), ' A draft until you keep it.'),
+      h('div', null, drafts.slice(0, 3).map(item => h(Btn, { key: item.id, kind: 'go', onClick: () => open(item.id) }, drafts.length === 1 ? 'Look at it' : item.title)))) : null,
+    rep.making ? h('section', { className: 'stoa-box', style: { marginBottom: 14 } },
+      h('div', { className: 'stoa-rephead', style: { marginBottom: 10 } }, h('h3', { className: 'stoa-eyebrow' }, 'A new report'),
+        h('span', { className: 'stoa-sub' }, 'Made here from a few choices. No model involved.')),
+      h(RepBuilder, { choices: data.choices, pb, busy, saveLabel: 'Make it', onSave: make, onCancel: () => setRep({ making: false }) })) : null,
+    rep.list
+      ? h('div', { className: 'stoa-replist' }, data.reports.map(item => h('div', { key: item.id, className: 'stoa-repitem' },
+        h('div', null, h('button', { type: 'button', className: 'stoa-proplink stoa-name', onClick: () => open(item.id) }, item.title), h('span', { className: 'stoa-sub' }, item.line)),
+        h('div', null,
+          item.draft ? h(Chip, { tone: 'warn' }, 'draft from Hermes') : item.custom ? h(Chip, null, 'made here') : null,
+          item.draft ? null : h(Btn, { kind: 'quiet', onClick: () => repAct(item.id, { verb: item.pinned ? 'unpin' : 'pin' }) }, item.pinned ? 'Take off the dashboard' : 'Put on the dashboard'),
+          item.pinned && !item.draft ? h(Btn, { kind: 'quiet', title: 'Move it earlier on the dashboard', 'aria-label': 'Move ' + item.title + ' earlier', onClick: () => repAct(item.id, { verb: 'up' }) }, '↑') : null,
+          item.pinned && !item.draft ? h(Btn, { kind: 'quiet', title: 'Move it later on the dashboard', 'aria-label': 'Move ' + item.title + ' later', onClick: () => repAct(item.id, { verb: 'down' }) }, '↓') : null,
+          h(Btn, { onClick: () => open(item.id) }, 'Open')))))
+      : data.cards.length
+        ? h('div', { className: 'stoa-repgrid' }, data.cards.map(card => h(ReportCard, { key: card.id, card, pb, open })))
+        : h('p', { className: 'stoa-sub' }, 'Nothing is on the dashboard. Put a report on it from All reports.'),
+    h('div', { className: 'stoa-repask' },
+      h('label', { className: 'stoa-eyebrow', htmlFor: 'stoa-repask' }, 'Ask for a report'),
+      h('form', { onSubmit: send },
+        h('input', { id: 'stoa-repask', className: 'stoa-field', value: ask, placeholder: 'Win rate by owner this quarter', onChange: event => setAsk(event.target.value) }),
+        h(Btn, { type: 'submit', disabled: !ask.trim() }, 'Make it')),
+      h('div', { className: 'stoa-repchips' }, hints.map(text => h(Btn, { key: text, onClick: () => setAsk(text) }, text))),
+      h('p', { className: 'stoa-sub', style: { margin: 0, maxWidth: '76ch' } }, 'Hermes turns the words into a saved report, once, and it waits as a draft for you to keep. After that Stoa works it out from your desk each time you open it: no model call, nothing sent anywhere.')))
+}
+
 function Page() {
   const query = useDesk()
   const tab = useValue($tab)
@@ -5057,7 +5518,7 @@ function Page() {
   const want = useValue($want)
   useEffect(() => {
     if (!want) return
-    if (!['today', 'pipeline', 'cash', 'activity'].includes($tab.get())) $tab.set('pipeline')
+    if (!['today', 'pipeline', 'cash', 'reports', 'activity'].includes($tab.get())) $tab.set('pipeline')
     setAdding(false)
     setStack(now => (now.length && now[now.length - 1].kind === 'record' && now[now.length - 1].id === want ? now : now.concat([{ kind: 'record', id: want }]).slice(-12)))
     $want.set('')
@@ -5134,7 +5595,7 @@ function Page() {
     ['From the map', totals.tracked, cap(pb.terms.deals) + ' that started on a market map.', ''],
     ['Won', totals.won + (totals.won_value ? ' · ' + money(totals.won_value, pb.currency) : ''), 'Closed as ' + pb.won.label.toLowerCase() + ', all time.', '']]
   const side = adding ? h(NewRecord, { state, close: () => setAdding(false), opened: id => { setAdding(false); openRecord(id) } }) : null
-  const tabLabel = { today: 'Today', pipeline: view === 'groups' ? cap(pb.terms.groups) : view === 'companies' ? 'Companies' : view === 'clients' ? 'Clients' : 'Pipeline', cash: 'Cash', activity: 'Activity' }[tab] || 'Back'
+  const tabLabel = { today: 'Today', pipeline: view === 'groups' ? cap(pb.terms.groups) : view === 'companies' ? 'Companies' : view === 'clients' ? 'Clients' : 'Pipeline', cash: 'Cash', reports: 'Reports', activity: 'Activity' }[tab] || 'Back'
   const before = stack.length > 1 ? stack[stack.length - 2] : null
   const backLabel = !before ? tabLabel : before.kind === 'record' ? ((state.deals.find(item => item.id === before.id) || {}).name || 'Back') : before.id
   const sheet = !top ? null
@@ -5142,7 +5603,7 @@ function Page() {
       : top.kind === 'group' ? h(GroupPage, { key: 'g:' + top.id, name: top.id, state, back, backLabel, openRecord, openClient, onRenamed: renamed })
         : top.kind === 'client' ? h(ClientPage, { key: 'cl:' + top.id, name: top.id, state, back, backLabel, openRecord, openGroup })
           : h(CompanyPage, { key: 'c:' + top.id, name: top.id, state, back, backLabel, openRecord, openGroup })
-  const paged = Boolean(sheet) && ['today', 'pipeline', 'cash', 'activity'].includes(tab)
+  const paged = Boolean(sheet) && ['today', 'pipeline', 'cash', 'reports', 'activity'].includes(tab)
   const nothing = h('div', { className: 'stoa-sub' },
     h('p', { style: { marginTop: 0 } }, 'Nothing on the desk yet. Add a ' + pb.terms.deal + ' with the button above, tell Stoa about one below, drop a list on the page, or ask it to map a market.'),
     h(Btn, { onClick: () => setTab('setup') }, 'See how it works, or look around with sample data'))
@@ -5175,7 +5636,7 @@ function Page() {
     h('div', { className: 'stoa-tabsrow' },
       h('div', { className: 'stoa-tabs', role: 'tablist' }, [['today', 'Today', day.needs], ['pipeline', 'Pipeline', totals.open]]
         .concat(cashShown ? [['cash', 'Cash', state.cash ? state.cash.strip.overdue.count + (state.cash.strip.to_bill || { count: 0 }).count : 0]] : [])
-        .concat([['market', 'Market map', totals.mapped], ['activity', 'Activity', 0], ['setup', 'Setup', 0]]).map(item =>
+        .concat([['market', 'Market map', totals.mapped], ['reports', 'Reports', 0], ['activity', 'Activity', 0], ['setup', 'Setup', 0]]).map(item =>
         h('button', { type: 'button', key: item[0], role: 'tab', 'aria-selected': tab === item[0], className: 'stoa-tab', 'data-on': tab === item[0] ? '1' : '0',
           onClick: () => setTab(item[0]) }, item[1], item[2] ? h('small', null, String(item[2])) : null))),
       (tab === 'today' || tab === 'pipeline') && !welcome ? h(Btn, { onClick: add }, '+  New ' + pb.terms.deal) : null),
@@ -5204,6 +5665,7 @@ function Page() {
     tab === 'market' ? (market
       ? h(MarketMap, { market, markets: state.markets, onMarket: setMarketId, shape: state.playbook.shape, openRecord })
       : h('div', { style: { maxWidth: 720 } }, h(NewMap, { first: true }))) : null,
+    !paged && tab === 'reports' ? h(Reports, { state, openRecord }) : null,
     !paged && tab === 'activity' ? h('div', { style: { maxWidth: 800 } }, state.activity.length ? state.activity.map(entry => h('div', { key: entry.id, className: 'stoa-row', style: { cursor: 'default', alignItems: 'center' } },
       h('i', { className: 'stoa-dot', style: { marginTop: 0 }, 'data-tone': entry.kind === 'stage' && !entry.undone ? 'good' : '' }),
       h('span', { className: 'stoa-grow', style: entry.undone ? { opacity: 0.55 } : undefined },
@@ -5262,6 +5724,8 @@ export default {
       const was = (ctx.storage.get(LANES[lane].key, {}) || {}).model
       if (was && typeof was.model === 'string' && typeof was.provider === 'string') setModel({ [lane]: { model: was.model, provider: was.provider, ...(typeof was.effort === 'string' && was.effort ? { effort: was.effort } : {}) } })
     }
+    const lastRep = ctx.storage.get('reports', {}) || {}
+    if (['30', '90', 'quarter', 'year', 'all'].includes(lastRep.period)) $rep.set({ ...$rep.get(), period: lastRep.period, compare: lastRep.compare !== false })
     const kept = ctx.storage.get('filter', {}) || {}      // an older version kept every filter, a picked-out stage included: take only these two
     $filter.set({ ...NO_FILTER, owner: typeof kept.owner === 'string' ? kept.owner : '', group: typeof kept.group === 'string' ? kept.group : '' })
     // While the app is open the desk knows it can draw cards and maps in the conversation here.

@@ -499,6 +499,45 @@ GTM_INVOICE = {
 # A desk can hold several pipelines; every tool can be pointed at one of them.
 PIPELINE_ARG = {"type": "string", "description": "Which pipeline, by name, when the desk has more than one (the system prompt lists them). "
                                                  "Left out: the first. The answer names the pipeline it used."}
-ALL = (GTM_PIPELINE, GTM_DEAL, GTM_CARD, GTM_MARKET, GTM_ENRICH, GTM_NOTES, GTM_PLAYBOOK, GTM_EXPORT, GTM_INTAKE, GTM_GROUP, GTM_CONTACT, GTM_INVOICE)
+GTM_REPORT = {
+    "name": "gtm_report",
+    "description": (
+        "The Stoa desk's reports: figures Stoa counts itself from the desk's records (pipeline by stage, win rate, time in "
+        "stage, where records come from, why they were lost, what the market map turned into, what Hermes proposed and "
+        "what the person did with it), and the ones made here. Use it when someone asks how the pipeline is doing, for a "
+        "number, a breakdown or a trend: read the report and say what it shows; never add records up yourself. "
+        "action='list' names every report. 'read' gives one report's figures and its one-line reading (`report`: its id "
+        "or title; `period` to change the stretch of time). 'save' makes a new report from a few choices when none of the "
+        "existing ones answers the question: `title`, `count` (records or value), `by` (what the bars are: source, owner, "
+        "stage, group, company, reason, month, or field:<key> for one of the pipeline's own fields), `when` (which records: "
+        "entered in the period, closed in the period, or open now), optional `split` (colour each bar by the furthest stage "
+        "reached, or by how it ended) and `only` (narrow it: status, owner, source, stage, group, company, min_value). It "
+        "is saved as a draft on the Reports tab, where the person keeps or discards it, and comes back worked out, so say "
+        "what it shows. To change a report made here, save again with `replaces` naming it. 'remove' deletes one made here."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "action": {"type": "string", "enum": ["list", "read", "save", "remove"]},
+            "report": {"type": "string", "description": "read/remove: the report's id, its title, or a clear part of the title."},
+            "period": {"type": "string", "enum": ["30", "90", "quarter", "year", "all"],
+                       "description": "read/save: last 30 days, last 90 days (the usual), this quarter, this year, or all time."},
+            "title": {"type": "string", "description": "save: a few words saying what it shows, e.g. 'Win rate by owner'."},
+            "count": {"type": "string", "enum": ["records", "value"], "description": "save: count the records, or add up what they are worth."},
+            "by": {"type": "string", "description": "save: what each bar is. One of source, owner, stage, group, company, reason, month, or field:<key>."},
+            "when": {"type": "string", "enum": ["entered", "closed", "open"],
+                     "description": "save: records that entered in the period, that closed (won or lost) in the period, or that are open now."},
+            "split": {"type": "string", "enum": ["none", "furthest", "outcome"],
+                      "description": "save: colour each bar by the furthest stage its records reached, or by how they ended (won, lost, still open)."},
+            "only": {"type": "object", "description": "save: narrow the records. Keys: status (open, won, lost), owner, source, stage, group, company, min_value."},
+            "asked": {"type": "string", "description": "save: the person's own words for what they wanted, kept beside the report."},
+            "replaces": {"type": "string", "description": "save: a report made here that this is a new version of."},
+        },
+        "required": ["action"],
+    },
+}
+
+ALL = (GTM_PIPELINE, GTM_DEAL, GTM_CARD, GTM_MARKET, GTM_ENRICH, GTM_NOTES, GTM_PLAYBOOK, GTM_EXPORT, GTM_INTAKE, GTM_GROUP, GTM_CONTACT, GTM_INVOICE,
+       GTM_REPORT)
 for _schema in ALL:
     _schema["parameters"]["properties"]["pipeline"] = PIPELINE_ARG

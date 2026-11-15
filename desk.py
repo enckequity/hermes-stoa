@@ -24,6 +24,7 @@ from . import cards, demo, sources
 from . import store as st
 from .intake import Intake
 from .market import Markets
+from .reports import Reports
 from .usage import Meter
 from .playbook import DEFAULT, MOST_STAGES, SHAPES, Library, Playbook, PlaybookError
 
@@ -192,6 +193,7 @@ class Desk:
         self.desktop_seen = 0.0     # when the Desktop/Webapp half last checked in (it does so while it is open)
         self.markets = Markets(self)
         self.intake = Intake(self)
+        self.reports = Reports(self)
 
     # -- host services --------------------------------------------------------------------------
     @property
@@ -1443,6 +1445,9 @@ class Desk:
         if tool == "gtm_market" and action == "track" and "add" not in allows:
             return {"ok": False, "error": "A scheduled job cannot put a company in the pipeline by itself. Add it to the map and "
                                           "say which ones you would call first; the person adds them with one press."}
+        if tool == "gtm_report" and action in ("save", "remove"):         # which reports the desk keeps: the person's
+            return {"ok": False, "error": "A scheduled job cannot add or remove a report. Read the ones there are, and say in "
+                                          "your reply which one you would add."}
         if tool == "gtm_playbook" and action in ("save", "use", "stages"):      # what the pipeline is, and its stages: the person's
             return refused
         return None

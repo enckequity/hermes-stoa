@@ -8,6 +8,17 @@
   adds them together except "what needs me today". `/gtm` and `!gtm`, and a scheduled job that does
   not name a pipeline, are about the first one. A market map drawn inside a chat shows only while
   the page is on that map's pipeline.
+- **Reports count and add up; they do not do sums of your own.** A report is records or their value,
+  grouped one way, over one set of records. There is no formula, no average of a field, and no
+  report across pipelines. A bar coloured by how its records ended shows its win rate beside the
+  count; other ratios you read off the parts. Money that came in is on the Cash tab, not here.
+- **Time in stage knows what the desk saw.** How long records now in a stage have been there is
+  exact. How long the ones that left had stayed is read from the ledger, so a record imported
+  half-way through its life starts counting on the day it was imported.
+- **"What Hermes did" counts proposals**, the changes a scheduled job leaves for your approval, and
+  the call notes filed. What you ask Hermes to do in a chat is done at once and is not counted
+  there, and a proposal you altered before approving counts as approved.
+- **A report is not sent anywhere on a schedule.** Open it, download it, or ask Hermes about it.
 - **The web dashboard tab is set-up and status only.** It shows what is set up, how to set up the
   rest, and the desk in totals. It has no pipeline board, no map and no record: those are on the
   Stoa page in the Desktop app and the Webapp. Its totals name pipelines and maps, never a person or

@@ -59,6 +59,11 @@ The pictures show the sample map that comes with the tour; every company in it i
 - **Send it anything.** A PDF of leads, a spreadsheet, a photo of a sign-up sheet. Hermes reads it,
   Stoa shows what it would add and what it would change, and nothing is written until you press Apply.
 - **Click a button, the stage changes at once.** No model in the loop, no waiting, no wrong stage.
+- **Reports you can trust the arithmetic of.** A Reports tab with a dashboard: pipeline by stage,
+  win rate, time in stage, where records come from, why they were lost, what the market map turned
+  into, and what Hermes proposed and what you did with it. Stoa counts every figure itself from
+  your records, so opening one costs nothing and reads the same each time. Ask for another in
+  plain words and Hermes saves it as a draft for you to keep.
 - **Hermes proposes, you approve.** What it finds in your email, calls and Slack is logged on the
   right record. Anything more (a stage it thinks should move, a person to add) waits for your yes
   or no with the evidence beside it, a no is remembered, and any change can be taken back.
@@ -96,6 +101,8 @@ In Slack the command is `!gtm` (Slack keeps the slash for its own commands), and
 ![Searches: who each one is for, where it stands, and who is on the client's side](docs/desktop-searches.jpg)
 
 ![Cash: what came in, what is owed, and what is likely to come in](docs/desktop-cash.jpg)
+
+![Reports: a dashboard counted from your own records, each card with one line on what it shows](docs/desktop-reports.jpg)
 
 ## The first five minutes
 
@@ -197,6 +204,16 @@ What the plugin does that you would want to know before installing it:
   the page in the Desktop app and Webapp, which is what reads and changes the pipeline. They call no
   model and no outside service, except **Test** beside a key (above) and the paid lookups described
   above.
+- **Reports.** Every figure on the Reports tab is counted by the plugin from its own database: no
+  model is called to make one and nothing is sent anywhere. The reports you make, and which are on
+  the dashboard, are kept per pipeline in that pipeline's file. Three presses on the tab send words
+  to Hermes, in the talk box where you can read them: **Ask for a report** and **Change it in
+  words** send what you typed, and **Ask Hermes about it** asks the agent to read that report, so
+  its figures (counts and totals by stage, source, owner and so on; no list of people) go to the
+  model you have picked. A report Hermes makes is a draft until you keep it, and a scheduled job
+  cannot add or remove one. A report saved as a page is one file with no script that asks nothing
+  of the network; it carries figures and the names of sources, owners, stages and groups, and names
+  no record. A row saved as a spreadsheet does list its records.
 - **The Setup tab.** It shows, to anyone signed in to your Hermes, which chats and Slack members
   the desk is limited to, the folders it reads and writes, where its database file is, and whether
   each key is set. It never shows a key or a token.
