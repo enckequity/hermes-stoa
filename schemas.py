@@ -136,16 +136,22 @@ GTM_NOTES = {
     "name": "gtm_notes",
     "description": (
         "Turn meeting notes into updates on the Stoa desk. action='inbox' lists recent call notes that have not been filed "
-        "yet (from the team's notes folder and, if connected, Granola), each with the records it probably belongs to. "
-        "'read' returns one note's text. 'file' attaches your short summary of a note to a record's activity log and "
-        "can set the next step; 'skip' dismisses a note that is not about the pipeline. After a call, read the note, "
-        "file it on the right record, and propose the stage change rather than making it yourself."
+        "yet (from the team's notes folders and, if connected, Granola and Fireflies), each with the records it probably "
+        "belongs to and why. 'read' returns one note's text; where the answer has `read_with_your_own_tool`, the note is a "
+        "PDF and you read those files with your own file tool. 'file' attaches your short summary of a note to a record's "
+        "activity log and can set the next step; 'skip' dismisses a note that is not about the pipeline. If the inbox "
+        "names `connections`, more notes live in a tool you are connected to: follow `connections_how`, and use 'known' to "
+        "learn which of them are new. A note stays filed even if its file is edited, renamed or moved; 'reopen' puts one "
+        "back in the inbox when the person asks for it to be gone through again. After a call, read the note, file it on the right record, and propose the stage "
+        "change rather than making it yourself."
     ),
     "parameters": {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["inbox", "read", "file", "skip"]},
-            "note": {"type": "string", "description": "read/file/skip: the note id from the inbox."},
+            "action": {"type": "string", "enum": ["inbox", "read", "file", "skip", "known", "reopen"]},
+            "include_filed": {"type": "boolean", "description": "inbox: also list the notes already filed or skipped (`handled`), with their ids, for reopening one."},
+            "note": {"type": "string", "description": "read/file/skip: the note id from the inbox, or for a note in a connection '<connection>:<its id there>'."},
+            "notes": {"type": "array", "items": {"type": "string"}, "description": "known: the ids to ask about, each '<connection>:<its id there>'. The answer says which are new."},
             "deal": {"type": "string", "description": "file: the record this note belongs to."},
             "summary": {"type": "string", "description": "file: two or three sentences on what was said and agreed. Only what the note states."},
             "next_step": {"type": "string", "description": "file: the next step that came out of the call."},

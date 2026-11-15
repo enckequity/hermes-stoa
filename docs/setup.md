@@ -90,23 +90,63 @@ Exa it runs one search for one result, which Exa bills like any other search.
 
 ## 6. Bring in your call notes (optional)
 
-Each note is filed on the record it is about, with the next step it implies. Notes can come from a
-folder, from Granola, or both.
+Each note is filed on the record it is about, with the next step it implies. Stoa reads what your
+recorder wrote (the summary, the transcript); it does not record or transcribe anything itself.
 
-**From a folder.** Any folder on the computer Hermes runs on where notes are saved as files ending
-in `.md` or `.txt`: an Obsidian folder, or wherever your meeting recorder saves its notes.
+Open the step and pick where your notes live. It shows the way in for that tool:
 
-1. Open the step and paste the folder's path into the box. On a Mac, to copy a folder's path: in
-   Finder, right-click the folder, hold the Option key, and choose **Copy as Pathname**.
-2. Press **Check**. Stoa says how many notes it found there, or what is wrong with the path.
-3. Press **Save**.
+| Your notes are in | How they reach the desk |
+|---|---|
+| **Plaud** | A folder. Plaud has no key for a personal account, so export into a folder (steps below). Or Plaud's own connector, through Hermes. |
+| **Obsidian** | A folder: the one inside your vault where meeting notes go. |
+| **Granola** | A key. In the Granola app, **Settings → Connectors → API keys → Create new key** (Business and Enterprise plans). |
+| **Fireflies** | A key. In Fireflies, **Integrations → Fireflies API**. Stoa reads the summary and action items, never the transcript. |
+| **Another recorder** (Otter, Fathom, tl;dv, Zoom, a phone's voice notes) | A folder: export or download each note as TXT, Markdown or Word. |
 
-Not sure where your notes are? **Look for a folder** tries a few usual places (Documents,
-Obsidian, Notes) and offers any that hold notes. It counts the notes and opens none.
+**A folder, step by step.**
 
-**From Granola.** Add a Granola key the same way as in step 5: in the Granola app, **Settings →
-Connectors → API keys → Create new key**. Granola offers API keys on its Business and Enterprise
-plans. **Test** reads the first page of your note list.
+1. Make a folder for your notes on the computer Hermes runs on, for example `Documents/Plaud`.
+2. Get your notes into it. In Plaud: open a recording, choose **Export**, export the **Summary** as
+   Markdown or TXT and, if you want Hermes to see what was said, the **Transcript** as TXT. Keep
+   the names Plaud gives them.
+3. Paste the folder's path into the box. On a Mac, to copy a folder's path: in Finder, right-click
+   the folder, hold the Option key, and choose **Copy as Pathname**. Not sure where your notes
+   are? **Or have Stoa look for a folder** tries a few usual places and offers any that hold notes.
+4. Press **Check**. Stoa says what is there: how many notes and of which kinds, how many are PDFs
+   (Hermes reads those itself), and whether there are recordings with no words yet.
+5. Press **Add folder**. You can add up to eight.
+
+What a folder may hold:
+
+- **Read by Stoa:** Markdown, text, Word (`.docx`), subtitle files (`.srt`, `.vtt`), web pages
+  and rich text, in the folder and up to three folders below it.
+- **A transcript and a summary of one meeting,** saved as two files, are read as one note, the
+  summary first, and filed once.
+- **A PDF** is listed and handed to Hermes, which reads it with its own tools.
+- **A recording** (audio or video) is only counted, so the page can tell you it has no words yet.
+- **Who a note is about** is worked out from attendees listed at its head (`attendees:` between two
+  `---` lines, as Obsidian writes it), from a name or company in its title, and from a person, an
+  email address or a company named in what it says. The date is the one at its head or in its
+  name, else the day the file was saved.
+
+![What Stoa would pick up: the notes waiting, and the record each looks to be about](desktop-notes.jpg)
+
+**A note is filed once.** It stays filed if you edit it later, if a sync tool saves it again, or
+if you rename it or move it to another folder Stoa reads. If a note changed and you want it gone
+through again, say so: *"go through my Juniper call note again"*. What was filed before stays on
+the record, and Hermes adds only what is new.
+
+**See it work before any schedule runs.** Under the folders, **What Stoa would pick up** lists the
+notes waiting to be filed and the record each one looks to be about. **Have Hermes file them now**
+hands them to Hermes there and then. To have it happen without asking, switch on *File meeting
+notes* in step 8.
+
+**Through a connector Hermes already has (new).** Some tools can be connected to Hermes directly.
+Plaud is one: in Hermes, open **Capabilities → Connectors**, add a connector with the address
+`https://mcp.plaud.ai/mcp`, and sign in to Plaud. Back on this step, pick Plaud and press **Have
+Hermes look in Plaud**. On a notes sweep Hermes then reads your recordings with that connector's
+own tools and files them on the desk, each once. Stoa cannot see into a connector, so it shows no
+count for it, and how well this works depends on the connector.
 
 ## 7. Work from Slack (optional)
 

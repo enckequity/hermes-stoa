@@ -119,7 +119,9 @@ missing in one line and ask for it.
 ## Meeting notes
 
 `gtm_notes(action="inbox")` lists call notes that have not been filed, each with the records it
-probably belongs to. For each one:
+probably belongs to and why (an attendee, a name in the title, a person or company named in the
+note). They come from the person's notes folders, and from Granola or Fireflies when a key is set.
+For each one:
 
 1. `read` it.
 2. If it is about a record on the desk, `file` it there with a two or three sentence summary
@@ -128,6 +130,23 @@ probably belongs to. For each one:
    card's button.
 4. If it is about someone not on the desk who should be, ask before adding them.
 5. If it is not about the pipeline at all, `skip` it.
+
+A filed note stays filed, even if its file is edited, saved again, renamed or moved. If the person
+says a note changed, or went on the wrong record, list the inbox with `include_filed=true`,
+`reopen` that note, and go through it again: what was filed before is still on its record, so add
+only what is new.
+
+Three things to know about where a note comes from:
+
+- **One meeting can be several files.** A recorder writes a transcript and a summary; `read` gives
+  them together, the summary first, under their file names. File the meeting once.
+- **A PDF.** When `read` answers with `read_with_your_own_tool`, Stoa could not open the note: read
+  those files with your own file tool, then file the note here as usual.
+- **Notes in a tool Hermes is connected to** (Plaud's connector, for one). When the inbox carries
+  `connections`, those notes are not in the inbox. Use that connection's own tools to list what is
+  recent, name each `<connection>:<its id there>`, ask `gtm_notes(action="known", notes=[...])`
+  which are new, read each new one with the connection's tools, and `file` or `skip` it here under
+  that id. If the connection's tools are not there in this conversation, say so; do not guess.
 
 ## Activity sweep (email, calls, Slack)
 

@@ -371,12 +371,27 @@ us."* It asks a few questions, shows you the stages, and saves the playbook. Or 
 
 ### Meeting notes
 
-Point `notes_dir` at any folder of Markdown or text call notes (an Obsidian folder, the export
-folder of an open-source meeting recorder, files you drop in by hand), or add a Granola API key.
-`gtm_notes` lists the notes that have not been filed and which record each one is probably
-about. The agent reads a note, files a short summary on the right record with the next step,
-and recommends a stage change for you to confirm. The *File meeting notes* automation does this
-a few times a day.
+Call notes reach the desk three ways, and any mix of them:
+
+- **Folders** (`notes_dir`, up to eight, a semicolon between them): an Obsidian folder, wherever a
+  recorder such as Plaud exports to, files you drop in by hand. Stoa reads Markdown, text, Word,
+  subtitle, web-page and rich-text files, three folders deep. A meeting's transcript and summary,
+  saved as two files, are one note. A PDF is handed to Hermes to read with its own tools.
+- **A key**: Granola or Fireflies. Summaries and action items only; a transcript is never asked for.
+- **A connector Hermes already has** (`notes_connections`, for example `plaud`): Hermes reads the
+  notes there with that connector's own tools and files them here under an id of its own, so each
+  is filed once (`gtm_notes(action="known")` tells it which are new). New, and only as good as the
+  connector.
+
+A note is filed once: it stays filed when its file is edited, saved again, renamed or moved, and
+`gtm_notes(action="reopen")` puts one back in the inbox when a person asks for it.
+
+`gtm_notes` lists the notes that have not been filed and which record each one is probably about,
+with why: an attendee, a name or company in the title, or a person, an email address or a company
+named in the note. The agent reads a note, files a short summary on the right record with the
+next step, and recommends a stage change for you to confirm. The *File meeting notes* automation
+does this a few times a day, and **What Stoa would pick up** on Setup shows the same list, with
+no model involved, before any of that has run.
 
 ### Enrichment
 

@@ -31,10 +31,45 @@ log = logging.getLogger("hermes.plugins.stoa")
 
 PDL_KEY = "PDL_API_KEY"
 GRANOLA_KEY = "GRANOLA_API_KEY"
+FIREFLIES_KEY = "FIREFLIES_API_KEY"
 EXA_KEY = "EXA_API_KEY"
 # The usual places a folder of notes is kept, looked in only when someone presses "Look for one" on Setup.
-LIKELY_NOTES = ("~/Documents/Meeting notes", "~/Documents/Meetings", "~/Documents/Notes", "~/Documents/Obsidian", "~/Obsidian",
+LIKELY_NOTES = ("~/Documents/Meeting notes", "~/Documents/Meetings", "~/Documents/Call notes", "~/Documents/Notes",
+                "~/Documents/Plaud", "~/Plaud", "~/Documents/Transcripts", "~/Documents/Obsidian", "~/Obsidian",
                 "~/Library/Mobile Documents/iCloud~md~obsidian/Documents", "~/Documents/Granola", "~/Notes")
+# Where a person's call notes live, and the way from there to the desk. ``route`` is how they arrive: a ``folder`` Stoa
+# reads, a ``key`` for a service with an API (see KEYS), or a ``connection`` Hermes already has. The steps are the tool's
+# own (Plaud's export formats and connector address are from Plaud's help centre and docs), kept general where a menu's
+# exact name could not be confirmed.
+NOTE_TOOLS = (
+    {"id": "plaud", "name": "Plaud", "route": "folder", "folder": "~/Documents/Plaud",
+     "about": "Plaud has no key for a personal account, so its notes come in as files.",
+     "steps": ["Make a folder for them on the computer Hermes runs on, for example Documents/Plaud.",
+               "In Plaud, open a recording and choose Export. Export the Summary as Markdown or TXT. If you want Hermes to "
+               "see what was said as well, export the Transcript as TXT too.",
+               "Save both into that folder. Keep the names Plaud gives them: Stoa sees that a transcript and a summary "
+               "belong to one meeting and files them once.",
+               "Add the folder below. A Word file or an SRT is read as well; a PDF is handed to Hermes to read."],
+     "connection": {"name": "plaud", "address": "https://mcp.plaud.ai/mcp",
+                    "about": "Plaud also has a connector of its own. With it Hermes reads your recordings straight from Plaud, "
+                             "with nothing to export."}},
+    {"id": "obsidian", "name": "Obsidian", "route": "folder", "folder": "~/Documents/Obsidian",
+     "about": "A vault is already a folder of notes.",
+     "steps": ["Find the folder inside your vault where meeting notes go, such as Meetings or Calls.",
+               "Add that folder below, not the whole vault, so everyday notes are left alone.",
+               "A note that begins with title, date and attendees lines between two --- lines is matched to its record by them."]},
+    {"id": "granola", "name": "Granola", "route": "key", "key": "granola",
+     "about": "Granola has a key, so there is nothing to export."},
+    {"id": "fireflies", "name": "Fireflies", "route": "key", "key": "fireflies",
+     "about": "Fireflies has a key, so there is nothing to export."},
+    {"id": "other", "name": "Another recorder", "route": "folder", "folder": "~/Documents/Meeting notes",
+     "about": "Otter, Fathom, tl;dv, Zoom, Teams, a phone's voice notes: anything that can save a note as a file.",
+     "steps": ["Make a folder for them on the computer Hermes runs on, for example Documents/Meeting notes.",
+               "In your recorder, export or download each note as TXT, Markdown or Word (.docx) into that folder. "
+               "A subtitle file (.srt, .vtt) works too, and a PDF is handed to Hermes to read.",
+               "Add the folder below. If your recorder can save there by itself, or a synced folder (iCloud, Dropbox, Drive) "
+               "lands on this computer, the desk keeps itself current with no further steps."]},
+)
 # The keys a person may add, in the order Setup lists them. Every one is optional. ``get`` is the page a key is made
 # on, ``where`` is that place in words, ``check`` says what pressing Test does and what it costs.
 KEYS = (
@@ -59,6 +94,14 @@ KEYS = (
      "steps": "In the Granola app: Settings, Connectors, API keys, Create new key. Granola offers API keys on its Business and Enterprise plans.",
      "cost": "No charge per request.",
      "check": "Reads the first page of your note list. Free."},
+    {"id": "fireflies", "env": FIREFLIES_KEY, "name": "Fireflies", "kind": "Call notes",
+     "unlocks": "Your Fireflies meetings join the notes inbox, each filed on the record it is about. Stoa reads the summary "
+                "and action items Fireflies wrote; it never asks for the transcript, the audio or the video.",
+     "without": "A notes folder does the same job for notes kept as files.",
+     "get": "https://docs.fireflies.ai/fundamentals/authorization", "where": "Fireflies's Integrations page",
+     "steps": "In Fireflies: open Integrations, choose Fireflies API, and copy your API key.",
+     "cost": "No charge per request. Fireflies limits how many requests a plan may make in a day.",
+     "check": "Asks for the id of one meeting. Free."},
 )
 LOG_KINDS = ("note", "call", "email", "meeting", "task")
 HANDOFF_FRESH = 90  # seconds a "Drafting..." line is believed without news (a restart loses the watcher that clears it)
@@ -824,8 +867,20 @@ class Desk:
                          "schedule": str(job.get("schedule") or ""), "next": str(job.get("next") or "")})
         return rows
 
+    def note_folders(self) -> list:
+        """The folders Stoa reads call notes from. One setting holds them, a path to a line (an older desk has one path)."""
+        raw = str(self.setting("notes_dir", "") or "")
+        seen, out = set(), []
+        for part in re.split(r"[\n;]+", raw):
+            path = part.strip().strip("\"'").strip()
+            if path and path not in seen:
+                seen.add(path)
+                out.append(path)
+        return out[:8]
+
     def notes_check(self, folder: Any) -> dict:
-        """Could Stoa read call notes from this folder? The answer is in words, with how many notes are there."""
+        """Could Stoa read call notes from this folder? The answer is in words, with what is there: how many notes, of
+        which kinds, how many it hands to Hermes, and how many are recordings with no words yet."""
         text = str(folder or "").strip().strip("\"'").strip()
         if not text:
             return {"ok": False, "message": "Paste the folder's path first."}
@@ -839,10 +894,22 @@ class Desk:
                 return {"ok": False, "message": "That is a file, not a folder. Use the folder it sits in."}
         except OSError as exc:
             return {"ok": False, "message": "Hermes is not allowed to look in that folder (%s)." % type(exc).__name__}
-        count, newest = sources.count_notes(path)
-        return {"ok": True, "folder": str(path), "count": count, "newest": newest,
-                "message": ("%d %s here, the newest from %s." % (count, "note" if count == 1 else "notes", newest)) if count
-                else "The folder is there, with no notes in it yet. Stoa reads files ending in .md, .markdown or .txt."}
+        census = sources.folder_census(path)
+        count, newest = census["notes"], census["newest"]
+        said = []
+        if count:
+            kinds = ", ".join("%d %s" % (n, kind) for kind, n in list(census["kinds"].items())[:4])
+            said.append("%d %s here (%s), the newest from %s." % (count, "note" if count == 1 else "notes", kinds, newest))
+        else:
+            said.append("The folder is there, with no notes in it yet. Stoa reads Markdown, text, Word (.docx), subtitle (.srt, .vtt) "
+                        "and web-page files, in this folder and up to three folders below it.")
+        if census["handed"]:
+            said.append("%d of them %s, which Hermes reads with its own tools." % (census["handed"], "is a PDF" if census["handed"] == 1 else "are PDFs"))
+        if census["audio"]:
+            said.append("%d %s no words yet: export the transcript or summary beside %s." % (
+                census["audio"], "recording has" if census["audio"] == 1 else "recordings have", "it" if census["audio"] == 1 else "them"))
+        return {"ok": True, "folder": str(path), "count": count, "newest": newest, "kinds": census["kinds"],
+                "handed": census["handed"], "audio": census["audio"], "message": " ".join(said)}
 
     def notes_look(self) -> dict:
         """Look in a few usual places for a folder of notes, when asked to. Only whether each exists and how many notes
@@ -862,19 +929,79 @@ class Desk:
         found.sort(key=lambda row: row["newest"], reverse=True)
         return {"ok": True, "found": found[:4], "looked": list(LIKELY_NOTES)}
 
-    def notes_folder(self, folder: Any) -> dict:
-        """Save the folder Stoa reads call notes from (or clear it, with an empty one). It is one of the plugin's own
-        settings, so it is saved the way Hermes saves them; where this desk cannot save a setting it says so."""
+    def notes_folder(self, folder: Any, verb: Any = "set") -> dict:
+        """Change the folders Stoa reads call notes from: ``add`` one, ``remove`` one, or ``set`` the list to one folder
+        (none, with an empty one). They are one of the plugin's own settings, so they are saved the way Hermes saves
+        them; where this desk cannot save a setting it says so."""
         if not self.can_configure:
             return {"ok": False, "elsewhere": True, "message": "This page cannot save a setting from here. Open Stoa's settings and paste the path into Meeting notes folder."}
-        if not str(folder or "").strip():
+        verb, have = str(verb or "set").lower(), self.note_folders()
+        text = str(folder or "").strip().strip("\"'").strip()
+        if verb == "remove":
+            keep = [path for path in have if path != text and str(Path(path).expanduser()) != str(Path(text).expanduser())]
+            self._set_config("notes_dir", "; ".join(keep))
+            return {"ok": True, "folders": keep, "message": "Stoa no longer reads %s." % text if len(keep) < len(have) else "That folder was not on the list."}
+        if not text:
             self._set_config("notes_dir", "")
-            return {"ok": True, "folder": "", "message": "Stoa no longer reads a notes folder."}
-        check = self.notes_check(folder)
+            return {"ok": True, "folder": "", "folders": [], "message": "Stoa no longer reads a notes folder."}
+        check = self.notes_check(text)
         if not check["ok"]:
             return check
-        self._set_config("notes_dir", check["folder"])
-        return dict(check, saved=True, message="Saved. " + check["message"])
+        if verb == "add":
+            if check["folder"] in have:
+                return dict(check, folders=have, message="That folder is already on the list. " + check["message"])
+            if len(have) >= 8:
+                return {"ok": False, "message": "That is eight folders already. Remove one first."}
+            have = have + [check["folder"]]
+        else:
+            have = [check["folder"]]
+        self._set_config("notes_dir", "; ".join(have))
+        return dict(check, saved=True, folders=have, message="Saved. " + check["message"])
+
+    def note_connections(self) -> list:
+        """Connections of Hermes's own (a connector under Capabilities) that a person has said hold call notes, by the
+        names they typed. Stoa cannot reach them: the agent can, with that connection's tools, and the notes inbox
+        tells it to look there."""
+        raw = self.setting("notes_connections", "") or ""
+        raw = ",".join(str(item) for item in raw) if isinstance(raw, (list, tuple)) else str(raw)
+        out = []
+        for part in re.split(r"[,;\n]+", raw):
+            name = re.sub(r"[^a-z0-9_.-]", "", part.strip().lower())[:40]
+            if name and name not in out:
+                out.append(name)
+        return out[:6]
+
+    def notes_connections(self, names: Any) -> dict:
+        """Save which of Hermes's connections hold call notes (a list of names, or text with commas)."""
+        if not self.can_configure:
+            return {"ok": False, "elsewhere": True, "message": "This page cannot save a setting from here. Open Stoa's settings and type the names into Note connections."}
+        text = ", ".join(str(n) for n in names) if isinstance(names, (list, tuple)) else str(names or "")
+        self._set_config("notes_connections", text)
+        kept = self.note_connections()
+        return {"ok": True, "connections": kept,
+                "message": ("Hermes will look in %s for call notes on its next sweep." % " and ".join(name.capitalize() for name in kept)) if kept else "No connection is checked for call notes."}
+
+    def notes_sources(self) -> dict:
+        """Where call notes come from, for Setup: each folder with what it holds, each key, each connection, and the
+        ways in for each tool. Nothing is opened."""
+        folders = []
+        for path in self.note_folders():
+            check = self.notes_check(path)
+            folders.append({"folder": path, "ok": bool(check.get("ok")), "count": check.get("count", 0), "newest": check.get("newest", ""),
+                            "handed": check.get("handed", 0), "audio": check.get("audio", 0), "message": check.get("message", "")})
+        return {"folders": folders, "granola": bool(self.secret(GRANOLA_KEY)), "fireflies": bool(self.secret(FIREFLIES_KEY)),
+                "connections": self.note_connections(), "tools": [dict(tool) for tool in NOTE_TOOLS],
+                "days": _int(self.setting("notes_days", 7) or 7, 7, 1, 3650), "can_save": bool(self.can_configure)}
+
+    def notes_preview(self) -> dict:
+        """What the next sweep would pick up, with no model involved: the notes waiting to be filed, newest first, each
+        with the record it looks to be about. Titles, dates and matches only; no note's text is in it."""
+        inbox = self.notes({"action": "inbox"})
+        rows = [{"id": n["id"], "title": n["title"], "when": n.get("when", ""), "source": n.get("source", ""),
+                 "parts": n.get("parts", 1), "handed": bool(n.get("handed")),
+                 "suggested": [{"name": m["name"], "why": m["why"]} for m in n.get("suggested") or []][:2]} for n in inbox.get("notes") or []]
+        return {"ok": True, "notes": rows[:12], "waiting": inbox.get("waiting", len(rows)), "matched": len([r for r in rows if r["suggested"]]),
+                "problems": inbox.get("problems") or [], "days": _int(self.setting("notes_days", 7) or 7, 7, 1, 3650)}
 
     def key_test(self, service: str) -> dict:
         """Ask one service whether the key set for it is accepted, with the smallest request that service has.
@@ -922,12 +1049,18 @@ class Desk:
         slack = read("Slack", lambda: None if self.slack is None else bool(getattr(self.slack, "available", False)), None)
         pdl = read("the lookup key", lambda: bool(self.secret(PDL_KEY)), False)
         granola = read("the Granola key", lambda: bool(self.secret(GRANOLA_KEY)), False)
+        fireflies = read("the Fireflies key", lambda: bool(self.secret(FIREFLIES_KEY)), False)
+        note_sources = read("where call notes come from", self.notes_sources, {"folders": [], "connections": [], "tools": [], "can_save": False})
         keys = read("the keys", self.keys, [])
         have = [row["name"] for row in keys if row["set"]]
         automations = read("the automations", self.automations, [])
         running = [row["title"] for row in automations if row["state"] == "on"]
-        notes_dir = read("the notes folder", lambda: str(self.setting("notes_dir", "") or ""), "")
-        notes = read("the notes folder itself", lambda: self.notes_check(notes_dir) if notes_dir else {}, {})
+        note_folders = [row["folder"] for row in note_sources.get("folders") or []]
+        notes_dir = "; ".join(note_folders)
+        notes = (note_sources.get("folders") or [{}])[0]
+        reading = ([("%d folders" % len(note_folders)) if len(note_folders) > 1 else note_folders[0]] if note_folders else []) + (
+            ["Granola"] if granola else []) + (["Fireflies"] if fireflies else []) + [
+            "%s (through Hermes)" % name for name in note_sources.get("connections") or []]
         cap = read("the lookup cap", lambda: _int(self.setting("pdl_monthly_cap", 50), 50, 0, 10 ** 6), 50)
         used = read("lookups used", lambda: _int(self.own_store.meta_get("pdl_calls:" + st.today()[:7], "0"), 0, 0, 10 ** 9), 0)
         allow = read("the chats setting", lambda: self.setting("channels", []) or [], [])
@@ -949,10 +1082,9 @@ class Desk:
             {"id": "keys", "done": bool(have), "title": "Find companies and fill in people",
              "detail": ("Set: %s." % ", ".join(have)) if have
              else "Exa lets a map search for companies; People Data Labs fills in people and names buyers."},
-            {"id": "notes", "done": granola or bool(notes_dir), "title": "Bring in your call notes",
-             "detail": ("Reading Granola." if granola and not notes_dir else "Reading %s." % notes_dir if not granola
-                        else "Reading Granola and %s." % notes_dir) if granola or notes_dir
-             else "Name the folder your notes are saved in, or add a Granola key, and each note is filed on the record it is about."},
+            {"id": "notes", "done": bool(reading), "title": "Bring in your call notes",
+             "detail": ("Reading %s." % ", ".join(reading)) if reading
+             else "Wherever your call notes are (Plaud, Obsidian, Granola, Fireflies, any recorder), each one is filed on the record it is about."},
             {"id": "slack", "done": bool(slack), "title": "Work from Slack",
              "detail": "Connected: records post as cards with buttons, and !gtm works in Slack." if slack
              else "Slack is connected in Hermes, on its Messaging page. Once it is, records post there as cards whose buttons move the pipeline."},
@@ -970,6 +1102,8 @@ class Desk:
              else "Switched off in the %s playbook." % own.name if pdl else "No key set (PDL_API_KEY). Optional."},
             {"id": "granola", "label": "Granola meeting notes", "on": granola,
              "detail": "Key set." if granola else "No key set (GRANOLA_API_KEY). Optional."},
+            {"id": "fireflies", "label": "Fireflies meeting notes", "on": fireflies,
+             "detail": "Key set." if fireflies else "No key set (FIREFLIES_API_KEY). Optional."},
             {"id": "notes", "label": "Meeting notes folder", "on": bool(notes_dir), "detail": notes_dir or "Not set (notes_dir). Optional."},
             {"id": "google", "label": "Gmail, Calendar and Sheets", "on": None,
              "detail": "Stoa uses Hermes's own Google tools when they are connected; it holds no Google access itself."},
@@ -1009,8 +1143,10 @@ class Desk:
             "checklist": checklist, "connections": connections, "rules": rules, "keys": keys,
             "automations": automations or [{"name": bp["name"], "title": bp["title"], "description": bp["description"], "state": "unknown",
                                              "schedule": "", "next": ""} for bp in blueprints.BLUEPRINTS],
-            "notes": {"folder": notes_dir, "ok": bool(notes.get("ok")), "count": notes.get("count", 0), "message": notes.get("message", ""),
-                      "granola": granola, "can_save": bool(self.can_configure)},
+            "notes": {"folder": note_folders[0] if note_folders else "", "ok": bool(notes.get("ok")), "count": notes.get("count", 0),
+                      "message": notes.get("message", ""), "granola": granola, "fireflies": fireflies, "can_save": bool(self.can_configure),
+                      "folders": note_sources.get("folders") or [], "connections": note_sources.get("connections") or [],
+                      "tools": note_sources.get("tools") or [], "days": note_sources.get("days", 7)},
             "slack": slack,
             "data": {"path": str(self.data_dir / self.own_file()), "size": size, "records": real, "open": tally["open"], "won": tally["won"],
                      "lost": tally["lost"], "samples": tally["samples"], "activities": tally["activities"], "maps": tally["maps"],
@@ -2963,43 +3099,126 @@ class Desk:
     # -- gtm_notes ------------------------------------------------------------------------------
     def _note_sources(self, days: int) -> tuple:
         notes, problems = [], []
-        folder = str(self.setting("notes_dir", "") or "")
-        if folder:
-            notes += sources.folder_notes(folder, days)
-        key = self.secret(GRANOLA_KEY)
-        if key:
-            found, problem = sources.granola_notes(key, days, http=self.http)
+        folders = self.note_folders()
+        for folder in folders:
+            found = sources.folder_notes(folder, days)
+            if not found and not Path(folder).expanduser().is_dir():
+                problems.append("The notes folder %s is not there any more." % folder)
             notes += found
-            if problem:
-                problems.append(problem)
-        status = {"folder": folder or "not set (notes_dir)", "granola": "connected" if key else "not set (GRANOLA_API_KEY)"}
-        return notes, status, problems
+        granola, fireflies = self.secret(GRANOLA_KEY), self.secret(FIREFLIES_KEY)
+        for key, read in ((granola, sources.granola_notes), (fireflies, sources.fireflies_notes)):
+            if key:
+                found, problem = read(key, days, http=self.http)
+                notes += found
+                if problem:
+                    problems.append(problem)
+        status = {"folder": "; ".join(folders) or "not set (notes_dir)", "granola": "connected" if granola else "not set (GRANOLA_API_KEY)",
+                  "fireflies": "connected" if fireflies else "not set (FIREFLIES_API_KEY)"}
+        return sorted(notes, key=lambda n: (str(n.get("when") or "")[:10], n.get("changed") or n.get("when") or ""), reverse=True), status, problems
+
+    def _note_handled(self, note: dict) -> Optional[dict]:
+        """Whether a note was filed or skipped already, as ``{id, at, deal_id}``. A note is known by its own id, by an id
+        an earlier version gave its file, or, for a file that looks new, by the mark of what it says (so one that was
+        renamed or moved is not filed again). Whichever it was found by, it is remembered under its lasting id from then on."""
+        found = self.store.note_handled([note["id"]] + list(note.get("was") or []))
+        if found is None and note.get("source") == "folder":
+            mark = sources.note_print(note)
+            found = self.store.note_handled([mark]) if mark else None
+        if found and found["id"] != note["id"]:
+            self.store.mark_note(note["id"], found["deal_id"])
+            if note.get("source") == "folder" and not found["id"].startswith("same:"):
+                # Known by an id from an earlier version, which kept no mark of what the note says. It is taken now,
+                # once, so this note too is recognised if it is later renamed or moved.
+                mark = sources.note_print(note)
+                if mark:
+                    self.store.mark_note(mark, found["deal_id"])
+        return found
+
+    def _folder_note(self, note_id: str) -> Optional[dict]:
+        for folder in self.note_folders():
+            for note in sources.folder_notes(folder, days=3650):
+                if note["id"] == note_id or note_id in (note.get("was") or []):
+                    return note
+        return None
+
+    def _mark_note(self, note_id: str, deal_id: str = "") -> None:
+        """A note is filed or skipped. For a file, what it says is remembered too, so the same note under another name
+        or in another folder is known as this one."""
+        self.store.mark_note(note_id, deal_id)
+        if note_id.startswith("file:"):
+            note = self._folder_note(note_id)
+            mark = sources.note_print(note) if note else ""
+            if note and note["id"] != note_id:
+                self.store.mark_note(note["id"], deal_id)
+            if mark:
+                self.store.mark_note(mark, deal_id)
 
     def notes(self, args: dict) -> dict:
         action = str(args.get("action") or "inbox").lower()
         days = _int(args.get("days") or self.setting("notes_days", 7) or 7, 7, 1, 3650)
         if action == "inbox":
             notes, status, problems = self._note_sources(days)
-            waiting = [n for n in notes if not self.store.note_seen(n["id"])]
+            handled = {note["id"]: self._note_handled(note) for note in notes}
+            waiting = [n for n in notes if handled[n["id"]] is None]
             open_deals = self.store.list(status="open")
-            for note in waiting:
-                note["suggested"] = _suggest(note, open_deals)
-                note.pop("path", None)
-            out = {"ok": True, "notes": waiting[:25], "sources": status}
+            for note in waiting[:25]:
+                # A note kept as a file seldom says who was on the call, so its opening is read for who it names.
+                note["suggested"] = _suggest(note, open_deals, sources.note_head(note) if note.get("source") == "folder" else "")
+                if len(note.get("paths") or []) > 1:
+                    note["parts"] = len(note["paths"])
+                if not note.get("handed"):
+                    note.pop("handed", None)
+                for private in ("path", "paths", "changed", "was"):
+                    note.pop(private, None)
+            out = {"ok": True, "notes": waiting[:25], "waiting": len(waiting), "sources": status}
+            if args.get("include_filed"):
+                # Notes already handled, for when a person wants one read again (it changed, or it went on the wrong record).
+                names = {deal["id"]: deal["name"] for deal in self.store.list(status="all")}
+                out["handled"] = [{"id": n["id"], "title": n["title"], "when": n.get("when", ""), "source": n.get("source", ""),
+                                   "handled_at": handled[n["id"]]["at"],
+                                   "filed_on": names.get(handled[n["id"]]["deal_id"], "") or ("" if handled[n["id"]]["deal_id"] else "(skipped)")}
+                                  for n in notes if handled[n["id"]] is not None][:40]
             if problems:
                 out["problems"] = problems
-            if not waiting and status["folder"].startswith("not set") and status["granola"].startswith("not set"):
-                out["hint"] = ("No meeting-note source is set up. Point notes_dir at a folder of Markdown or text notes, "
-                               "or add GRANOLA_API_KEY, in the plugin's settings.")
+            connections = self.note_connections()
+            if connections:
+                # Notes Stoa cannot reach itself, in a tool Hermes is connected to. The agent reads them with that
+                # connection's own tools and files them here under an id of its own making, so none is filed twice.
+                out["connections"] = connections
+                out["connections_how"] = (
+                    "Call notes also live in %s, which you reach with that connection's own tools, not through this one. "
+                    "List its recordings or notes from the last %d days. Give each the id '<connection>:<its id there>' "
+                    "(for example 'plaud:abc123') and call gtm_notes(action='known', notes=[...]) to learn which are new. "
+                    "Read each new one there, then file or skip it here with that id, exactly as for a note from the inbox. "
+                    "If the connection's tools are not available in this conversation, say so and carry on with the rest."
+                    % (" and ".join(connections), days))
+            if not waiting and not connections and all(str(value).startswith("not set") for value in status.values()):
+                out["hint"] = ("No call-note source is set up. On the Stoa page, Setup has a step for it: a folder your recorder "
+                               "saves notes into, a Granola or Fireflies key, or a connection Hermes already has.")
             return out
+        if action == "known":
+            asked = args.get("notes") or ([args.get("note")] if args.get("note") else [])
+            asked = [str(item).strip()[:200] for item in (asked if isinstance(asked, (list, tuple)) else [asked]) if str(item or "").strip()][:100]
+            if not asked:
+                return {"ok": False, "error": "known needs `notes`: the ids to ask about, each '<connection>:<id>'"}
+            done = [note_id for note_id in asked if self.store.note_seen(note_id)]
+            return {"ok": True, "new": [note_id for note_id in asked if note_id not in done], "already_handled": done}
         note_id = str(args.get("note") or "").strip()
         if not note_id:
             return {"ok": False, "error": "pass the note id from the inbox"}
         if action == "read":
             return self._read_note(note_id)
         if action == "skip":
-            self.store.mark_note(note_id)
+            self._mark_note(note_id)
             return {"ok": True, "skipped": note_id}
+        if action == "reopen":
+            # A person asks for a handled note to be gone through again. Nothing already on a record is taken off it.
+            note = self._folder_note(note_id) if note_id.startswith("file:") else None
+            ids = [note_id] + ([note["id"]] + list(note.get("was") or []) + [sources.note_print(note)] if note else [])
+            cleared = self.store.unmark_notes(ids)
+            return {"ok": bool(cleared), "reopened": note_id if cleared else "",
+                    **({"note": "It is waiting in the inbox again. What was filed from it before is still on its record: add only what is new, or file it on the right record."}
+                       if cleared else {"error": "that note was not marked as filed or skipped; list the inbox with include_filed=true for the ids"})}
         if action == "file":
             deal, error = self._resolve(args.get("deal"))
             if error:
@@ -3016,11 +3235,11 @@ class Desk:
             follow = {k: args.get(k) for k in ("next_step", "next_due") if args.get(k) is not None}
             if follow:
                 self.store.update(deal["id"], actor=actor, **follow)
-            self.store.mark_note(note_id, deal["id"])
+            self._mark_note(note_id, deal["id"])
             deal = self.store.get(deal["id"])
             self._changed(deal)
             return {"ok": True, "filed": note_id, "deal": self.view(deal, activities=3)}
-        return {"ok": False, "error": "unknown action '%s'" % action, "actions": ["inbox", "read", "file", "skip"]}
+        return {"ok": False, "error": "unknown action '%s'" % action, "actions": ["inbox", "read", "file", "skip", "known", "reopen"]}
 
     def _read_note(self, note_id: str) -> dict:
         if note_id.startswith("granola:"):
@@ -3028,12 +3247,21 @@ class Desk:
             if not key:
                 return {"ok": False, "error": "Granola is not set up (GRANOLA_API_KEY)"}
             return sources.read_granola_note(key, note_id, http=self.http)
-        folder = str(self.setting("notes_dir", "") or "")
-        for note in sources.folder_notes(folder, days=3650):
-            if note["id"] == note_id:
-                return {"ok": True, "id": note_id, "source": "folder", "title": note["title"], "when": note["when"],
-                        "text": sources.read_folder_note(note)}
-        return {"ok": False, "error": "no note with id %s (the file may have changed; list the inbox again)" % note_id}
+        if note_id.startswith("fireflies:"):
+            key = self.secret(FIREFLIES_KEY)
+            if not key:
+                return {"ok": False, "error": "Fireflies is not set up (FIREFLIES_API_KEY)"}
+            return sources.read_fireflies_note(key, note_id, http=self.http)
+        if not note_id.startswith("file:"):
+            return {"ok": False, "error": "%s is not a note Stoa can read: it lives in a connection of Hermes's own. Read it with "
+                                          "that connection's tools, then file it here with the same id." % note_id}
+        note = self._folder_note(note_id)
+        if note is None:
+            return {"ok": False, "error": "no note with id %s (the file may have been removed; list the inbox again)" % note_id}
+        out = {"ok": True, "id": note_id, "source": "folder", "title": note["title"], "when": note["when"], "text": sources.read_folder_note(note)}
+        if note.get("handed"):      # a PDF: the agent reads it with its own file tool, so it is told where it is
+            out["read_with_your_own_tool"] = note["paths"]
+        return out
 
     # -- gtm_playbook ---------------------------------------------------------------------------
     # -- shapes and stages: how a person sets a pipeline up --------------------------------------------
@@ -3574,22 +3802,33 @@ def _profile_line(kind: str, profile: dict) -> str:
     return " · ".join(str(b) for b in bits if b) or "match found"
 
 
-def _suggest(note: dict, deals: list) -> list:
-    """Which open records a note is probably about: attendee email first, then a name in the title."""
+def _suggest(note: dict, deals: list, text: str = "") -> list:
+    """Which open records a note is probably about, surest first: an attendee's email, an attendee's name, a name or
+    company in the title, then (for a note kept as a file, which seldom lists who was there) an email address, a
+    person's whole name or a company named in what the note says."""
     emails = {a.get("email", "").lower() for a in note.get("attendees") or [] if a.get("email")}
     names = {a.get("name", "").lower() for a in note.get("attendees") or [] if a.get("name")}
     title = (note.get("title") or "").lower()
-    out = []
+    said = " ".join(str(text or "").lower().split())
+    named = lambda words: bool(words) and re.search(r"(?<![a-z0-9])" + re.escape(words) + r"(?![a-z0-9])", said) is not None
+    ranked = []
     for deal in deals:
-        why = ""
+        name, company = deal["name"].lower(), (deal["company"] or "").lower()
+        why, rank = "", 9
         if deal["email"] and deal["email"].lower() in emails:
-            why = "attendee email"
-        elif deal["name"].lower() in names:
-            why = "attendee name"
-        elif len(deal["name"]) > 3 and deal["name"].lower() in title:
-            why = "name in title"
-        elif deal["company"] and len(deal["company"]) > 3 and deal["company"].lower() in title:
-            why = "company in title"
+            why, rank = "attendee email", 0
+        elif name in names:
+            why, rank = "attendee name", 1
+        elif len(name) > 3 and name in title:
+            why, rank = "name in title", 2
+        elif len(company) > 3 and company in title:
+            why, rank = "company in title", 3
+        elif said and deal["email"] and deal["email"].lower() in said:
+            why, rank = "email in the note", 4
+        elif said and " " in name and len(name) > 5 and named(name):
+            why, rank = "named in the note", 5
+        elif said and len(company) > 3 and named(company):
+            why, rank = "company named in the note", 6
         if why:
-            out.append({"id": deal["id"], "name": deal["name"], "why": why})
-    return out[:4]
+            ranked.append((rank, {"id": deal["id"], "name": deal["name"], "why": why}))
+    return [row for _, row in sorted(ranked, key=lambda pair: pair[0])][:4]

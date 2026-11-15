@@ -441,10 +441,16 @@ class NotesTests(unittest.TestCase):
 
     def test_inbox_suggests_reads_files_and_empties(self):
         inbox = self.desk.notes({"action": "inbox"})
-        self.assertEqual(len(inbox["notes"]), 2)
+        self.assertEqual((len(inbox["notes"]), inbox["waiting"]), (3, 3))      # the PDF is listed too: Hermes reads it itself
         note = [n for n in inbox["notes"] if n["title"] == "Call with Dana Whitfield"][0]
         self.assertEqual(note["suggested"][0]["id"], self.deal["id"])
         self.assertNotIn("path", note)
+        self.assertNotIn("paths", note)
+        handed = [n for n in inbox["notes"] if n.get("handed")][0]
+        seen = self.desk.notes({"action": "read", "note": handed["id"]})
+        self.assertIn("skip.pdf is a PDF", seen["text"])
+        self.assertEqual(seen["read_with_your_own_tool"], [str(self.notes_dir / "skip.pdf")])
+        self.desk.notes({"action": "skip", "note": handed["id"]})
         self.assertIn("January", self.desk.notes({"action": "read", "note": note["id"]})["text"])
         self.assertFalse(self.desk.notes({"action": "file", "note": note["id"], "deal": self.deal["id"]})["ok"])
         filed = self.desk.notes({"action": "file", "note": note["id"], "deal": "dana", "summary": "Wants to move by January.",
@@ -457,7 +463,176 @@ class NotesTests(unittest.TestCase):
 
     def test_no_source_gives_a_hint(self):
         desk = make_desk(self.tmp.name)
-        self.assertIn("notes_dir", desk.notes({})["hint"])
+        self.assertIn("Setup has a step for it", desk.notes({})["hint"])
+
+    def test_a_recorders_export_is_read_whatever_it_is_written_in(self):
+        import zipfile
+        root = Path(self.tmp.name) / "plaud"
+        (root / "2026" / "11").mkdir(parents=True)
+        deep = root / "2026" / "11"
+        # one meeting, written as two files the way a recorder exports it: they are one note, the summary first
+        (deep / "2026-11-12 Northwind renewal - Transcript.txt").write_text("Speaker 1: we will sign in March.\n")
+        (deep / "2026-11-12 Northwind renewal - Summary.md").write_text("Renewal agreed in principle. Dana Whitfield to send the order form.\n")
+        with zipfile.ZipFile(deep / "Larkspur pilot.docx", "w") as z:
+            z.writestr("word/document.xml", '<w:document xmlns:w="x"><w:body><w:p><w:r><w:t>Pilot with 12 users &amp; a start in April.</w:t></w:r></w:p>'
+                                            '<w:p><w:r><w:t>Next: send pricing.</w:t></w:r></w:p></w:body></w:document>')
+        (deep / "standup.srt").write_text("1\n00:00:01,000 --> 00:00:03,000\nGood morning.\n\n2\n00:00:03,000 --> 00:00:05,000\nGood morning.\n\n3\n00:00:05,000 --> 00:00:07,000\nShip on Friday.\n")
+        (deep / "page.html").write_text("<html><head><style>p{}</style></head><body><h1>Recap</h1><p>Budget is &pound;40k.</p></body></html>")
+        (deep / "recording.m4a").write_bytes(b"\x00" * 40)
+        (deep / ".hidden.md").write_text("no")
+        (root / ".obsidian").mkdir()
+        (root / ".obsidian" / "workspace.md").write_text("no")
+        too_deep = deep / "a" / "b"
+        too_deep.mkdir(parents=True)
+        (too_deep / "lost.md").write_text("four levels down")
+        desk = make_desk(self.tmp.name, config={"notes_dir": str(root)})
+        dana = desk.deal({"action": "add", "name": "Dana Whitfield", "company": "Northwind Freight"})["deal"]
+        inbox = desk.notes({"action": "inbox"})
+        by_title = {n["title"]: n for n in inbox["notes"]}
+        self.assertEqual(sorted(by_title), ["Larkspur pilot", "Northwind renewal", "page", "standup"])
+        meeting = by_title["Northwind renewal"]
+        self.assertEqual((meeting["parts"], meeting["when"][:10]), (2, "2026-11-12"))      # the date is the one in its name
+        self.assertEqual((meeting["suggested"][0]["id"], meeting["suggested"][0]["why"]), (dana["id"], "named in the note"))
+        text = desk.notes({"action": "read", "note": meeting["id"]})["text"]
+        self.assertLess(text.index("Renewal agreed"), text.index("we will sign in March"))
+        self.assertIn("## 2026-11-12 Northwind renewal - Summary.md", text)
+        self.assertIn("Pilot with 12 users & a start in April.\nNext: send pricing.", desk.notes({"action": "read", "note": by_title["Larkspur pilot"]["id"]})["text"])
+        self.assertEqual(desk.notes({"action": "read", "note": by_title["standup"]["id"]})["text"], "Good morning.\nShip on Friday.")
+        self.assertIn("Budget is £40k.", desk.notes({"action": "read", "note": by_title["page"]["id"]})["text"])
+        # a transcript that arrives after its summary was filed does not bring the meeting back
+        desk.notes({"action": "file", "note": meeting["id"], "deal": dana["id"], "summary": "Renewal agreed in principle."})
+        (deep / "2026-11-12 Northwind renewal - Transcript.srt").write_text("1\n00:00:01,000 --> 00:00:02,000\nLate file.\n")
+        self.assertNotIn(meeting["id"], [n["id"] for n in desk.notes({"action": "inbox"})["notes"]])
+        check = desk.notes_check(str(root))
+        self.assertEqual((check["count"], check["audio"], check["handed"]), (6, 1, 0))
+        self.assertIn("1 recording has no words yet", check["message"])
+
+    def test_a_note_says_who_it_is_about_at_its_head_or_in_what_it_says(self):
+        (self.notes_dir / "weekly.md").write_text("---\ntitle: Weekly sync\ndate: 2026-10-30\nattendees:\n  - Priya Nair <priya@larkspur.example>\n  - Me\n---\n\nNothing about anyone by name.\n")
+        (self.notes_dir / "voice memo 7.txt").write_text("Rang the people at Corvid Health about the pilot. They want a call next week.\n")
+        priya = self.desk.deal({"action": "add", "name": "Priya Nair", "email": "priya@larkspur.example"})["deal"]
+        corvid = self.desk.deal({"action": "add", "name": "Lena Ortiz", "company": "Corvid Health"})["deal"]
+        notes = {n["title"]: n for n in self.desk.notes({"action": "inbox"})["notes"]}
+        self.assertEqual((notes["Weekly sync"]["when"][:10], notes["Weekly sync"]["suggested"][0]), ("2026-10-30", {"id": priya["id"], "name": "Priya Nair", "why": "attendee email"}))
+        self.assertEqual(notes["voice memo 7"]["suggested"][0], {"id": corvid["id"], "name": "Lena Ortiz", "why": "company named in the note"})
+        self.assertEqual(notes["groceries"]["suggested"], [])
+        seen = self.desk.notes_preview()      # the same list for the page, with no note's words in it
+        self.assertEqual((seen["waiting"], seen["matched"]), (5, 3))
+        self.assertNotIn("Rang the people", json.dumps(seen))
+
+    def test_a_filed_note_stays_filed_when_its_file_is_edited_saved_again_renamed_or_moved(self):
+        import hashlib, os
+        path = self.notes_dir / "2026-11-10 dana.md"
+        note = [n for n in self.desk.notes({"action": "inbox"})["notes"] if n["title"] == "Call with Dana Whitfield"][0]
+        self.desk.notes({"action": "file", "note": note["id"], "deal": self.deal["id"], "summary": "Wants to move by January."})
+        waiting = lambda: [n["title"] for n in self.desk.notes({"action": "inbox"})["notes"]]
+        self.assertNotIn("Call with Dana Whitfield", waiting())
+        logged = len(self.desk.store.activities(self.deal["id"], limit=50))
+        os.utime(path, (path.stat().st_atime, path.stat().st_mtime + 3600))      # a sync tool saves it again, unchanged
+        self.assertNotIn("Call with Dana Whitfield", waiting())
+        path.write_text(path.read_text() + "\nShe prefers remote.\n")      # the person adds a line
+        self.assertNotIn("Call with Dana Whitfield", waiting())
+        self.assertEqual(len(self.desk.store.activities(self.deal["id"], limit=50)), logged)      # and nothing more went on the record
+        # the same note under another name, in another folder the desk also reads
+        other = self.notes_dir / "archive"
+        other.mkdir()
+        fresh = self.notes_dir / "intro with sam.md"
+        fresh.write_text("# Intro with Sam Ito\n\nWants a call next week.\n")
+        sam = [n for n in self.desk.notes({"action": "inbox"})["notes"] if n["title"] == "Intro with Sam Ito"][0]
+        self.desk.notes({"action": "skip", "note": sam["id"]})
+        fresh.rename(other / "Sam Ito - first call.md")
+        self.assertNotIn("Intro with Sam Ito", waiting())
+        # a note filed by a version that knew a file by its path, size and time is still known as filed, and stays so
+        old = self.notes_dir / "older.md"
+        old.write_text("# Older call\n")
+        stat = old.stat()
+        legacy = "file:" + hashlib.sha1(("%s|%d|%d" % (old, stat.st_size, int(stat.st_mtime))).encode()).hexdigest()[:12]
+        self.desk.store.mark_note(legacy, self.deal["id"])
+        self.assertNotIn("Older call", waiting())
+        (self.notes_dir / "second.md").write_text("# Second older call\n")      # and one that is renamed and moved after the update
+        stat = (self.notes_dir / "second.md").stat()
+        self.desk.store.mark_note("file:" + hashlib.sha1(("%s|%d|%d" % (self.notes_dir / "second.md", stat.st_size, int(stat.st_mtime))).encode()).hexdigest()[:12], self.deal["id"])
+        self.assertNotIn("Second older call", waiting())      # the first listing after the update takes its mark
+        (self.notes_dir / "second.md").rename(other / "renamed later.md")
+        self.assertNotIn("Second older call", waiting())
+        old.write_text("# Older call\n\nEdited after the update.\n")
+        self.assertNotIn("Older call", waiting())
+
+    def test_a_handled_note_is_gone_through_again_only_when_asked(self):
+        note = [n for n in self.desk.notes({"action": "inbox"})["notes"] if n["title"] == "Call with Dana Whitfield"][0]
+        self.desk.notes({"action": "file", "note": note["id"], "deal": self.deal["id"], "summary": "Wants to move by January."})
+        listed = self.desk.notes({"action": "inbox", "include_filed": True})
+        self.assertNotIn("handled", self.desk.notes({"action": "inbox"}))
+        row = [h for h in listed["handled"] if h["id"] == note["id"]][0]
+        self.assertEqual((row["title"], row["filed_on"]), ("Call with Dana Whitfield", "Dana Whitfield"))
+        again = self.desk.notes({"action": "reopen", "note": note["id"]})
+        self.assertTrue(again["ok"])
+        self.assertIn("add only what is new", again["note"])
+        self.assertIn("Call with Dana Whitfield", [n["title"] for n in self.desk.notes({"action": "inbox"})["notes"]])
+        self.assertEqual(len([a for a in self.desk.store.activities(self.deal["id"]) if a["ref"] == note["id"]]), 1)      # what was filed is still there
+        self.assertFalse(self.desk.notes({"action": "reopen", "note": "file:nothing"})["ok"])
+
+    def test_several_folders_can_be_read_and_one_taken_away(self):
+        second = Path(self.tmp.name) / "obsidian" / "Meetings"
+        second.mkdir(parents=True)
+        (second / "intro.md").write_text("# Intro call\n")
+        added = self.desk.notes_folder(str(second), "add")
+        self.assertEqual((added["ok"], added["folders"]), (True, [str(self.notes_dir), str(second)]))
+        self.assertEqual(self.desk.note_folders(), [str(self.notes_dir), str(second)])
+        self.assertIn("already on the list", self.desk.notes_folder(str(second), "add")["message"])
+        self.assertIn("Intro call", [n["title"] for n in self.desk.notes({"action": "inbox"})["notes"]])
+        setup = self.desk.setup()
+        self.assertEqual([row["folder"] for row in setup["notes"]["folders"]], [str(self.notes_dir), str(second)])
+        self.assertIn("Reading 2 folders.", [c["detail"] for c in setup["checklist"] if c["id"] == "notes"])
+        self.assertEqual([tool["id"] for tool in setup["notes"]["tools"]], ["plaud", "obsidian", "granola", "fireflies", "other"])
+        self.assertFalse(self.desk.notes_folder(str(Path(self.tmp.name) / "nowhere"), "add")["ok"])
+        self.assertEqual(self.desk.notes_folder(str(self.notes_dir), "remove")["folders"], [str(second)])
+        self.assertEqual(self.desk.notes_folder("")["folders"], [])
+        gone = make_desk(self.tmp.name, config={"notes_dir": str(Path(self.tmp.name) / "deleted")})
+        self.assertIn("is not there any more", gone.notes({"action": "inbox"})["problems"][0])
+
+    def test_fireflies_notes(self):
+        sent = []
+
+        def http(url, headers=None, params=None, data=None, timeout=30):
+            self.assertEqual((url, headers), ("https://api.fireflies.ai/graphql", {"Authorization": "Bearer f"}))
+            sent.append(data)
+            if "transcripts(" in data["query"]:
+                return 200, {"data": {"transcripts": [{"id": "ff1", "title": "Northwind renewal", "dateString": "2026-11-12T16:00:00.000Z",
+                                                       "participants": ["dana@example.com", "me@example.com"], "transcript_url": "https://app.fireflies.ai/view/ff1",
+                                                       "meeting_attendees": [{"displayName": "Dana Whitfield", "email": "Dana@Example.com"}]}]}}
+            return 200, {"data": {"transcript": {"id": "ff1", "title": "Northwind renewal", "dateString": "2026-11-12T16:00:00.000Z",
+                                                 "summary": {"overview": "Renewal agreed.", "action_items": "Dana: send the order form", "shorthand_bullet": ["Sign in March"]}}}}
+        desk = make_desk(self.tmp.name, secrets={"FIREFLIES_API_KEY": "f"}, http=http)
+        desk.deal({"action": "update", "deal": self.deal["id"], "email": "dana@example.com"})
+        note = desk.notes({"action": "inbox"})["notes"][0]
+        self.assertEqual((note["id"], note["source"], note["suggested"][0]["why"]), ("fireflies:ff1", "fireflies", "attendee email"))
+        self.assertEqual(sent[0]["variables"]["limit"], 50)
+        self.assertNotIn("sentences", sent[0]["query"])      # the transcript is never asked for
+        text = desk.notes({"action": "read", "note": "fireflies:ff1"})["text"]
+        self.assertEqual(text, "Renewal agreed.\n\n## Action items\nDana: send the order form\n\n## Notes\nSign in March")
+        self.assertNotIn("sentences", sent[-1]["query"])
+        self.assertEqual(desk.key_test("fireflies")["state"], "works")
+        refused = make_desk(self.tmp.name, secrets={"FIREFLIES_API_KEY": "bad"}, http=lambda *a, **k: (200, {"errors": [{"message": "Invalid API key", "code": "auth_failed"}]}))
+        self.assertEqual(refused.key_test("fireflies")["state"], "rejected")
+        self.assertEqual(refused.notes({"action": "inbox"})["problems"], ["Fireflies rejected the API key"])
+
+    def test_notes_in_a_connection_of_hermess_own_are_filed_once(self):
+        desk = make_desk(self.tmp.name, config={"notes_connections": "Plaud, my notion!"})
+        self.assertEqual(desk.note_connections(), ["plaud", "mynotion"])
+        inbox = desk.notes({"action": "inbox"})
+        self.assertEqual(inbox["connections"], ["plaud", "mynotion"])
+        self.assertIn("gtm_notes(action='known'", inbox["connections_how"])
+        self.assertNotIn("hint", inbox)
+        dana = desk.deal({"action": "add", "name": "Dana Whitfield"})["deal"]
+        self.assertEqual(desk.notes({"action": "known", "notes": ["plaud:a1", "plaud:b2"]})["new"], ["plaud:a1", "plaud:b2"])
+        self.assertFalse(desk.notes({"action": "read", "note": "plaud:a1"})["ok"])      # Stoa cannot read it: the agent does, with Plaud's tools
+        filed = desk.notes({"action": "file", "note": "plaud:a1", "deal": dana["id"], "summary": "Wants to start in January."})
+        self.assertTrue(filed["ok"])
+        desk.notes({"action": "skip", "note": "plaud:b2"})
+        again = desk.notes({"action": "known", "notes": ["plaud:a1", "plaud:b2", "plaud:c3"]})
+        self.assertEqual((again["new"], again["already_handled"]), (["plaud:c3"], ["plaud:a1", "plaud:b2"]))
+        self.assertEqual(desk.notes_connections("")["connections"], [])
 
     def test_granola_notes(self):
         def http(url, headers=None, params=None, timeout=30):
@@ -1131,7 +1306,7 @@ class SetupTests(unittest.TestCase):
         desk.store.bump("pdl_calls:" + dt.date.today().isoformat()[:7], 3)
         data = desk.setup()
         keys = {row["id"]: row for row in data["keys"]}
-        self.assertEqual([row["id"] for row in data["keys"]], ["exa", "pdl", "granola"])
+        self.assertEqual([row["id"] for row in data["keys"]], ["exa", "pdl", "granola", "fireflies"])
         self.assertEqual((keys["exa"]["set"], keys["pdl"]["set"], keys["granola"]["set"]), (False, True, False))
         self.assertEqual(keys["pdl"]["note"], "3 of 80 lookups used this month.")
         for row in data["keys"]:

@@ -29,9 +29,10 @@ BLUEPRINTS = [
         schedule_template="0 {hours} * * 1-5",
         prompt_template=("Load the skill stoa:desk. Call gtm_notes(action=\"inbox\"). For each waiting note: read it, and if "
                          "it is about a record on the desk, file a two or three sentence summary on that record with the "
-                         "next step it implies; skip notes that are not about the pipeline. Then report what you filed and "
-                         "any stage changes you recommend. Do not change stages yourself. If the inbox is empty, reply "
-                         "with exactly [SILENT]."),
+                         "next step it implies; skip notes that are not about the pipeline. If the inbox names connections, "
+                         "do what its connections_how says for the notes kept there. Then report what you filed and "
+                         "any stage changes you recommend. Do not change stages yourself. If there was nothing new anywhere, "
+                         "reply with exactly [SILENT]."),
         slots=[{"name": "hours", "type": "text", "label": "Which hours? (cron hour list)", "default": "11,14,17"}, DELIVER],
         tags=["gtm", "notes"],
     ),

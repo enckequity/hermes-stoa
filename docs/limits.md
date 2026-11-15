@@ -75,6 +75,13 @@
 - The models picked under the dock and for map research are kept per computer and apply to the
   page's own two conversations only: Slack, scheduled jobs and other chats stay on Hermes's default. The list shows a price where
   Hermes has one for that provider, which it does not for every provider.
+- Notes in a folder are matched to a record by what is written: a name in a file's title, attendees
+  at its head, or a person or company named in the text. A recording alone, with no transcript or
+  summary exported, cannot be read. A filed note stays filed when its file is edited, saved again,
+  renamed or moved, so a change made to a note afterwards is not picked up by itself: ask Hermes to
+  go through that note again. Fireflies has been built from its documentation and tested
+  against a stand-in, not a live Fireflies account. Reading notes through a connector of Hermes's
+  own (Plaud's) is new and has not been run against a real Plaud account.
 - The dock on the page runs a turn of your agent's model, the same as typing in a chat. A file
   handed to it goes to Hermes as it would from the chat box, so what Hermes makes of a PDF, a Word
   file or a picture depends on the model and tools your Hermes has. A file over 25 MB, or more than

@@ -1,5 +1,5 @@
 name: stoa
-version: 0.22.1
+version: 0.23.0
 manifest_version: 2
 api_version: 1
 description: >-
@@ -58,7 +58,12 @@ config_schema:
     type: str
     default: ""
     label: Meeting notes folder
-    description: "A folder of Markdown or text call notes to watch (an Obsidian folder, a recorder's export folder). Optional."
+    description: "The folder your call notes are saved in: an Obsidian folder, or wherever a recorder such as Plaud exports to. Several folders, with a semicolon between them. Reads Markdown, text, Word and subtitle files, three folders deep. Optional; easier to set on the Stoa page, under Setup."
+  notes_connections:
+    type: str
+    default: ""
+    label: Note connections
+    description: "Optional. The names of connectors Hermes already has that hold call notes (for example: plaud), with commas between. Hermes then looks there on a notes sweep, with that connector's own tools."
   notes_days:
     type: int
     default: 7
@@ -84,3 +89,8 @@ config_schema:
     env: GRANOLA_API_KEY
     label: Granola API key
     description: "Optional. Adds your Granola call notes to the notes inbox. Made in the Granola app: Settings, Connectors, API keys."
+  fireflies_api_key:
+    type: secret
+    env: FIREFLIES_API_KEY
+    label: Fireflies API key
+    description: "Optional. Adds your Fireflies meetings to the notes inbox (summaries and action items, never the transcript). In Fireflies: Integrations, Fireflies API."

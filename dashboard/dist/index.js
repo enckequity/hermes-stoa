@@ -112,15 +112,16 @@
 
   function Notes(props) {
     var notes = props.notes || {};
-    var _f = useState(notes.folder || ""), folder = _f[0], setFolder = _f[1];
+    var _f = useState(""), folder = _f[0], setFolder = _f[1];
+    var folders = notes.folders || [];
     var _m = useState(null), found = _m[0], setFound = _m[1];
     var _b = useState(false), busy = _b[0], setBusy = _b[1];
     function run(promise) { setBusy(true); return promise.catch(function (e) { props.say("Stoa could not do that: " + why(e)); }).then(function () { setBusy(false); }); }
     function check() { return run(post("/notes/check", { folder: folder }).then(setFound)); }
-    function save(value) {
-      return run(post("/notes/folder", { folder: value }).then(function (r) {
-        props.say(r.ok ? (value ? "Stoa now reads call notes from that folder." : "Stoa no longer reads a notes folder.") : r.error || r.message || "Stoa could not save that.");
-        if (r.ok) { setFound(null); return props.refresh(); }
+    function save(value, verb) {
+      return run(post("/notes/folder", { folder: value, verb: verb || "add" }).then(function (r) {
+        props.say(r.message || (r.ok ? "Saved." : "Stoa could not save that."));
+        if (r.ok) { setFound(null); if (verb !== "remove") setFolder(""); return props.refresh(); }
       }));
     }
     function look() {
@@ -131,21 +132,27 @@
       }));
     }
     return h("div", null,
-      h("p", { className: "stoa-p" }, "Each note is filed on the record it is about, with the next step it implies. Notes can come from a folder on the computer Hermes runs on (files ending in .md or .txt, such as an Obsidian folder), from Granola, or both."),
-      h("label", { className: "stoa-label", htmlFor: "stoa-notes" }, "The folder your notes are saved in"),
+      h("p", { className: "stoa-p" }, "Each note is filed on the record it is about, with the next step it implies. Notes come from folders on the computer Hermes runs on (an Obsidian folder, or wherever a recorder such as Plaud exports to), from Granola or Fireflies with a key, or from a connector Hermes already has. The Stoa page has the steps for each tool and shows what would be picked up."),
+      folders.length ? h("div", { className: "stoa-rows" }, folders.map(function (row) {
+        return h("div", { className: "stoa-row", key: row.folder },
+          h("span", null, h("b", null, row.folder), h("small", null, row.message)),
+          h("span", { className: "stoa-tag", "data-on": row.ok && row.count ? "1" : "0" }, row.ok ? plural(row.count || 0, "note", "notes") : "cannot read"),
+          h("span", { style: { textAlign: "right" } }, h(Btn, { kind: "ghost", disabled: busy, onClick: function () { save(row.folder, "remove"); } }, "Remove")));
+      })) : null,
+      h("label", { className: "stoa-label", htmlFor: "stoa-notes" }, folders.length ? "Add another folder" : "The folder your notes are saved in"),
       h("div", { className: "stoa-line" },
         h("input", { id: "stoa-notes", className: "stoa-input", value: folder, placeholder: "/Users/you/Documents/Meeting notes", spellCheck: false,
           onChange: function (e) { setFolder(e.target.value); setFound(null); } }),
         h(Btn, { disabled: busy || !folder.trim(), onClick: check }, "Check"),
-        h(Btn, { kind: "primary", disabled: busy || !folder.trim() || notes.can_save === false, onClick: function () { save(folder.trim()); } }, "Save")),
-      h("p", { className: "stoa-p" }, "On a Mac, to copy a folder's path: in Finder, right-click the folder, hold the Option key and choose Copy as Pathname."),
+        h(Btn, { kind: "primary", disabled: busy || !folder.trim() || notes.can_save === false, onClick: function () { save(folder.trim(), "add"); } }, "Add folder")),
+      h("p", { className: "stoa-p" }, "On a Mac, to copy a folder's path: in Finder, right-click the folder, hold the Option key and choose Copy as Pathname. Stoa reads Markdown, text, Word and subtitle files, three folders deep; a PDF is handed to Hermes to read."),
       found ? h("p", { className: "stoa-p", "data-tone": found.ok ? "good" : "bad" }, found.message || (found.ok ? plural(found.count || 0, "note", "notes") + " found there." : "Stoa cannot read that folder.")) : null,
-      notes.folder && !found ? h("p", { className: "stoa-p", "data-tone": notes.ok ? "good" : "bad" }, notes.ok ? "Reading " + plural(notes.count || 0, "note", "notes") + " from " + notes.folder + "." : notes.message || "Stoa cannot read " + notes.folder + ".") : null,
       notes.can_save === false ? h("p", { className: "stoa-p" }, "This page cannot save the setting here. Ask Hermes: “Set Stoa's notes folder to " + (folder.trim() || "…") + "”.") : null,
       h("div", { className: "stoa-btns" },
-        h(Btn, { kind: "ghost", disabled: busy, title: "Tries Documents, Obsidian and Notes, and offers any that hold notes. It counts the notes and opens none.", onClick: look }, "Look for a folder"),
-        notes.folder ? h(Btn, { kind: "ghost", disabled: busy, onClick: function () { setFolder(""); save(""); } }, "Stop reading this folder") : null),
-      h("p", { className: "stoa-p" }, notes.granola ? "Granola: a key is set, so your Granola notes are read too." : "Granola: add a Granola key under step 3 and its notes are read too."));
+        h(Btn, { kind: "ghost", disabled: busy, title: "Tries Documents, Plaud, Obsidian and Notes, and offers any that hold notes. It counts the notes and opens none.", onClick: look }, "Look for a folder")),
+      h("p", { className: "stoa-p" }, [notes.granola ? "Granola: a key is set, so its notes are read too." : "", notes.fireflies ? "Fireflies: a key is set, so its meetings are read too." : "",
+        (notes.connections || []).length ? "Through Hermes: " + notes.connections.join(", ") + "." : "",
+        !notes.granola && !notes.fireflies ? "For Granola or Fireflies, add its key under step 3." : ""].filter(Boolean).join(" ")));
   }
 
   function Jobs(props) {

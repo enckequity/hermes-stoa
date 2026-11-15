@@ -1586,6 +1586,29 @@ class Store:
         with self._conn() as conn:
             conn.execute("INSERT OR REPLACE INTO notes_seen (id, at, deal_id) VALUES (?,?,?)", (note_id, now(), deal_id))
 
+    def note_handled(self, ids: list) -> Optional[dict]:
+        """The first of these note ids that was filed or skipped, as ``{id, at, deal_id}``; None when none was."""
+        ids = [i for i in ids if i]
+        if not ids:
+            return None
+        with self._conn() as conn:
+            row = conn.execute("SELECT id, at, deal_id FROM notes_seen WHERE id IN (%s) ORDER BY at LIMIT 1" % ",".join("?" * len(ids)), ids).fetchone()
+        return {"id": row[0], "at": row[1], "deal_id": row[2]} if row else None
+
+    def unmark_notes(self, ids: list) -> int:
+        """Forget that these notes were filed or skipped, so they wait again. Returns how many marks were removed."""
+        ids = [i for i in ids if i]
+        if not ids:
+            return 0
+        with self._conn() as conn:
+            return conn.execute("DELETE FROM notes_seen WHERE id IN (%s)" % ",".join("?" * len(ids)), ids).rowcount
+
+    def notes_handled(self, since: str) -> list:
+        """Notes filed or skipped since a time, newest first: ``{id, at, deal_id}``."""
+        with self._conn() as conn:
+            rows = conn.execute("SELECT id, at, deal_id FROM notes_seen WHERE at >= ? ORDER BY at DESC LIMIT 200", (since,)).fetchall()
+        return [{"id": r[0], "at": r[1], "deal_id": r[2]} for r in rows]
+
     def meta_get(self, key: str, default: str = "") -> str:
         with self._conn() as conn:
             row = conn.execute("SELECT v FROM meta WHERE k = ?", (key,)).fetchone()

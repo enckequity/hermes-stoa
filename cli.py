@@ -93,7 +93,7 @@ def _run(desk, args, command) -> None:
             print("  open value    %s" % cards.money(value, playbook.currency))
         print("  data          %s" % (desk.data_dir / (tour["file"] if tour else desk.own_file())))
         print("  enrichment    %s" % ("People Data Labs connected" if desk.can_enrich() else "off (set PDL_API_KEY)"))
-        notes_dir = desk.setting("notes_dir", "")
+        notes_dir = "; ".join(desk.note_folders())
         print("  notes folder  %s" % (notes_dir or "not set (notes_dir)"))
         print("  Granola       %s" % ("connected" if desk.secret("GRANOLA_API_KEY") else "off (set GRANOLA_API_KEY)"))
     elif command == "board":

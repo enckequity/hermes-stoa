@@ -53,6 +53,9 @@ The pictures show the sample map that comes with the tour; every company in it i
 
 ## And the desk behind it
 
+- **Your call notes, wherever they are.** Plaud, Obsidian, Granola, Fireflies, or any recorder that
+  saves a file. Point Stoa at the folder (or add a key), see at once which record each note is
+  about, and Hermes files it there with the next step it implies.
 - **Send it anything.** A PDF of leads, a spreadsheet, a photo of a sign-up sheet. Hermes reads it,
   Stoa shows what it would add and what it would change, and nothing is written until you press Apply.
 - **Click a button, the stage changes at once.** No model in the loop, no waiting, no wrong stage.
@@ -122,15 +125,17 @@ In Slack the command is `!gtm` (Slack keeps the slash for its own commands), and
 
 What the plugin does that you would want to know before installing it:
 
-- **Network calls.** Only when you add the matching key, and only to three hosts:
+- **Network calls.** Only when you add the matching key, and only to four hosts:
   `api.peopledatalabs.com` (the name, email, LinkedIn URL or company of the one record being
   enriched, or a company name and job titles for a buyer lookup), `api.exa.ai` (the search
-  phrase for a market-map search) and `public-api.granola.ai` (reads your note list and note
-  summaries; transcripts are never requested). No telemetry, no usage reporting, no other
+  phrase for a market-map search), `public-api.granola.ai` (reads your note list and note
+  summaries; transcripts are never requested) and `api.fireflies.ai` (reads your recent meetings'
+  titles, dates and attendees, and one meeting's summary and action items when it is read; the
+  transcript, audio and video are never requested). No telemetry, no usage reporting, no other
   outbound requests. Research the agent does with its own web tools is Hermes's, not the plugin's.
   Pressing **Test** beside a key on the Setup page makes one small request to that key's service:
   a lookup for a made-up address at People Data Labs (it bills a match only, so this is free), one
-  search for one result at Exa (billed like any search), or the first page of your note list at Granola.
+  search for one result at Exa (billed like any search), the first page of your note list at Granola, or the id of one meeting at Fireflies.
 - **Dictation.** The microphone in the page's dock uses your browser's own speech recognition,
   not anything of the plugin's or the agent's. In Chrome that means the audio goes to Google's
   speech service while you dictate. It listens only while the button is on, and the button is not
@@ -153,7 +158,7 @@ What the plugin does that you would want to know before installing it:
   list and can spend a paid lookup, so a press is taken only from the person the card was posted
   for, or, when you list people in `slack_users`, only from them, and only in a chat the desk is
   available in. Anyone else gets a private "Not allowed" and nothing changes.
-- **Credentials.** `PDL_API_KEY`, `EXA_API_KEY` and `GRANOLA_API_KEY` are read through Hermes's secret scope
+- **Credentials.** `PDL_API_KEY`, `EXA_API_KEY`, `GRANOLA_API_KEY` and `FIREFLIES_API_KEY` are read through Hermes's secret scope
   (`agent.secret_scope.get_secret`). The plugin reads no `.env` or credential file. A button click
   or a web-tab request arrives outside any chat turn; on a gateway serving several profiles the
   plugin then installs its own profile's scope around the read, the way Hermes does for its own
@@ -201,8 +206,13 @@ What the plugin does that you would want to know before installing it:
   says a tour is on, and one `tour-<id>.db` holding the made-up records. Both are deleted when
   you leave. While they are there the plugin does not read or write your own `desk.db`, apart
   from counting what is in it for the Setup tab.
-- **Files outside the plugin's own data.** It reads Markdown and text files in the folder you
-  set as `notes_dir`. By path it reads only `.csv` and `.tsv` files, and only from the plugin's
+- **Files outside the plugin's own data.** It reads call notes in the folders you set as
+  `notes_dir` (up to eight), each and up to three folders below it: Markdown, text, Word (`.docx`),
+  subtitle (`.srt`, `.vtt`), web-page and rich-text files. Listing the notes waiting (on a sweep,
+  or when you press **See what is waiting** on Setup) opens the first part of each to see which
+  record it names; the rest is read when the agent reads that note. A PDF there is not opened by
+  the plugin: its path is given to the agent, which reads it with its own tools. Recordings are
+  counted and never opened. By path it reads only `.csv` and `.tsv` files, and only from the plugin's
   own `imports/` folder, the folder you name in `import_dir`, and the working directory when that
   is a project folder; a path the agent passes anywhere else is refused. (At a terminal,
   `hermes stoa import <file>` reads the CSV you name.) It writes nowhere outside its own data
@@ -210,10 +220,16 @@ What the plugin does that you would want to know before installing it:
   folder, and a file name is all the agent can choose.
   On the Setup page, **Check** counts the note files in a folder you name, and **Look for a folder**
   does the same for a short fixed list of usual places (`~/Documents/Meeting notes`,
-  `~/Documents/Meetings`, `~/Documents/Notes`, `~/Documents/Obsidian`, `~/Obsidian`, the iCloud
-  Obsidian folder, `~/Documents/Granola`, `~/Notes`), only when you press it. Neither opens a note.
-  **Save** there stores the folder as the plugin's own `notes_dir` setting, the way Hermes saves
-  any plugin setting.
+  `~/Documents/Meetings`, `~/Documents/Call notes`, `~/Documents/Notes`, `~/Documents/Plaud`,
+  `~/Plaud`, `~/Documents/Transcripts`, `~/Documents/Obsidian`, `~/Obsidian`, the iCloud Obsidian
+  folder, `~/Documents/Granola`, `~/Notes`), only when you press it. Neither opens a note.
+  **Add folder** there stores the folder in the plugin's own `notes_dir` setting, the way Hermes
+  saves any plugin setting.
+- **Notes in a connector of Hermes's own.** If you list a connector under `notes_connections`
+  (for example Plaud's), the plugin does not contact it and holds no access to it. The notes inbox
+  tells the agent that notes live there; the agent reads them with that connector's own tools and
+  files a short summary on the desk. The plugin stores only the id the agent gives each note, so
+  none is filed twice.
 - **Hermes's scheduled jobs.** To show which of its automations are switched on, Setup reads the
   name, schedule and on-or-off state of this profile's scheduled jobs. It changes none of them.
 - **Messages to the agent.** With `allow_gateway_injection` granted, a button click queues one

@@ -625,8 +625,26 @@ def notes_look() -> dict:
 
 @router.post("/notes/folder")
 def notes_folder(body: dict = Body(...)) -> dict:
-    """Save (or, with an empty one, clear) the folder Stoa reads call notes from."""
-    result = desk().notes_folder(body.get("folder"))
+    """Change the folders Stoa reads call notes from: ``verb`` is ``add``, ``remove`` or ``set`` (the default: one folder, or
+    none with an empty one)."""
+    result = desk().notes_folder(body.get("folder"), body.get("verb") or "set")
+    if result.get("ok"):
+        desk().announce()
+    return result
+
+
+@router.get("/notes/preview")
+def notes_preview() -> dict:
+    """What the next notes sweep would pick up: the notes waiting, newest first, each with the record it looks to be
+    about. No model is involved, and no note's text is in the answer. With a Granola or Fireflies key set this asks
+    that service for its recent notes, as a sweep would."""
+    return desk().notes_preview()
+
+
+@router.post("/notes/connections")
+def notes_connections(body: dict = Body(...)) -> dict:
+    """Save which of Hermes's own connections hold call notes (names only)."""
+    result = desk().notes_connections(body.get("connections"))
     if result.get("ok"):
         desk().announce()
     return result

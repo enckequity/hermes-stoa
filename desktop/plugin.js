@@ -984,6 +984,19 @@ const CSS = `
 .stoa-stepbody .stoa-setrow:first-child { border-top: 0; padding-top: 4px; }
 .stoa-ways { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px 24px; }
 .stoa-pathrow { display: flex; gap: 6px; align-items: center; }
+.stoa-notepick { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
+.stoa-notepick .stoa-btn[data-on="1"] { background: var(--ui-text-primary); border-color: var(--ui-text-primary); color: var(--stoa-page); }
+.stoa-noteway { margin-top: 10px; padding: 12px 14px; border: 1px dotted var(--ui-stroke-primary); border-radius: var(--stoa-r); }
+.stoa-notesteps { margin: 0 0 10px; padding-left: 22px; list-style: decimal outside; } .stoa-notesteps li { margin: 4px 0; padding-left: 2px; }
+.stoa-noteconn { margin-top: 14px; padding-top: 12px; border-top: 1px dotted var(--ui-stroke-primary); }
+.stoa-linkbtn { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.stoa-linkbtn:disabled { opacity: .5; cursor: default; }
+.stoa-notewait { margin-top: 16px; padding-top: 12px; border-top: 1px dotted var(--ui-stroke-primary); }
+.stoa-noterow { display: grid; grid-template-columns: 54px minmax(0, 1fr) minmax(0, 220px); gap: 10px; align-items: start; padding: 7px 0; border-bottom: 1px dotted var(--ui-stroke-primary); }
+.stoa-notematch { text-align: right; min-width: 0; } .stoa-notematch b { display: block; font-weight: 550; overflow-wrap: anywhere; }
+.stoa-notematch small { display: block; font-size: 12px; color: var(--ui-text-secondary); }
+.stoa-notematch[data-on="1"] b::before { content: "→ "; color: var(--stoa-accent); }
+@container (max-width: 620px) { .stoa-noterow { grid-template-columns: 54px minmax(0, 1fr); } .stoa-notematch { grid-column: 2; text-align: left; } }
 .stoa-pathrow .stoa-field { flex: 1; min-width: 0; margin-top: 0; font-family: var(--stoa-mono); }
 .stoa-code { padding: 1px 5px; border: 1px solid var(--ui-stroke-secondary); border-radius: var(--stoa-r); font-family: var(--stoa-mono); font-size: 11.5px; white-space: nowrap; }
 .stoa-linkbtn { padding: 0; border-width: 0 0 1px; background: transparent; font: inherit; cursor: pointer; }
@@ -2818,46 +2831,123 @@ function Step({ id, done, optional, plain, title, status, open: openFirst, child
     open ? h('div', { className: 'stoa-stepbody', 'data-plain': plain ? '1' : '0' }, children) : null)
 }
 
-/** Call notes kept as files: name the folder here, check it, save it. Nothing to edit by hand and no setting to find. */
-function NotesFolder({ setup }) {
+/** Where call notes come from, on Setup. Pick where your notes live and it shows the way in for that tool; the folders,
+    keys and connections in use are listed under it; and "what Stoa would pick up" shows the notes waiting and the record
+    each looks to be about, before any sweep has run. Nothing here involves a model except the button that hands the
+    waiting notes to Hermes. */
+function NotesSources({ setup }) {
   const notes = setup.notes || {}
-  const [path, setPath] = useState(notes.folder || '')
+  const tools = notes.tools || []
+  const folders = notes.folders || []
+  const connections = notes.connections || []
+  const anything = folders.length || notes.granola || notes.fireflies || connections.length
+  const [pick, setPick] = useState('')
+  const [path, setPath] = useState('')
   const [result, setResult] = useState(null)
   const [found, setFound] = useState(null)
   const [busy, setBusy] = useState('')
+  const [looked, setLooked] = useState(false)
+  const preview = useQuery({ queryKey: ['stoa', 'notes-preview'], queryFn: () => rest('/notes/preview'), enabled: looked, staleTime: 5000 })
+  const tool = tools.find(item => item.id === pick)
   const call = (what, promise) => {
     setBusy(what)
     return promise.catch(error => ({ ok: false, message: 'Stoa could not do that: ' + why(error) })).then(answer => { setBusy(''); return answer })
   }
+  const again = () => { refresh(); queryClient.invalidateQueries({ queryKey: ['stoa', 'notes-preview'] }) }
   const check = () => call('check', rest('/notes/check', { method: 'POST', body: { folder: path } })).then(setResult)
-  const save = folder => call('save', rest('/notes/folder', { method: 'POST', body: { folder } })).then(answer => {
+  const add = folder => call('save', rest('/notes/folder', { method: 'POST', body: { folder, verb: 'add' } })).then(answer => {
     setResult(answer)
-    if (answer.ok) { setPath(answer.folder || ''); setFound(null); refresh() }
+    if (answer.ok) { setPath(''); setFound(null); setLooked(true); again() }      // and straight away: what is in it, and who it matches
   })
+  const drop = folder => call('save', rest('/notes/folder', { method: 'POST', body: { folder, verb: 'remove' } })).then(answer => { setResult(answer); if (answer.ok) again() })
+  const connect = names => call('connect', rest('/notes/connections', { method: 'POST', body: { connections: names } })).then(answer => { setResult(answer); if (answer.ok) again() })
   const look = () => call('look', rest('/notes/look')).then(answer => { setResult(null); setFound(answer.found || []) })
+  const fileNow = () => {
+    if (toChat('Go through the notes inbox on the Stoa desk. Read each waiting note, file it on the record it is about with a short summary and the next step it implies, and skip any that is not about the pipeline. Then tell me what you filed, and any stage change you would recommend. Do not change a stage yourself.'))
+      host.notify({ kind: 'info', message: 'Hermes is going through your notes. The conversation above the talk box shows what it files.' })
+  }
   const typed = path.trim()
-  return h('div', null,
-    notes.folder ? h('p', { style: { margin: '0 0 8px' } }, h(Chip, { tone: notes.ok ? 'good' : 'bad' }, notes.ok ? 'reading' : 'cannot read'), '  ' + notes.folder,
-      h('span', { className: 'stoa-sub' }, '  ' + (notes.message || ''))) : null,
-    h('p', { className: 'stoa-sub', style: { margin: '0 0 8px' } }, 'Any folder on the computer Hermes runs on where notes are saved as files ending in .md or .txt: an Obsidian folder, or wherever your meeting recorder saves its notes.'),
+  const day = stamp => { const d = new Date(String(stamp || '').slice(0, 10) + 'T12:00:00'); return isNaN(d) ? '' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) }
+  const where = { folder: 'a folder', granola: 'Granola', fireflies: 'Fireflies' }
+  const addRow = hint => h('div', null,
     h('div', { className: 'stoa-pathrow' },
-      h('input', { className: 'stoa-field', value: path, placeholder: '~/Documents/Meeting notes', 'aria-label': 'The folder your notes are saved in', spellCheck: false,
+      h('input', { className: 'stoa-field', value: path, placeholder: hint || '~/Documents/Meeting notes', 'aria-label': 'The folder your notes are saved in', spellCheck: false,
         onChange: event => { setPath(event.target.value); setResult(null) }, onKeyDown: event => { if (event.key === 'Enter' && typed) check() } }),
-      h(Btn, { disabled: !typed || Boolean(busy), onClick: check }, busy === 'check' ? 'Checking…' : 'Check'),
-      h(Btn, { kind: 'primary', disabled: !typed || Boolean(busy) || typed === notes.folder, onClick: () => save(path) }, busy === 'save' ? 'Saving…' : 'Save')),
-    result ? h('div', { role: 'status', style: { marginTop: 8 } }, h(Chip, { tone: result.ok ? 'good' : 'bad' }, result.ok ? (result.saved ? 'saved' : result.folder ? 'found' : 'done') : 'not yet'), '  ' + result.message,
+      h(Btn, { disabled: !typed || Boolean(busy), title: 'Says what is in the folder without changing anything', onClick: check }, busy === 'check' ? 'Checking…' : 'Check'),
+      h(Btn, { kind: 'primary', disabled: !typed || Boolean(busy), onClick: () => add(path) }, busy === 'save' ? 'Adding…' : 'Add folder')),
+    h('p', { className: 'stoa-sub', style: { margin: '6px 0 0' } }, 'Paste the folder\'s path. On a Mac: in Finder, right-click the folder, hold the Option key, and choose Copy as Pathname. ',
+      h('button', { type: 'button', className: 'stoa-linkbtn', disabled: Boolean(busy), title: 'Looks in a few usual places on the computer Hermes runs on, such as Documents, Plaud and Obsidian. It counts the notes there and opens none.', onClick: look },
+        busy === 'look' ? 'Looking…' : 'Or have Stoa look for a folder.')))
+  const ways = tool ? h('div', { className: 'stoa-noteway' },
+    h('p', { style: { margin: '0 0 6px' } }, tool.about),
+    tool.route === 'key' ? h(Keys, { setup, only: [tool.key] })
+      : [h('ol', { key: 'steps', className: 'stoa-notesteps' }, (tool.steps || []).map((step, index) => h('li', { key: index }, step))),
+        h('div', { key: 'add' }, addRow(tool.folder)),
+        tool.connection ? h('div', { key: 'conn', className: 'stoa-noteconn' },
+          h('span', { className: 'stoa-eyebrow' }, 'Or with nothing to export'),
+          h('p', { style: { margin: '4px 0 6px' } }, tool.connection.about + ' In Hermes, open Capabilities, then Connectors, add a connector with this address, and sign in to ' + tool.name + ' when it asks: ',
+            h('code', { className: 'stoa-code' }, tool.connection.address)),
+          h('p', { className: 'stoa-sub', style: { margin: '0 0 6px' } }, 'Then tell Stoa to have Hermes look there on each notes sweep. This way is new: Hermes reads the notes with the connector\'s own tools, so how well it works depends on that connector.'),
+          h('div', { className: 'stoa-btns', style: { margin: 0 } },
+            h(Btn, { onClick: () => host.navigate('/capabilities') }, 'Open Capabilities'),
+            connections.includes(tool.connection.name)
+              ? h(Btn, { kind: 'quiet', disabled: Boolean(busy), onClick: () => connect(connections.filter(name => name !== tool.connection.name)) }, 'Stop looking in ' + tool.name)
+              : h(Btn, { disabled: Boolean(busy) || notes.can_save === false, onClick: () => connect(connections.concat([tool.connection.name])) }, 'Have Hermes look in ' + tool.name))) : null]) : null
+  const waiting = preview.data
+  return h('div', { className: 'stoa-notes' },
+    h('p', { className: 'stoa-sub', style: { margin: '0 0 10px' } }, 'Each note is filed on the record it is about, with the next step it implies. Stoa reads what your recorder wrote (the summary, the transcript); it does not record or transcribe anything itself.'),
+    h('div', { className: 'stoa-eyebrow' }, 'Where do your notes live?'),
+    h('div', { className: 'stoa-notepick', role: 'group', 'aria-label': 'Where your notes live' }, tools.map(item =>
+      h('button', { key: item.id, type: 'button', className: 'stoa-btn', 'data-on': pick === item.id ? '1' : '0', 'aria-pressed': pick === item.id,
+        onClick: () => { setPick(pick === item.id ? '' : item.id); setResult(null); setFound(null); setPath('') } }, item.name))),
+    ways,
+    !tool && !anything ? h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'Pick one and it shows the steps. More than one is fine.') : null,
+    result ? h('div', { role: 'status', style: { marginTop: 10 } }, h(Chip, { tone: result.ok ? 'good' : 'bad' }, result.ok ? (result.saved ? 'added' : result.folder ? 'found' : 'done') : 'not yet'), '  ' + (result.message || ''),
       result.elsewhere ? h(Btn, { style: { marginLeft: 8 }, onClick: openSettings }, 'Open Stoa\'s settings') : null) : null,
     found ? (found.length
       ? h('div', { style: { marginTop: 8 } }, found.map(row => h('div', { key: row.folder, className: 'stoa-setrow' },
         h('span', { className: 'stoa-grow' }, h('span', { className: 'stoa-name', style: { display: 'block', overflowWrap: 'anywhere' } }, row.folder),
           h('span', { className: 'stoa-sub' }, plural(row.count, 'note', 'notes') + ', the newest from ' + row.newest)),
-        h(Btn, { disabled: Boolean(busy), onClick: () => save(row.folder) }, 'Use this'))))
-      : h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'Nothing in the usual places (Documents, Obsidian, Notes). Paste the folder\'s path above instead.')) : null,
-    h('div', { className: 'stoa-btns', style: { marginTop: 8 } },
-      h(Btn, { kind: 'quiet', disabled: Boolean(busy), title: 'Looks in a few usual places on the computer Hermes runs on, such as Documents and Obsidian. It counts the notes there and opens none.', onClick: look },
-        busy === 'look' ? 'Looking…' : 'Not sure where they are? Look for a folder'),
-      notes.folder ? h(Btn, { kind: 'quiet', disabled: Boolean(busy), onClick: () => save('') }, 'Stop reading this folder') : null),
-    h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'To copy a folder\'s path on a Mac: in Finder, right-click the folder, hold the Option key, and choose Copy as Pathname. Then paste it above.'))
+        h(Btn, { disabled: Boolean(busy), onClick: () => add(row.folder) }, 'Use this'))))
+      : h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'Nothing in the usual places (Documents, Plaud, Obsidian, Notes). Paste the folder\'s path instead.')) : null,
+
+    anything ? [h('div', { key: 'eyebrow', className: 'stoa-eyebrow', style: { marginTop: 16 } }, 'What Stoa reads now'),
+      folders.map(row => h('div', { key: row.folder, className: 'stoa-setrow' },
+        h(Lamp, { on: row.ok && row.count > 0 ? true : row.ok ? null : false }),
+        h('span', { className: 'stoa-grow' }, h('span', { className: 'stoa-name', style: { display: 'block', overflowWrap: 'anywhere' } }, row.folder),
+          h('span', { className: 'stoa-sub' }, row.message)),
+        h(Btn, { kind: 'quiet', disabled: Boolean(busy), onClick: () => drop(row.folder) }, 'Remove'))),
+      notes.granola || notes.fireflies ? h(Keys, { key: 'keys', setup, only: [notes.granola ? 'granola' : '', notes.fireflies ? 'fireflies' : ''].filter(Boolean) }) : null,
+      connections.map(name => h('div', { key: 'c:' + name, className: 'stoa-setrow' },
+        h(Lamp, { on: null }),
+        h('span', { className: 'stoa-grow' }, h('span', { className: 'stoa-name', style: { display: 'block' } }, cap(name) + ', through Hermes'),
+          h('span', { className: 'stoa-sub' }, 'On a notes sweep Hermes looks there with that connector\'s own tools. Stoa cannot see into it, so it shows no count.')),
+        h(Btn, { kind: 'quiet', disabled: Boolean(busy), onClick: () => connect(connections.filter(other => other !== name)) }, 'Remove'))),
+      !tool && folders.length < 8 ? h('div', { key: 'more', style: { marginTop: 8 } }, addRow()) : null,
+
+      h('div', { key: 'waiting', className: 'stoa-notewait' },
+        h('div', { className: 'stoa-sechead', style: { padding: '0 0 6px' } }, h('span', { className: 'stoa-eyebrow' }, 'What Stoa would pick up'),
+          h('span', { className: 'stoa-sub' }, 'the last ' + plural(notes.days || 7, 'day', 'days') + ', not yet filed')),
+        !looked ? h('div', { className: 'stoa-btns', style: { margin: 0 } }, h(Btn, { onClick: () => setLooked(true) }, 'See what is waiting'))
+          : !waiting ? h('p', { className: 'stoa-sub', style: { margin: 0 } }, preview.error ? 'The notes could not be listed: ' + why(preview.error) : 'Looking…')
+            : h('div', null,
+              (waiting.problems || []).map(problem => h('p', { key: problem, style: { margin: '0 0 6px', color: 'var(--ui-red)' } }, problem)),
+              waiting.notes.length ? [
+                h('p', { key: 'sum', style: { margin: '0 0 6px' } }, plural(waiting.waiting, 'note', 'notes') + ' waiting, ' + (waiting.matched === waiting.notes.length && waiting.waiting === waiting.notes.length ? 'each' : waiting.matched) + ' matched to a record'
+                  + (waiting.waiting > waiting.notes.length ? ' among the newest ' + waiting.notes.length : '') + '.'),
+                waiting.notes.map(note => h('div', { key: note.id, className: 'stoa-noterow' },
+                  h('span', { className: 'stoa-num' }, day(note.when)),
+                  h('span', { className: 'stoa-grow', style: { minWidth: 0 } }, h('span', { className: 'stoa-name', style: { display: 'block', overflowWrap: 'anywhere' } }, note.title),
+                    h('span', { className: 'stoa-sub' }, [where[note.source] || note.source, note.parts > 1 ? note.parts + ' files, read as one' : '', note.handed ? 'a PDF: Hermes reads it' : ''].filter(Boolean).join(' · '))),
+                  h('span', { className: 'stoa-notematch', 'data-on': note.suggested.length ? '1' : '0' }, note.suggested.length
+                    ? [h('b', { key: 'n' }, note.suggested[0].name), h('small', { key: 'w' }, note.suggested[0].why)]
+                    : h('small', null, 'no record matched yet')))),
+                h('p', { key: 'unmatched', className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'A note with no match is still read: Hermes works out who it is about from what it says, and asks before adding anyone new.'),
+                h('div', { key: 'go', className: 'stoa-btns' },
+                  h(Btn, { kind: 'primary', title: 'Sends Hermes a line asking it to read and file the waiting notes. It proposes stage changes; it does not make them.', onClick: fileNow }, 'Have Hermes file them now'),
+                  h(Btn, { kind: 'quiet', onClick: () => queryClient.invalidateQueries({ queryKey: ['stoa', 'notes-preview'] }) }, 'Look again'))]
+                : h('p', { className: 'stoa-sub', style: { margin: 0 } }, 'Nothing is waiting. A new note shows here as soon as it is saved, and is gone once it is filed or skipped.'),
+              h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'To have this happen without asking, switch on File meeting notes in the next step but one, “Let Hermes keep the desk current”.')))] : null)
 }
 
 /** A schedule in words where it is one of the plain kinds ("30 8 * * 1-5" is weekdays at 8:30); otherwise as Hermes shows it. */
@@ -2961,9 +3051,7 @@ function Setup({ state, go }) {
         h('p', { className: 'stoa-sub', style: { margin: '0 0 4px' } }, 'Two outside services, each with a key. Hermes keeps your keys and Stoa only reads them: Add key opens Hermes\'s settings for Stoa, where you paste the key and press Save. Then come back and press Test.'),
         h(Keys, { setup, only: ['exa', 'pdl'] })),
       h(Step, { id: 'notes', optional: true, done: step.notes.done, title: 'Bring in your call notes', status: step.notes.detail },
-        h('p', { className: 'stoa-sub', style: { margin: '0 0 2px' } }, 'Each note is filed on the record it is about, with the next step it implies. Notes can come from a folder, from Granola, or both.'),
-        label('From a folder'), h(NotesFolder, { setup }),
-        label('From Granola'), h(Keys, { setup, only: ['granola'] })),
+        h(NotesSources, { setup })),
       h(Step, { id: 'slack', optional: true, done: step.slack.done, title: 'Work from Slack', status: step.slack.detail },
         setup.slack ? h('div', null,
           h('p', { style: { margin: '0 0 6px' } }, 'In Slack, type ', h('code', { className: 'stoa-code' }, '!gtm'), ' for the board, ', h('code', { className: 'stoa-code' }, '!gtm today'), ' for what needs you, or ', h('code', { className: 'stoa-code' }, '!gtm'), ' and a name for that record\'s card. The buttons on a card move it at once.'),
