@@ -93,6 +93,14 @@ The *Market watch* automation re-checks a map every week and adds at most five n
   goes to Hermes to check against every company. A company moves to another segment from its panel.
 - **Filter.** The breakdowns (who holds the market, how big they are, how rare each requirement is)
   are buttons: press one and those companies light up on the map and in the table.
+- **Your maps.** The map's name at the top is a list: press it to switch to another map, start a
+  **New map** (say what you sell and who to, and Hermes goes and maps it; the new map shows itself
+  when it is saved), **Rename** this one, or **Delete** it. Deleting asks first, takes the map and
+  its companies for good, and leaves any record already in your pipeline where it is. Only a person
+  at the page can delete a map; Hermes has no way to.
+- **The company panel stays with you.** On a wide page it sits beside the map and follows as you
+  scroll, so a company picked from the table opens where you are looking. On a narrow page it sits
+  under the map and the page goes to it.
 
 ![The map by priority, with one company open](desktop-market-priority.jpg)
 

@@ -27,6 +27,8 @@
   open, the task waits on the record.
 - If your agent already keeps people somewhere else, it may look there first. Naming the desk ("on the Stoa
   desk") or using `!gtm <name>` settles it.
+- A deleted map is gone: it is not on the ledger and Undo does not bring it back. The daily copies
+  of the desk made before it was deleted still hold it.
 - On the page's map, the weights under **What matters** and the **Size by** choice are kept with the
   page on that computer, per map. Slack, the downloaded page and Hermes still show Hermes's own fit.
   A reason to call recorded before signals carried dates has none, so *Priority* sets it in the middle until Hermes

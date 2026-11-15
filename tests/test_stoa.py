@@ -3728,6 +3728,12 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(self.api.state()["markets"][0]["counts"]["dismissed"], 0)
         with self.assertRaises(self.api.HTTPException):
             self.api.targets({"verb": "restore", "ids": []})
+        mid = self.api.state()["markets"][0]["id"]
+        self.assertRegex(self.api.state()["markets"][0]["updated"], r"^\d{4}-\d{2}-\d{2}$")
+        self.assertEqual(self.api.market_rename(mid, {"name": "Freight brokers"})["name"], "Freight brokers")
+        self.assertEqual(self.api.state()["markets"][0]["name"], "Freight brokers")
+        self.assertTrue(self.api.market_remove(mid)["ok"])
+        self.assertEqual(self.api.state()["markets"], [])
 
 
 class MapOnThePageTests(unittest.TestCase):
@@ -3770,6 +3776,31 @@ class MapOnThePageTests(unittest.TestCase):
         self.assertNotIn("problems", out)
         company = self.desk.markets.summary(self.desk.markets._market("Long words")["id"], text=False)["segments"][0]["companies"][0]
         self.assertEqual([req["shown"] for req in company["requirements"]], [True, True])
+
+    def test_a_map_is_renamed_without_losing_anything_on_it(self):
+        before = self.companies()
+        self.desk.markets.define({"name": "Second map", "segments": ["One"]})
+        renamed = self.desk.markets.rename(self.market["id"], "  Midwest freight brokers  ")
+        self.assertEqual((renamed["ok"], renamed["id"], renamed["name"]), (True, self.market["id"], "Midwest freight brokers"))
+        self.assertEqual(self.desk.markets._market("Midwest freight brokers")["id"], self.market["id"])
+        self.assertEqual(sorted(self.companies()), sorted(before))
+        self.assertEqual(self.desk.markets.rename(self.market["id"], "second map")["error"], "Another map is already called that.")
+        self.assertFalse(self.desk.markets.rename(self.market["id"], "   ")["ok"])
+        self.assertFalse(self.desk.markets.rename("no such map", "Anything")["ok"])
+
+    def test_deleting_a_map_takes_its_companies_and_leaves_the_pipeline(self):
+        rows = self.companies()
+        made = self.desk.markets.track_many([rows["Meridian Freight"]["id"]], "tester")["added"][0]["deal"]
+        self.desk.markets.define({"name": "Second map", "segments": ["One"]})
+        self.desk.markets.add({"market": "Second map", "companies": [{"company": "Ada", "segment": "One"}]})
+        gone = self.desk.markets.remove(self.market["id"])
+        self.assertEqual((gone["ok"], gone["companies"], gone["in_pipeline"]), (True, len(fixture.COMPANIES), 1))
+        self.assertEqual([m["name"] for m in self.desk.markets.list_markets()], ["Second map"])
+        self.assertEqual(len(self.desk.markets.targets(self.market["id"])), 0)
+        self.assertEqual(len(self.desk.markets.targets(self.desk.markets._market("Second map")["id"])), 1)      # the other map is untouched
+        self.assertIsNotNone(self.desk.store.get(made))      # the record made from the deleted map is still in the pipeline
+        self.assertFalse(self.desk.markets.remove(self.market["id"])["ok"])
+        self.assertNotIn("remove", schemas.GTM_MARKET["parameters"]["properties"]["action"]["enum"])      # only a person at the page deletes a map
 
     def test_several_are_added_to_the_pipeline_at_once(self):
         rows = self.companies()

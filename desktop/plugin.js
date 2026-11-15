@@ -779,15 +779,47 @@ const CSS = `
   --stoa-m3: color-mix(in oklab, var(--stoa-h3) 84%, var(--ui-text-primary)); --stoa-m4: color-mix(in oklab, var(--stoa-h4) 84%, var(--ui-text-primary));
   --stoa-m5: color-mix(in oklab, var(--stoa-h5) 84%, var(--ui-text-primary)); --stoa-m6: color-mix(in oklab, var(--stoa-h6) 84%, var(--ui-text-primary));
   --stoa-m7: color-mix(in oklab, var(--stoa-h7) 84%, var(--ui-text-primary)); }
-.stoa-maptop { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; margin-bottom: 12px; }
+.stoa-maptop { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; margin-bottom: 14px; }
+.stoa-menu { position: relative; }
+.stoa-menutitle { display: inline-block; max-width: 100%; margin: 0 0 2px -8px; padding: 3px 8px; overflow-wrap: anywhere; text-wrap: balance; border: 0; border-radius: var(--stoa-r); background: transparent; color: var(--ui-text-primary);
+  font: inherit; font-size: 20px; font-weight: 600; letter-spacing: -.015em; line-height: 1.25; text-align: left; cursor: pointer; }
+.stoa-menutitle:hover, .stoa-menutitle[aria-expanded="true"] { background: var(--ui-row-hover-background); }
+.stoa-menutitle:focus-visible, .stoa-menuitem:focus-visible { outline: 2px solid var(--stoa-accent); outline-offset: -2px; }
+.stoa-menucaret { font-size: 15px; font-weight: 400; color: var(--ui-text-secondary); }
+.stoa-btn .stoa-menucaret { margin-left: 2px; }
+.stoa-menulist { position: absolute; z-index: 30; top: calc(100% + 4px); left: -8px; width: max-content; min-width: 300px; max-width: min(460px, 86vw); max-height: 420px; overflow-y: auto; padding: 5px;
+  border: 1px solid var(--ui-stroke-primary); border-radius: var(--stoa-r); background: var(--stoa-page); box-shadow: 0 10px 30px rgba(0, 0, 0, .28); }
+.stoa-menuitem { display: block; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--stoa-r); background: transparent; color: var(--ui-text-primary); font: inherit; text-align: left; cursor: pointer; }
+.stoa-menuitem:hover { background: var(--ui-row-hover-background); }
+.stoa-menuitem[data-on="1"] { box-shadow: inset 2px 0 0 var(--stoa-accent); background: var(--stoa-accent-soft); }
+.stoa-menuitem[data-danger="1"] { color: var(--ui-red); }
+.stoa-menuitem > span { display: block; font-weight: 550; overflow-wrap: anywhere; }
+.stoa-menuitem small { display: block; margin-top: 1px; font-size: 12px; color: var(--ui-text-secondary); }
+.stoa-menurule { height: 0; margin: 5px 4px; border-top: 1px dotted var(--ui-stroke-primary); }
+.stoa-mapform { max-width: 720px; margin-bottom: 14px; }
+.stoa-mapform .stoa-btns { margin-top: 10px; }
+.stoa-maptext { height: auto; min-height: 76px; padding: 8px 10px; font-size: 13px; line-height: 1.45; resize: vertical; }
+.stoa-btn[data-kind="danger"] { border-color: var(--ui-red); color: var(--ui-red); font-weight: 600; }
+.stoa-btn[data-kind="danger"]:hover { background: color-mix(in srgb, var(--ui-red) 12%, transparent); }
 .stoa-maph { font-size: 20px; font-weight: 600; letter-spacing: -.015em; line-height: 1.2; margin: 4px 0 2px; }
-.stoa-mapbar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 10px; }
+.stoa-mapbar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 8px; }
 .stoa-mapquick { display: flex; flex-wrap: wrap; gap: 2px 4px; flex: 1 1 auto; min-width: 0; }
 .stoa-mapquick .stoa-btn[data-on="1"] { border-color: var(--ui-stroke-primary); color: var(--ui-text-primary); }
-.stoa-mapfind { width: 190px; max-width: 100%; margin-top: 0; }
-.stoa-mapmain { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
-@container (min-width: 980px) { .stoa-mapmain { grid-template-columns: minmax(0, 1fr) 340px; } }
+.stoa-mapfind { flex: 0 0 200px; width: 200px; max-width: 100%; margin-top: 0; }
+/* The picture, then the company panel, then the breakdowns and the table. On a wide page the panel is a rail beside all
+   of it that stays in view as you scroll, so a company picked from the table opens where you can see it. */
+.stoa-mapbody { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+.stoa-mapa, .stoa-mapb { min-width: 0; }
 .stoa-mapside { min-width: 0; overflow-wrap: anywhere; }
+@container (min-width: 1040px) {
+  .stoa-mapbody { grid-template-columns: minmax(0, 1fr) 348px; grid-template-areas: "a side" "b side"; column-gap: 18px; }
+  .stoa-mapa { grid-area: a; } .stoa-mapb { grid-area: b; }
+  .stoa-mapside { grid-area: side; position: sticky; top: 12px; max-height: calc(100vh - 232px); overflow-y: auto; }
+  .stoa-mapabar { display: none !important; }
+}
+.stoa-maphow { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; justify-content: space-between; margin: 0 0 8px; }
+.stoa-maphow p { flex: 1 1 320px; min-width: 0; margin: 0; }
+.stoa-mapnote { margin: 0 0 8px; min-height: 54px; }
 .stoa-mapside .stoa-select { width: 100%; max-width: 100%; text-overflow: ellipsis; }      /* a list of long segment names is as wide as the panel, not as its longest name */
 .stoa-mapside .stoa-sechead { margin-top: 14px; padding-top: 10px !important; border-top: 1px dotted var(--ui-stroke-primary); }
 .stoa-mapside > div > .stoa-sechead:first-child { margin-top: 0; padding-top: 0 !important; border-top: 0; }
@@ -844,8 +876,9 @@ const CSS = `
 .stoa-maptip b { display: block; font-size: 13px; }
 .stoa-maptip { overflow-wrap: anywhere; }
 .stoa-maplasso { z-index: 4; border: 1px dashed var(--ui-text-primary); background: color-mix(in srgb, var(--ui-text-primary) 7%, transparent); pointer-events: none !important; animation: none !important; }
-.stoa-maplegend { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; padding: 9px 2px 0; font-family: var(--stoa-mono); font-size: 10.5px; color: var(--ui-text-secondary); }
-.stoa-maplegend > span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.stoa-maplegend { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 20px; align-items: center; padding: 9px 2px 0; font-family: var(--stoa-mono); font-size: 10.5px; color: var(--ui-text-secondary); }
+.stoa-maplegend > div { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
+.stoa-maplegend > div > span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .stoa-mapheat { display: inline-block; width: 60px; height: 6px; background: linear-gradient(90deg, var(--stoa-m1), var(--stoa-m2), var(--stoa-m3), var(--stoa-m4), var(--stoa-m5), var(--stoa-m6), var(--stoa-m7));
   -webkit-mask-image: var(--stoa-grid); mask-image: var(--stoa-grid); -webkit-mask-composite: source-in; mask-composite: intersect; }
 .stoa-mapkey { display: inline-block; width: 12px; height: 12px; border-radius: 50%; }
@@ -853,11 +886,15 @@ const CSS = `
 .stoa-mapkey[data-kind="in"] { background: var(--stoa-m4); }
 .stoa-mapkey[data-kind="fresh"] { border: 1px dashed var(--ui-text-primary); }
 .stoa-mapkey[data-kind="sig"] { width: 8px; height: 8px; margin: 0 3px; background: var(--ui-text-tertiary); box-shadow: 0 0 0 2px var(--ui-bg-card), 0 0 0 3px var(--ui-text-primary); }
-.stoa-mapcols { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 6px 32px; margin-top: 18px; }
+.stoa-mapcols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px 32px; margin-top: 22px; align-items: start; }
 .stoa-mapcols > div { min-width: 0; }
-.stoa-mapweight { padding: 8px 0 2px; border-bottom: 1px dotted var(--ui-stroke-primary); }
-.stoa-mapweight > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 10px; align-items: center; }
-.stoa-mapweight .stoa-mapfacet { border-bottom: 0; }
+/* A requirement: its wording on a line of its own, then how much it counts and how common it is, always in the same places. */
+.stoa-mapweight { padding: 9px 0; border-bottom: 1px dotted var(--ui-stroke-primary); }
+.stoa-mapwlabel { overflow-wrap: anywhere; }
+.stoa-mapwrow { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; margin-top: 6px; }
+.stoa-mapwrow > .stoa-tabs { flex: none; }
+.stoa-mapwrow .stoa-mapfacet { flex: 1 1 170px; width: auto; padding: 3px 0; border-bottom: 0; grid-template-columns: 38px minmax(0, 1fr) auto; }
+.stoa-mapwrow .stoa-mapfacet .stoa-mapmeter { margin-top: 0; }
 .stoa-mapfacet { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px; align-items: center; width: 100%; padding: 7px 0; border: 0; border-bottom: 1px dotted var(--ui-stroke-primary);
   background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .stoa-mapfacet:hover { background: var(--ui-row-hover-background); }
@@ -868,11 +905,18 @@ const CSS = `
 .stoa-mapmeter { display: block; height: 4px; margin-top: 5px; background: var(--ui-stroke-primary); text-decoration: none; -webkit-mask-image: var(--stoa-grid); mask-image: var(--stoa-grid); -webkit-mask-composite: source-in; mask-composite: intersect; }
 .stoa-mapmeter i { display: block; height: 100%; background: var(--ui-text-primary); }
 .stoa-maptablewrap { overflow-x: auto; border: 1px solid var(--ui-stroke-secondary); border-radius: var(--stoa-r); }
-.stoa-maptable { width: 100%; min-width: 880px; border-collapse: collapse; }
+.stoa-maptable { width: 100%; min-width: 900px; border-collapse: collapse; table-layout: fixed; }
 .stoa-maptable th { padding: 0; text-align: left; border-bottom: 1px dotted var(--ui-text-tertiary); white-space: nowrap; }
 .stoa-maptable th button { width: 100%; padding: 9px 10px; border: 0; background: none; text-align: left; font-family: var(--stoa-mono); font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--ui-text-secondary); cursor: pointer; }
 .stoa-maptable th button:hover, .stoa-maptable th button[aria-pressed="true"] { color: var(--ui-text-primary); }
-.stoa-maptable td { padding: 9px 10px; border-bottom: 1px dotted var(--ui-stroke-primary); vertical-align: top; overflow-wrap: break-word; max-width: 260px; }
+.stoa-maptable td { padding: 9px 10px; border-bottom: 1px dotted var(--ui-stroke-primary); vertical-align: top; overflow-wrap: break-word; }
+.stoa-maptable th[data-num="1"] button, .stoa-maptable td[data-num="1"] { text-align: right; }
+.stoa-maptable td:first-child, .stoa-maptable th:first-child { padding-right: 0; }
+.stoa-maptable tbody tr:last-child td { border-bottom: 0; }
+.stoa-maptable td .stoa-btn { height: 24px; padding: 0 9px; }
+.stoa-maptable th button { overflow: hidden; text-overflow: ellipsis; }
+/* Long words in a cell fold to two lines and stop, so every row is about as tall as the next. The whole of it is in the title and on the panel. */
+.stoa-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .stoa-maptable td b { font-weight: 600; }
 .stoa-maptable tbody tr { cursor: pointer; } .stoa-maptable tbody tr:hover { background: var(--ui-row-hover-background); }
 .stoa-maptable tbody tr[data-sel="1"] { background: var(--stoa-accent-soft); box-shadow: inset 2px 0 0 var(--stoa-accent); }
@@ -4128,9 +4172,52 @@ function MapPicture({ market, list, lens, sizeBy, sel, shown, onPick, onLasso, o
       lasso ? h('div', { className: 'stoa-maplasso', style: { left: lasso.l, top: lasso.t, width: lasso.w, height: lasso.h } }) : null) : null)
 }
 
+/** A button that opens a short list beneath it. It closes on a choice, a click anywhere else, or Escape. */
+function Menu({ label, title, kind, children }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef(null)
+  useEffect(() => {
+    if (!open) return undefined
+    const away = event => { if (box.current && !box.current.contains(event.target)) setOpen(false) }
+    const key = event => { if (event.key === 'Escape') setOpen(false) }
+    document.addEventListener('pointerdown', away)
+    document.addEventListener('keydown', key)
+    return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', key) }
+  }, [open])
+  return h('div', { ref: box, className: 'stoa-menu' },
+    h('button', { type: 'button', className: kind === 'title' ? 'stoa-menutitle' : 'stoa-btn', title, 'aria-haspopup': 'menu', 'aria-expanded': open, onClick: () => setOpen(!open) },
+      label, '\u00a0', h('span', { className: 'stoa-menucaret', 'aria-hidden': true }, '▾')),
+    open ? h('div', { className: 'stoa-menulist', role: 'menu', onClick: event => { if (event.target.closest('[role="menuitem"]')) setOpen(false) } }, children) : null)
+}
+const MenuItem = ({ title, sub, on, danger, onClick }) => h('button', { type: 'button', role: 'menuitem', className: 'stoa-menuitem', 'data-on': on ? '1' : '0', 'data-danger': danger ? '1' : '0', onClick },
+  h('span', null, title), sub ? h('small', null, sub) : null)
+
+/** Starting a map is Hermes's work: it has to go and find the companies. This takes what you sell and who to, and hands it over. */
+function NewMap({ first, onClose }) {
+  const [text, setText] = useState('')
+  const go = () => {
+    const said = text.trim()
+    if (!said) return
+    const sent = toChat('Map a new market for me and keep it on the desk as a map of its own: ' + said + ' Name the market, split it into segments that would each get a different pitch, set the requirements, '
+      + 'then research companies with the evidence for each and the date of any signal. Tell me when it is on the desk.', null)
+    if (!sent) return
+    host.notify({ kind: 'info', message: 'Hermes is mapping it. The map appears here when it is saved, which takes a few minutes.' })
+    setText('')
+    if (onClose) onClose()
+  }
+  return h('div', { className: 'stoa-box stoa-mapform' },
+    h('label', { className: 'stoa-name', htmlFor: 'stoa-newmap' }, first ? 'Map your first market' : 'A new map'),
+    h('p', { className: 'stoa-sub', style: { margin: '4px 0 8px' } }, 'Say what you sell and who you are after. Hermes names the market, splits it into segments, researches companies and saves it as a map of its own. It takes a few minutes, and you can keep working while it does.'),
+    h('textarea', { id: 'stoa-newmap', className: 'stoa-field stoa-maptext', rows: 3, autoFocus: !first, value: text, placeholder: 'We sell a fraud prevention tool to fintechs and marketplaces in the US with a small risk team.', onChange: event => setText(event.target.value) }),
+    h('div', { className: 'stoa-btns' }, h(Btn, { kind: 'primary', disabled: !text.trim(), onClick: go }, 'Have Hermes map it'), onClose ? h(Btn, { kind: 'quiet', onClick: onClose }, 'Cancel') : null))
+}
+
 /** The market map on the page: the picture, what is picked beside it, the brief you can weigh, and every company in a table. */
-function MarketMap({ market, shape, openRecord }) {
+function MarketMap({ market, markets, onMarket, shape, openRecord }) {
   const [lens, setLens] = useState('seg')
+  const [mode, setMode] = useState('')      // a form open under the map's name: new | rename | delete
+  const [draft, setDraft] = useState('')
+  const rail = useRef(null)
   const [picked, setPicked] = useState([])
   const [quick, setQuick] = useState('all')
   const [find, setFind] = useState('')
@@ -4144,7 +4231,7 @@ function MarketMap({ market, shape, openRecord }) {
   const keep = (key, value) => { try { if (storage) storage.set(key + ':' + market.id, value) } catch { /* no storage: it lasts as long as the page */ } }
   const [weights, setWeightsNow] = useState(() => kept('mapweights') || {})
   const [sizeBy, setSizeNow] = useState(() => kept('mapsize') || (shape === 'roles' ? 'named' : 'people'))
-  useEffect(() => { setWeightsNow(kept('mapweights') || {}); setSizeNow(kept('mapsize') || (shape === 'roles' ? 'named' : 'people')); setPicked([]); setFacet(null); setFind(''); setQuick('all') }, [market.id])
+  useEffect(() => { setWeightsNow(kept('mapweights') || {}); setSizeNow(kept('mapsize') || (shape === 'roles' ? 'named' : 'people')); setPicked([]); setFacet(null); setFind(''); setQuick('all'); setMode('') }, [market.id])
   const setWeights = next => { setWeightsNow(next); keep('mapweights', next) }
   const setSize = next => { setSizeNow(next); keep('mapsize', next) }
   const list = useMemo(() => mapCompanies(market, weights), [market, weights])
@@ -4267,71 +4354,116 @@ function MarketMap({ market, shape, openRecord }) {
   const value = c => (sort.key === 'buyer' ? (c.buyer ? c.buyer.name : '~') : sort.key === 'headcount' ? (c.headcount || 0) : sort.key === 'reason' ? c.timing : c[sort.key])
   const rows = list.slice().sort((a, b) => { const x = value(a), y = value(b); return (typeof x === 'number' ? x - y : String(x || '').localeCompare(String(y || ''))) * sort.dir || b.rank - a.rank })
   const dismissed = market.dismissed || []
+  const shortDay = stamp => { const d = new Date(String(stamp || '') + 'T12:00:00'); return isNaN(d) ? '' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) }
+  // Picked from the table, the company's panel must be where the eye is. Beside a wide page it rides along as you
+  // scroll; on a narrow one it sits under the map, so the page goes to it.
+  const pickHere = (id, many) => {
+    pick(id, many)
+    requestAnimationFrame(() => { const panel = rail.current; if (panel && getComputedStyle(panel).position !== 'sticky') panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) })
+  }
+  const manage = (verb, body, said) => {
+    setBusy(verb)
+    return rest('/market/' + encodeURIComponent(market.id) + '/' + verb, { method: 'POST', body })
+      .then(result => { if (result.ok) { setMode(''); host.notify({ kind: 'success', message: said(result) }) } else host.notify({ kind: 'info', message: result.error || 'Stoa could not do that.' }); refresh(); return result })
+      .catch(error => { host.notifyError(error, 'Stoa could not do that'); return null })
+      .then(result => { setBusy(''); return result })
+  }
+  const clamp = (text, lines) => h('span', { className: 'stoa-clamp', style: lines ? { WebkitLineClamp: lines } : undefined, title: text }, text)
+  const cols = [['company', 'Company', '18%'], ['segment', 'Segment', null], ['score', 'Fit', '104px'], ['reason', 'Why now', null], ['headcount', 'People', '74px'], ['uses', 'Uses today', null], ['buyer', 'Buyer', null], ['status', 'Pipeline', '128px']]
   return h('div', { className: 'stoa-mapwrap' },
     h('div', { className: 'stoa-maptop' },
-      h('div', { className: 'stoa-grow' }, h('div', { className: 'stoa-maph', style: { fontSize: 18 } }, market.name),
+      h('div', { className: 'stoa-grow', style: { minWidth: 0 } },
+        h(Menu, { kind: 'title', label: market.name, title: 'Your market maps: switch, start a new one, rename or delete' },
+          (markets || []).map(item => h(MenuItem, { key: item.id, on: item.id === market.id, title: item.name,
+            sub: plural(item.counts.mapped, 'company', 'companies') + (shortDay(item.updated) ? ' · updated ' + shortDay(item.updated) : ''), onClick: () => onMarket(item.id) })),
+          h('div', { className: 'stoa-menurule' }),
+          h(MenuItem, { title: '+  New map…', sub: 'Tell Hermes what you sell and who to, and it maps the market', onClick: () => setMode('new') }),
+          h(MenuItem, { title: 'Rename this map…', onClick: () => { setDraft(market.name); setMode('rename') } }),
+          h(MenuItem, { title: 'Delete this map…', danger: true, onClick: () => setMode('delete') })),
         h('div', { className: 'stoa-sub' }, [plural(list.length, 'company', 'companies'), market.numbers.in_pipeline + ' in the pipeline', list.filter(c => c.reason).length + ' with a reason to call',
-          plural(list.filter(c => c.buyer).length, 'buyer named', 'buyers named')].join(' · '))),
+          plural(list.filter(c => c.buyer).length, 'buyer named', 'buyers named'), shortDay(market.updated) ? 'updated ' + shortDay(market.updated) : ''].filter(Boolean).join(' · '))),
       h('div', { className: 'stoa-btns', style: { margin: 0 } },
         h(Btn, { disabled: Boolean(saving), title: 'The whole map as one web page, with buyers\' names and what is in your pipeline', onClick: () => save(false) }, saving === 'own' ? 'Saving…' : 'Download page'),
         h(Btn, { disabled: Boolean(saving), title: 'The same page without buyers\' names or your pipeline: the one to host or send to a client', onClick: () => save(true) }, saving === 'share' ? 'Saving…' : 'Download a copy to share'))),
-    h('div', { className: 'stoa-mapbar' },
-      h('div', { className: 'stoa-tabs', style: { margin: 0 }, role: 'group', 'aria-label': 'How the map is drawn' }, MAP_LENSES.map(item => h('button', { type: 'button', key: item[0], className: 'stoa-tab', style: { height: 28 },
-        'data-on': lens === item[0] ? '1' : '0', 'aria-pressed': lens === item[0], onClick: () => setLens(item[0]) }, item[1]))),
-      h('div', { className: 'stoa-mapquick' },
-        [['all', 'All'], ['open', 'Not in the pipeline'], ['reason', 'Reason to call'], ['nobuyer', 'No buyer named'], ['fresh', 'Added today']].filter(item => item[0] !== 'fresh' || count('fresh')).map(item =>
-          h(Btn, { key: item[0], kind: 'quiet', 'aria-pressed': quick === item[0], 'data-on': quick === item[0] ? '1' : '0', onClick: () => setQuick(item[0]) }, item[1] + ' ' + count(item[0]))),
-        facet ? h(Btn, { title: 'Show every company again', onClick: () => setFacet(null) }, facet.label + ' ×') : null,
-        filtered && showing.length ? h(Btn, { onClick: () => setPicked(showing.map(c => c.id)) }, 'Pick these ' + showing.length) : null,
-        dismissed.length ? h(Btn, { kind: 'quiet', 'aria-expanded': gone, onClick: () => setGone(!gone) }, dismissed.length + ' dismissed') : null),
-      h('input', { className: 'stoa-field stoa-mapfind', type: 'search', value: find, placeholder: 'Find a company', 'aria-label': 'Find a company', onChange: event => setFind(event.target.value) })),
-    gone && dismissed.length ? h('div', { className: 'stoa-box', style: { marginBottom: 10 } }, h('div', { className: 'stoa-sub', style: { marginBottom: 6 } }, 'Taken off this map. Hermes does not propose a dismissed company again.'),
+    mode === 'new' ? h(NewMap, { onClose: () => setMode('') }) : null,
+    mode === 'rename' ? h('form', { className: 'stoa-box stoa-mapform', onSubmit: event => { event.preventDefault(); if (draft.trim() && draft.trim() !== market.name) manage('rename', { name: draft.trim() }, result => 'The map is now called ' + result.name + '.') } },
+      h('label', { className: 'stoa-name', htmlFor: 'stoa-mapname' }, 'What this map is called'),
+      h('div', { className: 'stoa-pathrow', style: { marginTop: 8 } },
+        h('input', { id: 'stoa-mapname', className: 'stoa-field', style: { fontFamily: 'inherit' }, autoFocus: true, maxLength: 120, value: draft, onChange: event => setDraft(event.target.value) }),
+        h(Btn, { type: 'submit', kind: 'primary', disabled: Boolean(busy) || !draft.trim() || draft.trim() === market.name }, busy === 'rename' ? 'Saving…' : 'Save'),
+        h(Btn, { kind: 'quiet', onClick: () => setMode('') }, 'Cancel'))) : null,
+    mode === 'delete' ? h('div', { className: 'stoa-box stoa-mapform', role: 'alertdialog', 'aria-label': 'Delete this map' },
+      h('div', { className: 'stoa-name' }, 'Delete “' + market.name + '”?'),
+      h('p', { className: 'stoa-sub', style: { margin: '4px 0 0' } }, 'The map and the ' + plural(list.length + dismissed.length, 'company', 'companies') + ' on it go for good: this cannot be taken back from the page. '
+        + (market.numbers.in_pipeline ? 'The ' + plural(market.numbers.in_pipeline, 'record', 'records') + ' already in your pipeline ' + (market.numbers.in_pipeline === 1 ? 'stays' : 'stay') + ' there.' : 'Nothing in your pipeline is touched.')),
+      h('div', { className: 'stoa-btns' }, h(Btn, { kind: 'danger', disabled: Boolean(busy), onClick: () => manage('remove', {}, result => result.name + ' was deleted, with ' + plural(result.companies, 'company', 'companies') + '.') }, busy === 'remove' ? 'Deleting…' : 'Delete the map'),
+        h(Btn, { autoFocus: true, onClick: () => setMode('') }, 'Keep it'))) : null,
+    gone && dismissed.length ? h('div', { className: 'stoa-box', style: { marginBottom: 12 } }, h('div', { className: 'stoa-sub', style: { marginBottom: 6 } }, 'Taken off this map. Hermes does not propose a dismissed company again.'),
       h('div', { className: 'stoa-chips' }, dismissed.map(row => h(Btn, { key: row.id, disabled: Boolean(busy), title: 'Put ' + row.company + ' back on the map',
         onClick: () => send('restore', [row], null, result => ((result.restored || []).length ? row.company + ' is back on the map.' : 'Nothing was put back.')) }, row.company + '  ↩')))) : null,
-    h('div', { className: 'stoa-mapmain' },
-      h('div', { style: { minWidth: 0 } },
-        h('p', { className: 'stoa-sub', style: { margin: '0 0 8px' } }, MAP_LENSES.find(item => item[0] === lens)[2]),
+    h('div', { className: 'stoa-mapbody' },
+      h('div', { className: 'stoa-mapa' },
+        h('div', { className: 'stoa-mapbar' },
+          h('div', { className: 'stoa-tabs', style: { margin: 0 }, role: 'group', 'aria-label': 'How the map is drawn' }, MAP_LENSES.map(item => h('button', { type: 'button', key: item[0], className: 'stoa-tab', style: { height: 28 },
+            'data-on': lens === item[0] ? '1' : '0', 'aria-pressed': lens === item[0], onClick: () => setLens(item[0]) }, item[1]))),
+          h('div', { className: 'stoa-mapquick' },
+            [['all', 'All'], ['open', 'Not in the pipeline'], ['reason', 'Reason to call'], ['nobuyer', 'No buyer named'], ['fresh', 'Added today']].filter(item => item[0] !== 'fresh' || count('fresh')).map(item =>
+              h(Btn, { key: item[0], kind: 'quiet', 'aria-pressed': quick === item[0], 'data-on': quick === item[0] ? '1' : '0', onClick: () => setQuick(item[0]) }, item[1] + ' ' + count(item[0]))),
+            facet ? h(Btn, { title: 'Show every company again', onClick: () => setFacet(null) }, facet.label + ' ×') : null,
+            filtered && showing.length ? h(Btn, { onClick: () => setPicked(showing.map(c => c.id)) }, 'Pick these ' + showing.length) : null,
+            dismissed.length ? h(Btn, { kind: 'quiet', 'aria-expanded': gone, onClick: () => setGone(!gone) }, dismissed.length + ' dismissed') : null)),
+        h('div', { className: 'stoa-maphow' }, h('p', { className: 'stoa-sub' }, MAP_LENSES.find(item => item[0] === lens)[2]),
+          h('input', { className: 'stoa-field stoa-mapfind', type: 'search', value: find, placeholder: 'Find a company', 'aria-label': 'Find a company', onChange: event => setFind(event.target.value) })),
         h(MapPicture, { market, list, lens, sizeBy, sel, shown, onPick: pick, onClear: () => setPicked(now => (now.length ? [] : now)), onGrow: act.grow, onSuggest: act.suggest,
           onLasso: (ids, add) => setPicked(now => (add ? [...new Set(now.concat(ids))] : ids)) }),
         h('div', { className: 'stoa-maplegend' },
-          h('span', null, 'Size by'), h('span', { className: 'stoa-tabs', style: { margin: 0 }, role: 'group', 'aria-label': 'What a mark\'s size shows' }, MAP_SIZES.map(item => h('button', { type: 'button', key: item[0], className: 'stoa-tab',
-            style: { height: 22, padding: '0 8px', fontSize: 10.5 }, title: item[2], 'data-on': sizeBy === item[0] ? '1' : '0', 'aria-pressed': sizeBy === item[0], onClick: () => setSize(item[0]) }, item[1]))),
-          h('span', null, 'Fit ', h('i', { className: 'stoa-mapheat' }), ' cold to hot'),
-          h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'on' }), 'on the map'), h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'in' }), 'in the pipeline'),
-          h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'fresh' }), 'added today'), h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'sig' }), 'a reason to call'))),
-      h('aside', { className: 'stoa-box stoa-mapside', 'aria-live': 'polite' }, side)),
-    h('div', { className: 'stoa-mapcols' },
-      h('div', null, label('What matters'),
-        h('p', { className: 'stoa-sub', style: { margin: '0 0 6px' } }, weighed ? 'Fit is worked out from your weights, for every company Hermes checked against the brief.' : 'Fit is Hermes\'s judgement. Change how much a requirement counts and the map re-scores itself.'),
-        (market.rates || []).map(rate => { const weight = weights[rate.label] === undefined ? 2 : weights[rate.label]
-          return h('div', { key: rate.label, className: 'stoa-mapweight' },
-            h('div', null, h('span', null, rate.label), h('span', { className: 'stoa-tabs', style: { margin: 0 }, role: 'group', 'aria-label': 'How much “' + rate.label + '” counts' }, WEIGHT_WORDS.map((word, index) =>
-              h('button', { type: 'button', key: word, className: 'stoa-tab', style: { height: 22, padding: '0 7px', fontSize: 10 }, 'data-on': weight === index ? '1' : '0', 'aria-pressed': weight === index,
-                onClick: () => setWeights({ ...weights, [rate.label]: index }) }, word)))),
-            facetBtn('req', rate.label, 'Shows: ' + rate.label, rate.rate + '%', rate.rate, '', rate.shown + ' of ' + rate.of + ' show it')) }),
-        h('div', { className: 'stoa-btns', style: { marginTop: 8 } }, weighed ? h(Btn, { onClick: () => setWeights({}) }, 'Back to Hermes\'s judgement') : null),
-        h('form', { className: 'stoa-pathrow', style: { marginTop: 10 }, onSubmit: event => { event.preventDefault(); if (wanted.trim() && act.require(wanted.trim())) setWanted('') } },
-          h('input', { className: 'stoa-field', style: { fontFamily: 'inherit' }, value: wanted, placeholder: 'A new requirement, in your words', 'aria-label': 'A new requirement', onChange: event => setWanted(event.target.value) }),
-          h(Btn, { type: 'submit', disabled: !wanted.trim(), title: 'Hermes adds it and checks every company against it' }, 'Ask Hermes to check it'))),
-      h('div', null, label('Who holds this market'),
-        (market.holds || []).length ? [h('p', { key: 'p', className: 'stoa-sub', style: { margin: '0 0 6px' } }, 'What the ' + market.holds_of + ' companies we could place use today. Press one to light it up on the map.'),
-          market.holds.map(hold => facetBtn('uses', hold.name, 'Uses: ' + hold.name, hold.share + '%', hold.share, hold.name, hold.count))] : h('p', { className: 'stoa-sub' }, 'Nothing recorded yet about what these companies use today.')),
-      h('div', null, label('How big they are'),
-        MAP_BANDS.some(name => list.some(c => c.band === name)) ? MAP_BANDS.map(name => { const group = list.filter(c => c.band === name); if (!group.length) return null
-          return facetBtn('size', name, name + ' people', group.length, Math.round(100 * group.length / list.length), name + ' people', 'fit ' + Math.round(group.reduce((sum, c) => sum + c.score, 0) / group.length)) })
-          : h('p', { className: 'stoa-sub' }, 'No headcounts recorded yet. Ask Hermes to add each company\'s size.'))),
-    h('div', { className: 'stoa-sechead', style: { padding: '0 0 6px', marginTop: 18 } }, h('span', { className: 'stoa-eyebrow' }, 'The companies'), h('span', { className: 'stoa-sub' }, showing.length + ' of ' + list.length + ' showing')),
-    h('div', { className: 'stoa-maptablewrap' }, h('table', { className: 'stoa-maptable' },
-      h('thead', null, h('tr', null, h('th', { style: { width: 30 } }), [['company', 'Company'], ['segment', 'Segment'], ['score', 'Fit'], ['reason', 'Reason to call'], ['headcount', 'People'], ['uses', 'Uses today'], ['buyer', 'Buyer'], ['status', 'Status']].map(col =>
-        h('th', { key: col[0] }, h('button', { type: 'button', 'aria-pressed': sort.key === col[0], onClick: () => sortBy(col[0]) }, col[1] + (sort.key === col[0] ? (sort.dir < 0 ? ' ↓' : ' ↑') : '')))))),
-      h('tbody', null, rows.map(c => h('tr', { key: c.id, 'data-sel': sel.has(c.id) ? '1' : '0', 'data-dim': shown(c) ? '0' : '1', onClick: event => { if (!event.target.closest('button, input, a')) pick(c.id, event.shiftKey || event.metaKey || event.ctrlKey) } },
-        h('td', null, h('input', { type: 'checkbox', checked: sel.has(c.id), 'aria-label': 'Pick ' + c.company, onChange: () => pick(c.id, true) })),
-        h('td', null, h('b', null, c.company), h('span', { className: 'stoa-sub', style: { display: 'block' } }, c.location || '')),
-        h('td', null, c.segment), h('td', { style: { whiteSpace: 'nowrap' } }, h(Fit, { value: squaresOf(c.score) }), ' ', h('span', { className: 'stoa-num' }, c.score)),
-        h('td', null, c.signal ? [c.signal, agoWords(c.days) ? h('span', { key: 'a', className: 'stoa-sub', style: { display: 'block' } }, agoWords(c.days)) : null] : h('span', { className: 'stoa-sub' }, 'None yet')), h('td', { className: 'stoa-num' }, c.headcount ? c.headcount.toLocaleString() : ''),
-        h('td', null, c.uses), h('td', null, c.buyer ? [c.buyer.name, h('span', { key: 't', className: 'stoa-sub', style: { display: 'block' } }, c.buyer.title || '')] : h('span', { className: 'stoa-sub' }, 'Not named')),
-        h('td', { style: { whiteSpace: 'nowrap' } }, status(c), c.status !== 'tracked' ? h(Btn, { kind: 'quiet', disabled: Boolean(busy), style: { marginLeft: 4 }, onClick: () => act.add([c]) }, 'Add') : null)))))),
-    chosen.length > 1 ? h('div', { className: 'stoa-mapabar' }, h('b', null, chosen.length + ' picked'), actions(chosen), h(Btn, { kind: 'quiet', onClick: () => setPicked([]) }, 'Clear')) : null)
+          h('div', null,
+            h('span', null, 'Fit ', h('i', { className: 'stoa-mapheat' }), ' cold to hot'),
+            h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'on' }), 'on the map'), h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'in' }), 'in the pipeline'),
+            h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'fresh' }), 'added today'), h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'sig' }), 'a reason to call')),
+          h('div', null, h('span', null, 'Size by'), h('span', { className: 'stoa-tabs', style: { margin: 0 }, role: 'group', 'aria-label': 'What a mark\'s size shows' }, MAP_SIZES.map(item => h('button', { type: 'button', key: item[0], className: 'stoa-tab',
+            style: { height: 22, padding: '0 8px', fontSize: 10.5 }, title: item[2], 'data-on': sizeBy === item[0] ? '1' : '0', 'aria-pressed': sizeBy === item[0], onClick: () => setSize(item[0]) }, item[1])))))),
+      h('aside', { ref: rail, className: 'stoa-box stoa-mapside', 'aria-live': 'polite' }, side),
+      h('div', { className: 'stoa-mapb' },
+        h('div', { className: 'stoa-mapcols' },
+          h('div', null, label('What matters'),
+            h('p', { className: 'stoa-sub stoa-mapnote' }, weighed ? 'Fit is worked out from your weights, for every company Hermes checked against the brief.' : 'Fit is Hermes\'s judgement. Change how much a requirement counts and the map re-scores itself.'),
+            (market.rates || []).map(rate => { const weight = weights[rate.label] === undefined ? 2 : weights[rate.label]
+              return h('div', { key: rate.label, className: 'stoa-mapweight' },
+                h('div', { className: 'stoa-mapwlabel' }, rate.label),
+                h('div', { className: 'stoa-mapwrow' },
+                  h('span', { className: 'stoa-tabs', style: { margin: 0 }, role: 'group', 'aria-label': 'How much “' + rate.label + '” counts' }, WEIGHT_WORDS.map((word, index) =>
+                    h('button', { type: 'button', key: word, className: 'stoa-tab', style: { height: 22, padding: '0 7px', fontSize: 10 }, 'data-on': weight === index ? '1' : '0', 'aria-pressed': weight === index,
+                      onClick: () => setWeights({ ...weights, [rate.label]: index }) }, word))),
+                  facetBtn('req', rate.label, 'Shows: ' + rate.label, rate.rate + '%', rate.rate, '', rate.of ? rate.shown + ' of ' + rate.of + ' show it' : 'not checked yet'))) }),
+            weighed ? h('div', { className: 'stoa-btns', style: { marginTop: 10 } }, h(Btn, { onClick: () => setWeights({}) }, 'Back to Hermes\'s judgement')) : null,
+            h('form', { className: 'stoa-pathrow', style: { marginTop: 12 }, onSubmit: event => { event.preventDefault(); if (wanted.trim() && act.require(wanted.trim())) setWanted('') } },
+              h('input', { className: 'stoa-field', style: { fontFamily: 'inherit' }, value: wanted, placeholder: 'A new requirement, in your words', 'aria-label': 'A new requirement', onChange: event => setWanted(event.target.value) }),
+              h(Btn, { type: 'submit', disabled: !wanted.trim(), title: 'Hermes adds the requirement and checks every company on the map against it' }, 'Ask Hermes'))),
+          h('div', null, label('Who holds this market'),
+            (market.holds || []).length ? [h('p', { key: 'p', className: 'stoa-sub stoa-mapnote' }, 'What the ' + market.holds_of + ' companies we could place use today, and how many use each. Press one to light it up on the map.'),
+              market.holds.map(hold => facetBtn('uses', hold.name, 'Uses: ' + hold.name, hold.share + '%', hold.share, hold.name, String(hold.count)))] : h('p', { className: 'stoa-sub stoa-mapnote' }, 'Nothing recorded yet about what these companies use today.')),
+          h('div', null, label('How big they are'),
+            MAP_BANDS.some(name => list.some(c => c.band === name)) ? [h('p', { key: 'p', className: 'stoa-sub stoa-mapnote' }, 'Share of companies by the people who work there, how many that is, and their average fit. Press one to light it up on the map.'),
+              MAP_BANDS.map(name => { const group = list.filter(c => c.band === name); if (!group.length) return null
+                return facetBtn('size', name, name + ' people', Math.round(100 * group.length / list.length) + '%', Math.round(100 * group.length / list.length), name + ' people', group.length + ' · fit ' + Math.round(group.reduce((sum, c) => sum + c.score, 0) / group.length)) })]
+              : h('p', { className: 'stoa-sub stoa-mapnote' }, 'No headcounts recorded yet. Ask Hermes to add each company\'s size.'))),
+        h('div', { className: 'stoa-sechead', style: { padding: '0 0 6px', marginTop: 22 } }, h('span', { className: 'stoa-eyebrow' }, 'The companies'), h('span', { className: 'stoa-sub' }, showing.length + ' of ' + list.length + ' showing')),
+        h('div', { className: 'stoa-maptablewrap' }, h('table', { className: 'stoa-maptable' },
+          h('colgroup', null, h('col', { style: { width: 36 } }), cols.map(col => h('col', { key: col[0], style: col[2] ? { width: col[2] } : undefined }))),
+          h('thead', null, h('tr', null, h('th', null), cols.map(col =>
+            h('th', { key: col[0], 'data-num': col[0] === 'headcount' ? '1' : '0' }, h('button', { type: 'button', 'aria-pressed': sort.key === col[0], onClick: () => sortBy(col[0]) }, col[1] + (sort.key === col[0] ? (sort.dir < 0 ? ' ↓' : ' ↑') : '')))))),
+          h('tbody', null, rows.map(c => h('tr', { key: c.id, 'data-sel': sel.has(c.id) ? '1' : '0', 'data-dim': shown(c) ? '0' : '1', onClick: event => { if (!event.target.closest('button, input, a')) pickHere(c.id, event.shiftKey || event.metaKey || event.ctrlKey) } },
+            h('td', null, h('input', { type: 'checkbox', checked: sel.has(c.id), 'aria-label': 'Pick ' + c.company, onChange: () => pickHere(c.id, true) })),
+            h('td', null, h('b', null, clamp(c.company, 2)), c.location ? h('span', { className: 'stoa-sub stoa-clip', style: { display: 'block' }, title: c.location }, c.location) : null),
+            h('td', null, clamp(c.segment, 2)),
+            h('td', { style: { whiteSpace: 'nowrap' } }, h(Fit, { value: squaresOf(c.score) }), ' ', h('span', { className: 'stoa-num' }, c.score)),
+            h('td', null, c.signal ? [h('span', { key: 's' }, clamp(c.signal, 2)), agoWords(c.days) ? h('span', { key: 'a', className: 'stoa-sub', style: { display: 'block' } }, agoWords(c.days)) : null] : h('span', { className: 'stoa-sub' }, 'None yet')),
+            h('td', { className: 'stoa-num', 'data-num': '1' }, c.headcount ? c.headcount.toLocaleString() : ''),
+            h('td', null, c.uses ? clamp(c.uses, 2) : null),
+            h('td', null, c.buyer ? [h('span', { key: 'n' }, clamp(c.buyer.name, 2)), c.buyer.title ? h('span', { key: 't', className: 'stoa-sub stoa-clamp', style: { WebkitLineClamp: 1 }, title: c.buyer.title }, c.buyer.title) : null] : h('span', { className: 'stoa-sub' }, 'Not named')),
+            h('td', null, c.status === 'tracked' ? h(Chip, { tone: 'good' }, 'in the pipeline') : h(Btn, { disabled: Boolean(busy), title: 'Add ' + c.company + ' to the pipeline', onClick: () => act.add([c]) }, c.fresh ? 'Add · new today' : 'Add'))))))),
+        chosen.length > 1 ? h('div', { className: 'stoa-mapabar' }, h('b', null, chosen.length + ' picked'), actions(chosen), h(Btn, { kind: 'quiet', onClick: () => setPicked([]) }, 'Clear')) : null)))
 }
 
 /** Save a map as one web page: a file to keep, host or send. The copy to share leaves out buyers' names and the pipeline. */
@@ -4427,6 +4559,15 @@ function Page() {
   // A desk whose records are never billed has no Cash tab: if that was the last one shown, show Today.
   const cashShown = Boolean(query.data && query.data.playbook && (query.data.playbook.billing !== 'none' || hasClientMoney(query.data)))
   useEffect(() => { if (tab === 'cash' && query.data && !cashShown) $tab.set('today') }, [tab, cashShown, Boolean(query.data)])
+  // A map that was not there a moment ago (Hermes has just saved it) is the one to show.
+  const mapIds = query.data ? query.data.markets.map(item => item.id).join('|') : null
+  const knownMaps = useRef(null)
+  useEffect(() => {
+    if (mapIds === null) return
+    const ids = mapIds ? mapIds.split('|') : []
+    if (knownMaps.current) { const fresh = ids.find(id => !knownMaps.current.includes(id)); if (fresh) setMarketId(fresh) }
+    knownMaps.current = ids
+  }, [mapIds])
   if (!query.data) return h('div', { className: 'stoa stoa-page' }, h(Unavailable, { error: query.error, loading: query.isLoading }))
   const state = query.data, pb = state.playbook, totals = state.totals
   const sign = state.sign || { text: '', place: 'art' }, signed = String(typing ?? sign.text ?? '').trim(), ink = sign.ink || 'auto'
@@ -4536,11 +4677,8 @@ function Page() {
     !paged && tab === 'cash' ? h('div', { className: 'stoa-split', ref: split, 'data-side': '0' },
       h(Cash, { state, openId: '', setOpenId: openRecord, openClient })) : null,
     tab === 'market' ? (market
-      ? h('div', null,
-        state.markets.length > 1 ? h('div', { className: 'stoa-tabs', style: { marginTop: 0 } }, state.markets.map(item =>
-          h('button', { type: 'button', key: item.id, className: 'stoa-tab', 'data-on': item.id === market.id ? '1' : '0', onClick: () => setMarketId(item.id) }, item.name))) : null,
-        h(MarketMap, { market, shape: state.playbook.shape, openRecord }))
-      : h('p', { className: 'stoa-sub' }, 'No market map yet. Ask Stoa below: “Map the market for us.”')) : null,
+      ? h(MarketMap, { market, markets: state.markets, onMarket: setMarketId, shape: state.playbook.shape, openRecord })
+      : h('div', { style: { maxWidth: 720 } }, h(NewMap, { first: true }))) : null,
     !paged && tab === 'activity' ? h('div', { style: { maxWidth: 800 } }, state.activity.length ? state.activity.map(entry => h('div', { key: entry.id, className: 'stoa-row', style: { cursor: 'default', alignItems: 'center' } },
       h('i', { className: 'stoa-dot', style: { marginTop: 0 }, 'data-tone': entry.kind === 'stage' && !entry.undone ? 'good' : '' }),
       h('span', { className: 'stoa-grow', style: entry.undone ? { opacity: 0.55 } : undefined },

@@ -609,6 +609,35 @@ class Markets:
             return {"ok": True, "dismissed": done}
         return {"ok": False, "error": "nothing matched (records already in the pipeline cannot be dismissed)"}
 
+    def rename(self, ref: Any, name: Any) -> dict:
+        """Call a map something else. Its id, and so every company's, stays as it was."""
+        market = self._market(ref)
+        if market is None:
+            return {"ok": False, "error": "That map is no longer on the desk."}
+        name = _clean(name, 120)
+        if not name:
+            return {"ok": False, "error": "A map needs a name."}
+        taken = [m for m in self.list_markets() if m["id"] != market["id"] and (m["name"].lower() == name.lower() or m["id"] == st.slugify(name))]
+        if taken:
+            return {"ok": False, "error": "Another map is already called that."}
+        with self.store._conn() as conn:
+            conn.execute("UPDATE markets SET name = ?, updated_at = ? WHERE id = ?", (name, st.now(), market["id"]))
+        self._refresh(market["id"])
+        return {"ok": True, "id": market["id"], "name": name}
+
+    def remove(self, ref: Any) -> dict:
+        """Delete a map and every company on it. Records already made from it stay in the pipeline. This is not on the
+        ledger and cannot be taken back, so only a person at the page does it: no tool action leads here."""
+        market = self._market(ref)
+        if market is None:
+            return {"ok": False, "error": "That map is no longer on the desk."}
+        with self.store._conn() as conn:
+            companies = conn.execute("SELECT count(*) FROM targets WHERE market_id = ?", (market["id"],)).fetchone()[0]
+            kept = conn.execute("SELECT count(*) FROM targets WHERE market_id = ? AND status = 'tracked'", (market["id"],)).fetchone()[0]
+            conn.execute("DELETE FROM targets WHERE market_id = ?", (market["id"],))
+            conn.execute("DELETE FROM markets WHERE id = ?", (market["id"],))
+        return {"ok": True, "id": market["id"], "name": market["name"], "companies": companies, "in_pipeline": kept}
+
     def restore(self, refs: list) -> dict:
         """Put dismissed companies back on the map."""
         done, touched = [], set()

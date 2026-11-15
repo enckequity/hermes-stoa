@@ -187,6 +187,7 @@ def state() -> dict:
         summary = d.markets.summary(market["id"], text=False)
         markets.append({
             "id": market["id"], "name": market["name"], "brief": market["brief"],
+            "updated": (summary["market"].get("updated_at") or "")[:10],
             "requirements": summary["market"]["requirements"], "reading": summary["market"]["reading"],
             "implications": summary["market"]["implications"], "numbers": summary["numbers"],
             "segments": [{"name": seg["segment"], "description": seg["description"], "count": seg["count"], "share": seg["share"],
@@ -782,6 +783,24 @@ def market_page(market_id: str, share: int = 0) -> dict:
         raise HTTPException(404, "no such market map")
     html = _mod("page").render(d.markets.summary(market["id"]), d.playbook().terms, share=bool(share))
     return {"filename": "%s%s.html" % (market["id"], "-share" if share else ""), "html": html}     # the id is the map's name as a slug
+
+
+@router.post("/market/{market_id}/rename")
+def market_rename(market_id: str, body: dict = Body(...)) -> dict:
+    """Call a map something else."""
+    d = desk()
+    result = d.markets.rename(market_id, body.get("name"))
+    d.announce()
+    return result
+
+
+@router.post("/market/{market_id}/remove")
+def market_remove(market_id: str) -> dict:
+    """Delete a map and the companies on it, after the page has asked. Records already in the pipeline stay."""
+    d = desk()
+    result = d.markets.remove(market_id)
+    d.announce()
+    return result
 
 
 @router.post("/targets")
