@@ -19,6 +19,7 @@ hermes plugins doctor . --ci
 | `intake.py` | Lists sent in: matching rows to records, the review, and applying what was approved |
 | `market.py` | Market maps: segments, requirements, what the map adds up to, and the step into the pipeline |
 | `page.py` | A market map as one self-contained web page |
+| `pagemap.js` | The working map inside that page: written into the file by `page.py`. Kept in step by hand with `mapCompanies` and `mapLayout` in `desktop/plugin.js` |
 | `sources.py` | People Data Labs, Exa and meeting-note sources |
 | `dashboard/` | The web tab: `plugin_api.py` (routes, shared with the app half), `dist/index.js` and `dist/style.css` (hand-written, no build step) |
 | `desktop/plugin.js` | The Desktop app and Webapp half: the pane, the page, and the card and map drawn in a conversation |

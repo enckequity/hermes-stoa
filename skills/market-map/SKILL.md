@@ -52,6 +52,9 @@ Aim for 5 to 10 companies per segment on a first pass. Twenty checked ones beat 
   know something the requirements miss. A map of all fives is useless.
 - `why`: one sentence of evidence. Never invent it.
 - `signal`: a reason to reach out now (funding, hiring, a launch, a new executive).
+- `signal_date`: the day that happened, as `YYYY-MM-DD` (`YYYY-MM` if you only know the month). The
+  page puts a fresh reason to call above a stale one, so a date matters. Leave it out if the source
+  does not give one. Never guess.
 - `uses`: what it uses today for the job you do. A vendor's name, "Spreadsheets", "In-house
   tool". This is how the map shows who you are up against.
 - `also`: a second segment it could just as well sit in. These are the bridges between segments.

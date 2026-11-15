@@ -760,12 +760,26 @@ class MarketTests(unittest.TestCase):
         for must in ("Regional freight brokers (demo)", "How rare each requirement is", "Who holds this market today",
                      "Where the segments meet", "First calls", "Renata Okafor", "In the pipeline", "&lt;script&gt;alert(1)&lt;/script&gt; &amp; Sons"):
             self.assertIn(must, html)
-        for never in ("<script", "href=\"javascript", " src=", "@import", "<b>bold</b>"):
+        # The page carries two scripts of its own and no other: the companies as data, and the map that draws them.
+        # Nothing a company's words say can become markup, in the page or in that data, and nothing is fetched.
+        self.assertEqual(html.count("<script"), 2)
+        self.assertIn('<script type="application/json" id="sm-data">', html)
+        for never in ("<script>alert", "alert(1)</script>", "href=\"javascript", " src=", "@import", "<b>bold</b>", "fetch(", "XMLHttpRequest", "WebSocket", "//cdn"):
             self.assertNotIn(never, html)
+        data = json.loads(html.split('<script type="application/json" id="sm-data">')[1].split("</script>")[0])
+        names = [c["company"] for seg in data["segments"] for c in seg["companies"]]
+        self.assertIn("<script>alert(1)</script> & Sons", names)      # whole in the data, and only there
+        meridian = next(c for seg in data["segments"] for c in seg["companies"] if c["company"] == "Meridian Freight")
+        self.assertEqual((meridian["status"], meridian["people"][0]["name"], meridian["headcount"]), ("tracked", "Renata Okafor", 220))
         shared = Path(self.market({"action": "export", "share": True})["path"]).read_text(encoding="utf-8")
         for hidden in ("Renata Okafor", "Tobias Lindqvist", "In the pipeline", "Buyers named"):
             self.assertNotIn(hidden, shared)
         self.assertIn("Meridian Freight", shared)
+        sent = json.loads(shared.split('<script type="application/json" id="sm-data">')[1].split("</script>")[0])
+        for company in (c for seg in sent["segments"] for c in seg["companies"]):
+            self.assertNotIn("people", company)
+            self.assertNotIn("status", company)
+        self.assertNotIn("People named", shared)      # a size the copy to send on has nothing to draw from
 
     def test_an_older_database_is_upgraded_in_place(self):
         import sqlite3
@@ -1105,12 +1119,115 @@ class SetupTests(unittest.TestCase):
     def test_a_new_desk_has_everything_still_to_do(self):
         data = self.fresh().setup()
         self.assertEqual({item["id"]: item["done"] for item in data["checklist"]},
-                         {"playbook": False, "records": False, "slack": False, "sweep": False, "notes": False})
+                         {"playbook": False, "records": False, "keys": False, "slack": False, "sweep": False, "notes": False})
         self.assertEqual((data["playbook"]["name"], data["playbook"]["chosen"], data["tour"], data["can_switch"]), ("b2b-sales", False, None, True))
         self.assertEqual(len(data["automations"]), 7)
         self.assertEqual(sorted(example["id"] for example in data["examples"]), ["recruiting", "saas"])
         self.assertEqual(data["playbook_sets"]["stages"][-1], "Closed won")
         self.assertRegex(data["version"], r"^\d+\.\d+\.\d+$")
+
+    def test_each_key_says_what_it_is_for_and_whether_it_is_set(self):
+        desk = self.fresh({"playbook": "b2b-sales", "pdl_monthly_cap": 80}, {"PDL_API_KEY": "pdl-secret-value"})
+        desk.store.bump("pdl_calls:" + dt.date.today().isoformat()[:7], 3)
+        data = desk.setup()
+        keys = {row["id"]: row for row in data["keys"]}
+        self.assertEqual([row["id"] for row in data["keys"]], ["exa", "pdl", "granola"])
+        self.assertEqual((keys["exa"]["set"], keys["pdl"]["set"], keys["granola"]["set"]), (False, True, False))
+        self.assertEqual(keys["pdl"]["note"], "3 of 80 lookups used this month.")
+        for row in data["keys"]:
+            self.assertTrue(row["get"].startswith("https://"))
+            self.assertTrue(all(row[field] for field in ("name", "unlocks", "without", "steps", "cost", "check", "where")))
+        step = next(item for item in data["checklist"] if item["id"] == "keys")
+        self.assertEqual((step["done"], step["detail"]), (True, "Set: People Data Labs."))
+        self.assertNotIn("pdl-secret-value", json.dumps(data))
+
+    def test_a_key_is_tested_with_one_small_request_and_never_shown(self):
+        calls = []
+
+        def http(url, **kw):
+            calls.append((url, kw))
+            return {"api.peopledatalabs.com": (404, {}), "api.exa.ai": (401, {}), "public-api.granola.ai": (402, {})}[url.split("/")[2]]
+
+        desk = make_desk(self.tmp.name, playbook="b2b-sales", http=http,
+                         secrets={"PDL_API_KEY": "pdl-secret-value", "EXA_API_KEY": "exa-secret-value", "GRANOLA_API_KEY": "granola-secret-value"})
+        pdl, exa, granola = desk.key_test("pdl"), desk.key_test("exa"), desk.key_test("granola")
+        self.assertEqual((pdl["ok"], pdl["state"], pdl["message"]), (True, "works", "People Data Labs accepted the key."))
+        self.assertEqual((exa["ok"], exa["state"]), (False, "rejected"))
+        self.assertIn("Copy it again from the Exa dashboard", exa["message"])
+        self.assertEqual((granola["ok"], granola["state"]), (False, "spent"))
+        self.assertEqual(len(calls), 3)     # one request each, no more
+        self.assertEqual(calls[0][1]["params"]["email"], sources.KEY_CHECK_EMAIL)     # nobody's address: the lookup cannot match, so it is not billed
+        self.assertEqual(calls[1][1]["data"], {"query": "Exa", "numResults": 1})
+        for answer in (pdl, exa, granola):
+            self.assertNotIn("secret-value", json.dumps(answer))
+        self.assertEqual(desk.setup()["keys"][1]["note"], "0 of 50 lookups used this month.")     # a test is not a lookup
+
+    def test_a_key_that_is_not_set_or_cannot_be_reached_says_so(self):
+        desk = make_desk(self.tmp.name, playbook="b2b-sales", secrets={"EXA_API_KEY": "exa-secret-value"})     # the stand-in network answers nothing
+        self.assertEqual(desk.key_test("pdl")["state"], "missing")
+        self.assertEqual(desk.key_test("nonsense")["state"], "unknown")
+        down = desk.key_test("exa")
+        self.assertEqual((down["ok"], down["state"]), (False, "unreachable"))
+        self.assertIn("nothing is known about the key", down["message"])
+
+    def test_setup_says_which_automations_hermes_has_switched_on(self):
+        desk = self.fresh({"playbook": "b2b-sales"})
+        self.assertEqual({row["state"] for row in desk.setup()["automations"]}, {"unknown"})     # nothing to read Hermes's jobs with
+        desk.jobs = lambda: [{"name": "Pipeline morning brief", "on": True, "schedule": "30 8 * * 1-5", "next": "2031-01-06T08:30:00"},
+                             {"name": "Friday pipeline review", "on": False, "schedule": "0 16 * * 5", "next": ""},
+                             {"name": "Somebody else's job", "on": True, "schedule": "0 9 * * *", "next": ""}]
+        data = desk.setup()
+        rows = {row["name"]: row for row in data["automations"]}
+        self.assertEqual((rows["morning-brief"]["state"], rows["morning-brief"]["schedule"]), ("on", "30 8 * * 1-5"))
+        self.assertEqual((rows["friday-review"]["state"], rows["notes-sweep"]["state"]), ("paused", "off"))
+        self.assertEqual(len(data["automations"]), 7)
+        step = next(item for item in data["checklist"] if item["id"] == "sweep")
+        self.assertEqual((step["done"], step["detail"]), (True, "Switched on: Pipeline morning brief."))
+
+        def broken():
+            raise OSError("jobs file is locked")
+        desk.jobs = broken
+        self.assertEqual({row["state"] for row in desk.setup()["automations"]}, {"unknown"})     # Setup still opens
+
+    def test_a_notes_folder_is_checked_found_and_saved_from_the_page(self):
+        settings = {"playbook": "b2b-sales"}
+        desk = Desk(data_dir=lambda: Path(self.tmp.name), get_config=lambda k, default=None: settings.get(k, default),
+                    set_config=settings.__setitem__, get_secret=lambda n: None, actor=lambda: "tester")
+        folder = Path(self.tmp.name) / "Meeting notes"
+        (folder / "calls").mkdir(parents=True)
+        (folder / "dana.md").write_text("Dana wants the proposal by Thursday.")
+        (folder / "calls" / "marcus.txt").write_text("Marcus asked about SSO.")
+        (folder / "photo.png").write_text("not a note")
+        self.assertIn("Paste the folder", desk.notes_check("")["message"])
+        self.assertIn("not a whole path", desk.notes_check("Meeting notes")["message"])
+        self.assertIn("no folder at that path", desk.notes_check(str(folder) + "-typo")["message"])
+        self.assertIn("a file, not a folder", desk.notes_check(str(folder / "dana.md"))["message"])
+        found = desk.notes_check(' "%s" ' % folder)      # pasted with quotes and spaces round it
+        self.assertEqual((found["ok"], found["count"], found["folder"]), (True, 2, str(folder)))
+        self.assertFalse(desk.notes_folder(str(folder) + "-typo")["ok"])
+        self.assertNotIn("notes_dir", settings)      # a folder that is not there is never saved
+        saved = desk.notes_folder(str(folder))
+        self.assertEqual((saved["ok"], saved["saved"], settings["notes_dir"]), (True, True, str(folder)))
+        data = desk.setup()
+        self.assertEqual((data["notes"]["folder"], data["notes"]["ok"], data["notes"]["count"]), (str(folder), True, 2))
+        self.assertTrue(next(item for item in data["checklist"] if item["id"] == "notes")["done"])
+        self.assertEqual((desk.notes_folder("")["folder"], settings["notes_dir"]), ("", ""))
+        desk.can_configure = False
+        self.assertTrue(desk.notes_folder(str(folder))["elsewhere"])
+        self.assertEqual(settings["notes_dir"], "")
+
+    def test_looking_for_a_notes_folder_tries_only_the_usual_places(self):
+        desk = self.fresh({"playbook": "b2b-sales"})
+        home = Path(self.tmp.name) / "home"
+        (home / "Documents" / "Notes").mkdir(parents=True)
+        (home / "Documents" / "Notes" / "call.md").write_text("A call.")
+        (home / "Documents" / "Obsidian").mkdir()      # there, but empty: not offered
+        (home / "Elsewhere").mkdir()
+        (home / "Elsewhere" / "secret.md").write_text("Not in a usual place.")
+        with mock.patch.dict("os.environ", {"HOME": str(home)}):
+            answer = desk.notes_look()
+        self.assertEqual([(row["folder"], row["count"]) for row in answer["found"]], [(str(home / "Documents" / "Notes"), 1)])
+        self.assertTrue(all(place.startswith("~/") for place in answer["looked"]))
 
     def test_it_reports_what_is_set_without_showing_any_key(self):
         desk = self.fresh({"playbook": "recruiting", "channels": ["C1"], "slack_users": ["U1", "U2"], "pdl_monthly_cap": 80,
@@ -1145,7 +1262,7 @@ class SetupTests(unittest.TestCase):
         desk._get_secret = lambda name: (_ for _ in ()).throw(RuntimeError("no scope"))      # swallowed where secrets are read: not a problem
         with self.assertLogs("hermes.plugins.stoa", level="WARNING") as logged:
             data = desk.setup()
-        self.assertEqual((data["ok"], data["data"]["records"], len(data["checklist"]), len(data["automations"])), (True, 1, 5, 7))
+        self.assertEqual((data["ok"], data["data"]["records"], len(data["checklist"]), len(data["automations"])), (True, 1, 6, 7))
         self.assertEqual(sorted(data["problems"]), ["the folders it may read: OSError: disk went away", "who may press Slack buttons: OSError: disk went away"])
         self.assertEqual(len(logged.output), 2)
         self.assertEqual({rule["label"]: rule["value"] for rule in data["rules"]}["Files it may read"], "CSV and TSV only, from: .")
@@ -3237,6 +3354,9 @@ class DashboardApiTests(unittest.TestCase):
         self.assertTrue(self.api.act(dana, {"verb": "done", "next_step": "Prep call", "next_due": "2031-01-07"})["ok"])
         self.assertEqual(self.desk.store.get(dana)["next_step"], "Prep call")
         self.assertEqual(self.api.setup()["playbook"]["name"], "recruiting")
+        self.assertEqual(self.api.key_test({"service": "pdl"})["state"], "missing")     # the page's Test button, with no key set
+        self.assertFalse(self.api.notes_check({"folder": "not-a-whole-path"})["ok"])
+        self.assertEqual(self.api.notes_look()["ok"], True)
         started = self.api.tour({"action": "start", "example": "saas"})
         self.assertEqual((started["example"], self.api.state()["tour"]["example"], self.api.state()["playbook"]["name"]), ("saas", "saas", "b2b-sales"))
         self.assertEqual(self.api.tour({"action": "leave"}), {"ok": True, "left": True})
@@ -3602,6 +3722,79 @@ class DashboardApiTests(unittest.TestCase):
         self.assertNotIn("Renata Okafor", page["html"])
         counts = self.api.state()["markets"][0]["counts"]
         self.assertEqual((counts["mapped"], counts["tracked"], counts["dismissed"]), (6, 1, 1))
+        state = self.api.state()
+        self.assertEqual(([row["company"] for row in state["markets"][0]["dismissed"]], state["markets"][0]["lookups"], state["playbook"]["shape"]), (["Quill Cargo"], False, "roles"))
+        self.assertEqual(self.api.targets({"verb": "restore", "ids": [other["id"]]})["restored"], ["Quill Cargo"])
+        self.assertEqual(self.api.state()["markets"][0]["counts"]["dismissed"], 0)
+        with self.assertRaises(self.api.HTTPException):
+            self.api.targets({"verb": "restore", "ids": []})
+
+
+class MapOnThePageTests(unittest.TestCase):
+    """What the page's map does to the companies picked on it."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.desk = make_desk(self.tmp.name, playbook="b2b-sales")
+        fixture.load_market(self.desk)
+        self.market = self.desk.markets.list_markets()[0]
+
+    def companies(self):
+        return {c["company"]: c for seg in self.desk.markets.summary(self.market["id"], text=False)["segments"] for c in seg["companies"]}
+
+    def test_a_company_carries_its_headcount_and_the_day_it_was_added(self):
+        from stoa.market import headcount
+        self.assertEqual([headcount(text) for text in ("220 people", "1,200", "Founded 2015, 80 staff", "about 3k employees", "mid-size", "")], [220, 1200, 80, 3000, 0, 0])
+        rows = self.companies()
+        self.assertEqual(rows["Meridian Freight"]["headcount"], 220)
+        self.assertEqual(rows["Meridian Freight"]["added"], dt.datetime.now(dt.timezone.utc).date().isoformat())
+
+    def test_a_signal_keeps_the_day_it_happened(self):
+        from stoa.market import signal_day
+        self.assertEqual([signal_day(text) for text in ("2026-11-03", "2026-10", "last month", "2026-02-30", "", None, 20261103)], ["2026-11-03", "2026-10-15", "", "", "", "", ""])
+        name = fixture.MARKET["name"]
+        self.desk.markets.add({"market": name, "companies": [{"company": "Meridian Freight", "signal_date": "2026-11-03"}, {"company": "Halcyon Transport", "signal_date": "2026-11-01"}]})
+        rows = self.companies()
+        self.assertEqual(rows["Meridian Freight"]["signal_date"], "2026-11-03")
+        self.assertNotIn("signal_date", rows["Halcyon Transport"])      # no signal, so no date to show
+        self.desk.markets.add({"market": name, "companies": [{"company": "Meridian Freight", "signal": "Raised a round"}]})
+        self.assertNotIn("signal_date", self.companies()["Meridian Freight"])      # a new signal does not wear the old one's date
+        self.desk.markets.add({"market": name, "companies": [{"company": "Meridian Freight", "signal": "Raised a round", "signal_date": "2026-11"}]})
+        self.assertEqual(self.companies()["Meridian Freight"]["signal_date"], "2026-11-15")
+
+    def test_several_are_added_to_the_pipeline_at_once(self):
+        rows = self.companies()
+        result = self.desk.markets.track_many([rows["Meridian Freight"]["id"], rows["Tidewater Logistics"]["id"]], "tester")
+        self.assertEqual((result["ok"], len(result["added"])), (True, 2))
+        again = self.desk.markets.track_many([rows["Meridian Freight"]["id"]], "tester")
+        self.assertEqual((again["ok"], again["added"]), (False, []))
+        self.assertIn("already in the pipeline", again["skipped"][0])
+        self.assertEqual(self.companies()["Meridian Freight"]["status"], "tracked")
+
+    def test_a_dismissed_company_can_be_put_back(self):
+        target = self.companies()["Halcyon Transport"]["id"]
+        self.assertTrue(self.desk.markets.dismiss({"targets": [target], "reason": "Too small"})["ok"])
+        self.assertNotIn("Halcyon Transport", self.companies())
+        self.assertEqual(self.desk.markets.restore([target]), {"ok": True, "restored": ["Halcyon Transport"]})
+        back = self.companies()["Halcyon Transport"]
+        self.assertEqual((back["status"], back.get("signal", "")), ("new", ""))      # the reason it was dismissed for does not linger as a signal
+        self.assertEqual(self.desk.markets.restore([target]), {"ok": False, "restored": []})
+
+    def test_a_company_moves_only_to_a_segment_the_map_has(self):
+        target = self.companies()["Halcyon Transport"]["id"]
+        moved = self.desk.markets.move(target, "hybrid carriers")
+        self.assertEqual((moved["ok"], moved["segment"]), (True, "Hybrid carriers"))
+        self.assertEqual(self.companies()["Halcyon Transport"]["segment"], "Hybrid carriers")
+        self.assertFalse(self.desk.markets.move(target, "A segment nobody made")["ok"])
+
+    def test_buyers_are_looked_up_only_where_nobody_is_named_and_say_why_they_stop(self):
+        rows = self.companies()
+        nobody = [c["id"] for c in rows.values() if not c.get("people")]
+        self.assertTrue(nobody)
+        stopped = self.desk.markets.buyers(nobody + [rows["Meridian Freight"]["id"]])
+        self.assertEqual((stopped["ok"], stopped["found"]), (False, []))
+        self.assertIn("People Data Labs is not set up", stopped["problem"])
 
 
 class FileBoundaryTests(unittest.TestCase):

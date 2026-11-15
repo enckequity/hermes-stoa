@@ -192,7 +192,51 @@ def domain_of(url: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
+# -- Is a key any good? -------------------------------------------------------------------------
+KEY_CHECK_EMAIL = "stoa-key-check@example.com"      # an address nobody has: the lookup cannot match
+
+
+def check_key(service: str, key: str, http: Callable = http_json) -> dict:
+    """One small request that shows whether a service accepts a key. Returns ``{"state", "status"}``.
+
+    ``state`` is ``works``, ``rejected`` (the service refused the key), ``spent`` (accepted, but the
+    account is out of credit) or ``unreachable`` (no answer, or one that says nothing about the key).
+
+    - People Data Labs: a person lookup for an address nobody has. It bills a match only, so this is free.
+    - Exa: one search for one result with no page text. Exa bills it like any other search.
+    - Granola: the first page of the note list, one note long. Free.
+    """
+    if service == "pdl":
+        status, _ = http(PDL + "/person/enrich", headers={"X-Api-Key": key}, params={"email": KEY_CHECK_EMAIL, "min_likelihood": 10})
+        accepted = status in (200, 404)             # 404 is "no such person", which only an accepted key is told
+    elif service == "exa":
+        status, _ = http(EXA + "/search", headers={"x-api-key": key}, data={"query": "Exa", "numResults": 1})
+        accepted = status == 200
+    elif service == "granola":
+        since = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        status, _ = http(GRANOLA + "/notes", headers={"Authorization": "Bearer " + key}, params={"updated_after": since, "page_size": 1})
+        accepted = status == 200
+    else:
+        return {"state": "unknown", "status": 0}
+    state = "works" if accepted else "rejected" if status in (401, 403) else "spent" if status == 402 else "unreachable"
+    return {"state": state, "status": status}
+
+
 # -- Meeting notes ------------------------------------------------------------------------------
+def count_notes(folder: Path) -> tuple:
+    """How many notes ``folder_notes`` would find in a folder (it and one level below), and when the newest was
+    written (a date, or ""). Names and dates only: no note is opened."""
+    count, newest = 0, 0.0
+    try:
+        for path in list(folder.glob("*")) + list(folder.glob("*/*")):
+            if path.is_file() and path.suffix.lower() in NOTE_SUFFIXES and not path.name.startswith("."):
+                count += 1
+                newest = max(newest, path.stat().st_mtime)
+    except OSError:
+        pass
+    return count, (dt.date.fromtimestamp(newest).isoformat() if newest else "")
+
+
 def folder_notes(folder: str, days: int = 7) -> list:
     """Markdown and text files in a folder (and one level below), newest first.
 

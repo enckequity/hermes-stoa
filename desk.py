@@ -30,6 +30,35 @@ log = logging.getLogger("hermes.plugins.stoa")
 
 PDL_KEY = "PDL_API_KEY"
 GRANOLA_KEY = "GRANOLA_API_KEY"
+EXA_KEY = "EXA_API_KEY"
+# The usual places a folder of notes is kept, looked in only when someone presses "Look for one" on Setup.
+LIKELY_NOTES = ("~/Documents/Meeting notes", "~/Documents/Meetings", "~/Documents/Notes", "~/Documents/Obsidian", "~/Obsidian",
+                "~/Library/Mobile Documents/iCloud~md~obsidian/Documents", "~/Documents/Granola", "~/Notes")
+# The keys a person may add, in the order Setup lists them. Every one is optional. ``get`` is the page a key is made
+# on, ``where`` is that place in words, ``check`` says what pressing Test does and what it costs.
+KEYS = (
+    {"id": "exa", "env": EXA_KEY, "name": "Exa", "kind": "Company search",
+     "unlocks": "A market map searches for companies directly, from a plain description of who you are after.",
+     "without": "Maps still work without it: Hermes researches with whatever web search it has.",
+     "get": "https://dashboard.exa.ai/api-keys", "where": "the Exa dashboard",
+     "steps": "Sign up at exa.ai, open API Keys in the dashboard, create a key and copy it.",
+     "cost": "Exa bills each search. A map search asks for at most 15 results.",
+     "check": "Runs one search for one result. Exa bills it like any other search: about a cent or less."},
+    {"id": "pdl", "env": PDL_KEY, "name": "People Data Labs", "kind": "People and company facts",
+     "unlocks": "Enrich fills in a person's title, company and LinkedIn, and a map can name the buyers at a company.",
+     "without": "Records and maps hold what you and Hermes put on them.",
+     "get": "https://dashboard.peopledatalabs.com/", "where": "the People Data Labs dashboard",
+     "steps": "Sign up at peopledatalabs.com, open the dashboard and copy your API key.",
+     "cost": "People Data Labs bills each match. Stoa stops at the monthly cap in its settings.",
+     "check": "Looks up an address nobody has. People Data Labs bills a match only, so this is free."},
+    {"id": "granola", "env": GRANOLA_KEY, "name": "Granola", "kind": "Call notes",
+     "unlocks": "Your Granola call notes join the notes inbox, each filed on the record it is about.",
+     "without": "A notes folder does the same job for notes kept as files.",
+     "get": "https://docs.granola.ai/help-center/sharing/integrations/personal-api", "where": "Granola's settings",
+     "steps": "In the Granola app: Settings, Connectors, API keys, Create new key. Granola offers API keys on its Business and Enterprise plans.",
+     "cost": "No charge per request.",
+     "check": "Reads the first page of your note list. Free."},
+)
 LOG_KINDS = ("note", "call", "email", "meeting", "task")
 HANDOFF_FRESH = 90  # seconds a "Drafting..." line is believed without news (a restart loses the watcher that clears it)
 DESKTOP_FRESH = 90  # seconds since the Desktop app or Webapp half last checked in for it to count as open
@@ -113,6 +142,7 @@ class Desk:
         self.can_configure = True          # False where settings cannot be saved (the page's own stand-in desk)
         self.home: Optional[Path] = None   # the Hermes profile this desk belongs to, when Hermes built it
         self.slack = None  # set by __init__ when the Slack half is wired
+        self.jobs: Optional[Callable[[], list]] = None     # Hermes's scheduled jobs for this profile, read only; set by __init__
         self.announce: Callable[[], None] = lambda: None   # tells an open Desktop app or Webapp that the desk changed
         self.desktop_seen = 0.0     # when the Desktop/Webapp half last checked in (it does so while it is open)
         self.markets = Markets(self)
@@ -757,6 +787,112 @@ class Desk:
             lines.append("Nothing needs you today.")
         return "\n".join(lines)
 
+    def keys(self) -> list:
+        """The keys a person may add: what each is for, how to get one, and whether it is set. No key's value is in here."""
+        own = self.own_playbook()
+        cap = _int(self.setting("pdl_monthly_cap", 50), 50, 0, 10 ** 6)
+        used = _int(self.own_store.meta_get("pdl_calls:" + st.today()[:7], "0"), 0, 0, 10 ** 9)
+        rows = []
+        for spec in KEYS:
+            row = dict(spec, set=bool(self.secret(spec["env"])), note="")
+            if spec["id"] == "pdl" and row["set"]:
+                row["note"] = ("Lookups are switched off in the %s playbook." % own.name if own.enrich == "none"
+                               else "%d of %d lookups used this month." % (used, cap) if cap else "%d lookups used this month; no cap." % used)
+            rows.append(row)
+        return rows
+
+    def automations(self) -> list:
+        """The automations Stoa offers, each with whether Hermes has it switched on. A job made from one carries its
+        title as its name, which is how it is recognised; ``unknown`` where Hermes's jobs cannot be read from here."""
+        from . import blueprints
+        jobs, known = [], self.jobs is not None
+        if known:
+            try:
+                jobs = list(self.jobs() or [])
+            except Exception as exc:
+                log.warning("stoa: the scheduled jobs could not be read: %s", exc)
+                known = False
+        rows = []
+        for bp in blueprints.BLUEPRINTS:
+            mine = [job for job in jobs if job.get("name") == bp["title"]]
+            running = [job for job in mine if job.get("on")]
+            job = (running or mine or [{}])[0]
+            rows.append({"name": bp["name"], "title": bp["title"], "description": bp["description"],
+                         "state": "unknown" if not known else "on" if running else "paused" if mine else "off",
+                         "schedule": str(job.get("schedule") or ""), "next": str(job.get("next") or "")})
+        return rows
+
+    def notes_check(self, folder: Any) -> dict:
+        """Could Stoa read call notes from this folder? The answer is in words, with how many notes are there."""
+        text = str(folder or "").strip().strip("\"'").strip()
+        if not text:
+            return {"ok": False, "message": "Paste the folder's path first."}
+        path = Path(text).expanduser()
+        if not path.is_absolute():
+            return {"ok": False, "message": "That is not a whole path. It should start with / or ~, like ~/Documents/Meeting notes."}
+        try:
+            if not path.exists():
+                return {"ok": False, "message": "There is no folder at that path on the computer Hermes runs on. Check the spelling, capitals included."}
+            if not path.is_dir():
+                return {"ok": False, "message": "That is a file, not a folder. Use the folder it sits in."}
+        except OSError as exc:
+            return {"ok": False, "message": "Hermes is not allowed to look in that folder (%s)." % type(exc).__name__}
+        count, newest = sources.count_notes(path)
+        return {"ok": True, "folder": str(path), "count": count, "newest": newest,
+                "message": ("%d %s here, the newest from %s." % (count, "note" if count == 1 else "notes", newest)) if count
+                else "The folder is there, with no notes in it yet. Stoa reads files ending in .md, .markdown or .txt."}
+
+    def notes_look(self) -> dict:
+        """Look in a few usual places for a folder of notes, when asked to. Only whether each exists and how many notes
+        it holds: nothing is opened, and nowhere else is searched."""
+        found, seen = [], set()
+        for likely in LIKELY_NOTES:
+            path = Path(likely).expanduser()
+            try:
+                if not path.is_dir() or path.resolve() in seen:
+                    continue
+                seen.add(path.resolve())
+            except OSError:
+                continue
+            count, newest = sources.count_notes(path)
+            if count:
+                found.append({"folder": str(path), "count": count, "newest": newest})
+        found.sort(key=lambda row: row["newest"], reverse=True)
+        return {"ok": True, "found": found[:4], "looked": list(LIKELY_NOTES)}
+
+    def notes_folder(self, folder: Any) -> dict:
+        """Save the folder Stoa reads call notes from (or clear it, with an empty one). It is one of the plugin's own
+        settings, so it is saved the way Hermes saves them; where this desk cannot save a setting it says so."""
+        if not self.can_configure:
+            return {"ok": False, "elsewhere": True, "message": "This page cannot save a setting from here. Open Stoa's settings and paste the path into Meeting notes folder."}
+        if not str(folder or "").strip():
+            self._set_config("notes_dir", "")
+            return {"ok": True, "folder": "", "message": "Stoa no longer reads a notes folder."}
+        check = self.notes_check(folder)
+        if not check["ok"]:
+            return check
+        self._set_config("notes_dir", check["folder"])
+        return dict(check, saved=True, message="Saved. " + check["message"])
+
+    def key_test(self, service: str) -> dict:
+        """Ask one service whether the key set for it is accepted, with the smallest request that service has.
+        The answer says what happened in words; the key itself is never in it."""
+        spec = next((entry for entry in KEYS if entry["id"] == service), None)
+        if spec is None:
+            return {"ok": False, "state": "unknown", "service": str(service)[:40], "message": "Stoa has no key by that name."}
+        key = self.secret(spec["env"])
+        if not key:
+            return {"ok": False, "state": "missing", "service": service, "message": "No %s key is set yet." % spec["name"]}
+        result = sources.check_key(service, key, http=self.http)
+        name = spec["name"]
+        message = {
+            "works": "%s accepted the key." % name,
+            "rejected": "%s refused the key. Copy it again from %s and save it." % (name, spec["where"]),
+            "spent": "%s accepted the key, but the account is out of credit." % name,
+        }.get(result["state"]) or "%s did not answer (%s), so nothing is known about the key. Try again in a minute." % (
+            name, result["status"] or "no connection")
+        return {"ok": result["state"] == "works", "state": result["state"], "service": service, "message": message}
+
     def setup(self) -> dict:
         """What is set up, what is not, and the rules in force, for the Setup tab. A key or a token is
         reported as set or not set; its value never leaves the server."""
@@ -784,7 +920,12 @@ class Desk:
         slack = read("Slack", lambda: None if self.slack is None else bool(getattr(self.slack, "available", False)), None)
         pdl = read("the lookup key", lambda: bool(self.secret(PDL_KEY)), False)
         granola = read("the Granola key", lambda: bool(self.secret(GRANOLA_KEY)), False)
+        keys = read("the keys", self.keys, [])
+        have = [row["name"] for row in keys if row["set"]]
+        automations = read("the automations", self.automations, [])
+        running = [row["title"] for row in automations if row["state"] == "on"]
         notes_dir = read("the notes folder", lambda: str(self.setting("notes_dir", "") or ""), "")
+        notes = read("the notes folder itself", lambda: self.notes_check(notes_dir) if notes_dir else {}, {})
         cap = read("the lookup cap", lambda: _int(self.setting("pdl_monthly_cap", 50), 50, 0, 10 ** 6), 50)
         used = read("lookups used", lambda: _int(self.own_store.meta_get("pdl_calls:" + st.today()[:7], "0"), 0, 0, 10 ** 9), 0)
         allow = read("the chats setting", lambda: self.setting("channels", []) or [], [])
@@ -803,16 +944,20 @@ class Desk:
              "detail": "You are on %s: %s." % (own.title, " → ".join(s["label"] for s in own.stages) + " → " + own.won["label"])},
             {"id": "records", "done": real > 0, "title": "Put your first %s on the desk" % terms["deals"],
              "detail": ("%d on the desk." % real) if real else "Add one by hand, tell Hermes about one, or drop a CSV on the page."},
-            {"id": "slack", "done": bool(slack), "title": "Connect Slack",
-             "detail": "Connected: cards with buttons, and !gtm in any chat the desk is allowed in." if slack
-             else "Once Hermes is in your Slack, records post there as cards whose buttons move the pipeline."},
-            {"id": "sweep", "done": tally["from_sweeps"] > 0, "title": "Have Hermes log email, calls and Slack for you",
-             "detail": ("%d entries logged from your inbox, calls and Slack so far." % tally["from_sweeps"]) if tally["from_sweeps"]
-             else "Type /blueprint in a chat and switch on “%s”. It logs what it finds and asks before any stage change."
-             % blueprints.titled("activity-sweep")},
-            {"id": "notes", "done": granola or bool(notes_dir), "title": "Point it at your meeting notes",
-             "detail": "Connected." if granola or notes_dir else "Set a notes folder or a Granola key in the plugin's settings, and call notes "
-                                                               "are filed on the right record with the next step they imply."},
+            {"id": "keys", "done": bool(have), "title": "Find companies and fill in people",
+             "detail": ("Set: %s." % ", ".join(have)) if have
+             else "Exa lets a map search for companies; People Data Labs fills in people and names buyers."},
+            {"id": "notes", "done": granola or bool(notes_dir), "title": "Bring in your call notes",
+             "detail": ("Reading Granola." if granola and not notes_dir else "Reading %s." % notes_dir if not granola
+                        else "Reading Granola and %s." % notes_dir) if granola or notes_dir
+             else "Name the folder your notes are saved in, or add a Granola key, and each note is filed on the record it is about."},
+            {"id": "slack", "done": bool(slack), "title": "Work from Slack",
+             "detail": "Connected: records post as cards with buttons, and !gtm works in Slack." if slack
+             else "Slack is connected in Hermes, on its Messaging page. Once it is, records post there as cards whose buttons move the pipeline."},
+            {"id": "sweep", "done": bool(running) or tally["from_sweeps"] > 0, "title": "Let Hermes keep the desk current",
+             "detail": ("Switched on: %s." % ", ".join(running)) if running
+             else ("%d entries logged from your inbox, calls and Slack so far." % tally["from_sweeps"]) if tally["from_sweeps"]
+             else "Jobs that run on a schedule: a morning brief, and sweeps of your email, calls and notes. What they find waits for your approval."},
         ]
         connections = [
             {"id": "slack", "label": "Slack", "on": slack,
@@ -859,8 +1004,12 @@ class Desk:
             "autonomy": {"level": level, "levels": [{"id": key, "label": entry["label"], "summary": entry["summary"]}
                                                     for key, entry in AUTONOMY.items()]},
             "declined": tally["declined"],
-            "checklist": checklist, "connections": connections, "rules": rules,
-            "automations": [{"name": bp["name"], "title": bp["title"], "description": bp["description"]} for bp in blueprints.BLUEPRINTS],
+            "checklist": checklist, "connections": connections, "rules": rules, "keys": keys,
+            "automations": automations or [{"name": bp["name"], "title": bp["title"], "description": bp["description"], "state": "unknown",
+                                             "schedule": "", "next": ""} for bp in blueprints.BLUEPRINTS],
+            "notes": {"folder": notes_dir, "ok": bool(notes.get("ok")), "count": notes.get("count", 0), "message": notes.get("message", ""),
+                      "granola": granola, "can_save": bool(self.can_configure)},
+            "slack": slack,
             "data": {"path": str(self.data_dir / self.own_file()), "size": size, "records": real, "open": tally["open"], "won": tally["won"],
                      "lost": tally["lost"], "samples": tally["samples"], "activities": tally["activities"], "maps": tally["maps"],
                      "people": tally["people"], "ledger": tally["ledger"], "archived": tally["archived"],

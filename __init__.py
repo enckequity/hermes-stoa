@@ -149,6 +149,18 @@ def _tool(fn, desk=None, quiet=False, name=""):
     return handler
 
 
+def _jobs_reader(home: Path):
+    """A way to read this profile's scheduled jobs from Hermes: each one's name, whether it is on, its schedule and
+    when it runs next. Read only; Setup uses it to say which of Stoa's automations are switched on."""
+    def read() -> list:
+        from cron import jobs as cron_jobs
+        with cron_jobs.use_cron_store(home):
+            found = cron_jobs.list_jobs(include_disabled=True)
+        return [{"name": str(job.get("name") or ""), "on": bool(job.get("enabled", True)) and job.get("state") not in ("paused", "completed", "error"),
+                 "schedule": str(job.get("schedule_display") or ""), "next": str(job.get("next_run_at") or "")} for job in found]
+    return read
+
+
 def build_desk(get_config, set_config) -> Desk:
     """A desk that belongs to the profile in scope right now.
 
@@ -159,6 +171,7 @@ def build_desk(get_config, set_config) -> Desk:
     desk = Desk(data_dir=lambda: data, get_config=get_config, set_config=set_config, get_secret=_secret_reader(home),
                 actor=lambda: "Hermes (scheduled)" if _session().get("platform") == "cron" else _session().get("actor", ""))
     desk.home = home
+    desk.jobs = _jobs_reader(home)
     return desk
 
 

@@ -72,9 +72,40 @@ stage of your playbook with the first known buyer as the contact, carries the ev
 activity log, and asks Hermes to confirm the buyer (or find one) and draft a first-touch note.
 The *Market watch* automation re-checks a map every week and adds at most five new companies.
 
-**A page to send.** `gtm_market(action="export")`, or **Download page** in the web tab, writes the
-whole map as one self-contained web page: no scripts, no outside requests, nothing to host. The
-share version leaves out buyers' names and what is in your pipeline.
+**The map on the page.** On the Stoa page the map is one picture you work on:
+
+- **Three views of the same companies.** *Segments* is the map. *Priority* puts a better fit further
+  right and a fresher reason to call higher up, so the top right is who to call first. A reason
+  with a date fades over about two months; one with no date sits in the middle. *Held by*
+  groups companies by what they use today.
+- **Reading a mark.** Colour is fit, cold to hot. Size is what **Size by** says: the people who work
+  there, the people you have named there (how a recruiting desk starts), or all the same. Solid
+  is in the pipeline, a dashed edge was added today, a ring is a reason to call. A dotted line
+  joins a company to a second segment it also fits.
+- **Act.** Click a company to open it; shift-click, drag across the map or tick rows in the table to
+  pick several. Then add them to the pipeline, name a buyer at each (a People Data Labs lookup
+  apiece), have Hermes draft outreach, or dismiss them. **Dismissed** puts one back.
+- **Grow.** **+ Grow** under a segment, **More like this** on a company and the faint ring for a
+  neighbouring segment each send Hermes a line in the box at the foot of the page. What it finds
+  lands on the map, marked as added today.
+- **Adjust.** Under **What matters**, set each requirement to Off, Nice, Matters or Must and fit is
+  worked out from your weights for every company Hermes checked. A new requirement typed there
+  goes to Hermes to check against every company. A company moves to another segment from its panel.
+- **Filter.** The breakdowns (who holds the market, how big they are, how rare each requirement is)
+  are buttons: press one and those companies light up on the map and in the table.
+
+![The map by priority, with one company open](desktop-market-priority.jpg)
+
+**A page to send.** **Download page** on the Market map tab saves the whole map as one
+self-contained web page, with the same working map at its head: the three views, a company opened by
+a click, and the requirements weighed on the spot. It makes no outside requests and depends on
+nothing; the one script in it is the map's own, written into the file with the companies beside it.
+A browser that runs no scripts shows a still picture instead. **Download a copy
+to share** saves the same page without buyers' names or what is in your pipeline, for hosting or
+sending to a client. Asking Hermes does the same (`gtm_market(action="export")`), and writes the
+file to the plugin's `exports/` folder instead of your browser's downloads.
+
+![The copy to share, as a client sees it: the working map, with no buyers' names and nothing about your pipeline](page-market.jpg)
 
 ### Intake
 

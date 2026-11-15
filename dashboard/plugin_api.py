@@ -2,7 +2,8 @@
 
 Every handler is a plain ``def`` so FastAPI runs it in a worker thread, off the event loop. The
 tab reads one ``/state`` document on a short poll and posts small, deterministic actions; nothing
-here calls a model or any outside service.
+here calls a model, and nothing calls an outside service except the Enrich button's lookup and the
+Test button beside a key (``/key/test``).
 """
 from __future__ import annotations
 
@@ -144,7 +145,7 @@ def _playbook(playbook) -> dict:
             "won": playbook.won, "lost": {"id": playbook.lost["id"], "label": playbook.lost["label"], "reasons": playbook.lost["reasons"]},
             "fields": playbook.fields, "group_fields": playbook.group_fields, "delivery": playbook.delivery,
             # how the page lays it out: whether a won record is billed, and whether a group is a company (one place to look)
-            "billing": playbook.billing, "group_is_company": playbook.group_is_company()}
+            "billing": playbook.billing, "group_is_company": playbook.group_is_company(), "shape": playbook.shape}
 
 
 def _ask(d, deal_id: str, verb: str) -> str:
@@ -193,6 +194,8 @@ def state() -> dict:
             "rates": summary["requirements"], "holds": summary["holds"], "holds_of": summary["holds_of"],
             "regions": summary["regions"], "sizes": summary["sizes"], "bridges": summary["bridges"],
             "first_calls": summary["first_calls"],
+            "dismissed": [{"id": row["id"], "company": row["company"], "segment": row["segment"]} for row in d.markets.targets(market["id"], "dismissed")][:60],
+            "lookups": bool(d.secret("PDL_API_KEY")),
             "counts": {"mapped": summary["numbers"]["companies"], "tracked": summary["numbers"]["in_pipeline"],
                        "dismissed": summary["numbers"]["dismissed"]}})
     last = d.store.undoables()      # per record, the last action that still stands
@@ -582,6 +585,34 @@ def setup() -> dict:
         raise HTTPException(500, "Setup could not be put together: %s: %s" % (type(exc).__name__, str(exc)[:300]))
 
 
+@router.post("/notes/check")
+def notes_check(body: dict = Body(...)) -> dict:
+    """Is this a folder Stoa could read call notes from? Counts the notes in it; opens none."""
+    return desk().notes_check(body.get("folder"))
+
+
+@router.get("/notes/look")
+def notes_look() -> dict:
+    """Look in a few usual places for a folder of notes. Runs only when someone presses the button for it."""
+    return desk().notes_look()
+
+
+@router.post("/notes/folder")
+def notes_folder(body: dict = Body(...)) -> dict:
+    """Save (or, with an empty one, clear) the folder Stoa reads call notes from."""
+    result = desk().notes_folder(body.get("folder"))
+    if result.get("ok"):
+        desk().announce()
+    return result
+
+
+@router.post("/key/test")
+def key_test(body: dict = Body(...)) -> dict:
+    """Ask one service (exa, pdl or granola) whether the key set for it is accepted. One small request to that
+    service, made only when someone presses Test; the key is read on the server and is never in the answer."""
+    return desk().key_test(str(body.get("service") or ""))
+
+
 @router.post("/tour")
 def tour(body: dict = Body(...)) -> dict:
     """start: show a worked example (sample data in a file of its own). leave: back to the team's own
@@ -743,13 +774,38 @@ def intake_act(intake_id: str, verb: str, body: Optional[dict] = Body(None)) -> 
 
 @router.get("/market/{market_id}/page")
 def market_page(market_id: str, share: int = 0) -> dict:
-    """The market map as one self-contained web page, for the tab to hand to the browser as a download."""
+    """The market map as one self-contained web page, for the page to hand to the browser as a download.
+    ``share=1`` leaves out buyers' names and what is in the pipeline, so the file can be sent on."""
     d = desk()
     market = d.markets._market(market_id)
     if market is None:
         raise HTTPException(404, "no such market map")
     html = _mod("page").render(d.markets.summary(market["id"]), d.playbook().terms, share=bool(share))
-    return {"filename": "%s%s.html" % (market["id"], "-share" if share else ""), "html": html}
+    return {"filename": "%s%s.html" % (market["id"], "-share" if share else ""), "html": html}     # the id is the map's name as a slug
+
+
+@router.post("/targets")
+def targets(body: dict = Body(...)) -> dict:
+    """One thing done to the companies picked on the map: add them to the pipeline, dismiss them, put dismissed ones
+    back, name a buyer at each (a paid lookup apiece), or move one to another segment."""
+    d = desk()
+    verb, ids = str(body.get("verb") or ""), [str(i) for i in (body.get("ids") or []) if i][:50]
+    if not ids:
+        raise HTTPException(400, "no companies were picked")
+    if verb == "track":
+        result = d.markets.track_many(ids, d.actor() or "Someone")
+    elif verb == "dismiss":
+        result = d.markets.dismiss({"targets": ids, "reason": str(body.get("reason") or "")})
+    elif verb == "restore":
+        result = d.markets.restore(ids)
+    elif verb == "buyers":
+        result = d.markets.buyers(ids)
+    elif verb == "move":
+        result = d.markets.move(ids[0], str(body.get("segment") or ""))
+    else:
+        raise HTTPException(400, "unknown action")
+    d.announce()
+    return result
 
 
 @router.post("/target/{target_id}/{verb}")

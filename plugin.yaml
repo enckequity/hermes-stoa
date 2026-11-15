@@ -67,14 +67,14 @@ config_schema:
     type: secret
     env: PDL_API_KEY
     label: People Data Labs API key
-    description: "Optional. Turns on the Enrich button and gtm_enrich."
+    description: "Optional. Turns on the Enrich button, gtm_enrich and buyer lookups on a map. Copy yours from dashboard.peopledatalabs.com."
   exa_api_key:
     type: secret
     env: EXA_API_KEY
     label: Exa API key
-    description: "Optional. Lets the market map search for companies directly; without it the agent uses its own web search."
+    description: "Optional. Lets the market map search for companies directly; without it the agent uses its own web search. Make one at dashboard.exa.ai/api-keys."
   granola_api_key:
     type: secret
     env: GRANOLA_API_KEY
     label: Granola API key
-    description: "Optional. Adds your Granola call notes to the notes inbox."
+    description: "Optional. Adds your Granola call notes to the notes inbox. Made in the Granola app: Settings, Connectors, API keys."

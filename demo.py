@@ -115,7 +115,7 @@ TALENT_MARKET = {
 TALENT_COMPANIES = [
     {"company": "Ironbridge Payments", "website": "ironbridge.example", "segment": "Payments infrastructure", "fit": 5,
      "size": "310 people", "location": "Chicago, IL", "why": "Rebuilt its ledger in Go last year and has just cut a platform team.",
-     "signal": "Reorganised in the last quarter",
+     "signal": "Reorganised in the last quarter", "signal_days": 70,
      "requirements": {"Runs its own ledger or payment rails": "Engineering blog: 'our double-entry ledger'", "Go or Rust in production": "Go, per its job ads",
                       "Engineering team of 50 to 400": "About 180 engineers", "Recent reorganisation or layoffs": "Platform team folded into payments in September"},
      "people": [{"name": "Samira Costa", "title": "Staff Software Engineer", "why": "Led the ledger rebuild"},
@@ -127,7 +127,7 @@ TALENT_COMPANIES = [
      "people": [{"name": "Anders Holm", "title": "Principal Engineer", "why": "Owns settlement"}]},
     {"company": "Farrow Ledger", "website": "farrowledger.example", "segment": "Payments infrastructure", "fit": 4,
      "size": "90 people", "location": "Remote", "why": "Ledger-as-a-service: every engineer has built what Northwind needs.",
-     "signal": "Missed its last funding round", "also": "Banking platforms",
+     "signal": "Missed its last funding round", "also": "Banking platforms", "signal_days": 33,
      "requirements": {"Runs its own ledger or payment rails": "The ledger is the product", "Go or Rust in production": "Go",
                       "Engineering team of 50 to 400": "About 55 engineers", "Recent reorganisation or layoffs": "Flat round, hiring frozen"},
      "people": [{"name": "Lena Fischer", "title": "Staff Engineer"}]},
@@ -137,7 +137,7 @@ TALENT_COMPANIES = [
                       "Engineering team of 50 to 400": "", "Recent reorganisation or layoffs": ""}},
     {"company": "Lodestar Bank Platform", "website": "lodestar.example", "segment": "Banking platforms", "fit": 5,
      "size": "260 people", "location": "New York, NY", "why": "Laid off a fifth of engineering in October; its core is written in Go.",
-     "signal": "Layoffs in October",
+     "signal": "Layoffs in October", "signal_days": 21,
      "requirements": {"Runs its own ledger or payment rails": "Core banking ledger", "Go or Rust in production": "Go",
                       "Engineering team of 50 to 400": "About 150 engineers", "Recent reorganisation or layoffs": "A fifth of engineering let go"},
      "people": [{"name": "Marisol Vega", "title": "Staff Backend Engineer", "why": "Posted that she is looking"},
@@ -149,7 +149,7 @@ TALENT_COMPANIES = [
      "people": [{"name": "Priscilla Dunn", "title": "Principal Engineer"}]},
     {"company": "Anchorage BaaS", "website": "anchoragebaas.example", "segment": "Banking platforms", "fit": 4,
      "size": "120 people", "location": "Salt Lake City, UT", "why": "Sponsor-bank trouble has engineers taking calls.",
-     "signal": "Lost a bank partner",
+     "signal": "Lost a bank partner", "signal_days": 12,
      "requirements": {"Runs its own ledger or payment rails": "Program ledger for its fintech clients", "Go or Rust in production": "Go and some Rust",
                       "Engineering team of 50 to 400": "About 60 engineers", "Recent reorganisation or layoffs": "Partner bank exit announced"},
      "people": [{"name": "Ravi Menon", "title": "Senior Staff Engineer"}]},
@@ -161,7 +161,7 @@ TALENT_COMPANIES = [
      "people": [{"name": "Elena Petrou", "title": "Staff Engineer, Payments"}]},
     {"company": "Stallholder", "website": "stallholder.example", "segment": "Marketplaces", "fit": 4,
      "size": "230 people", "location": "Portland, OR", "why": "Moved off a processor to its own rails this year.",
-     "signal": "New payments platform launched",
+     "signal": "New payments platform launched", "signal_days": 40,
      "requirements": {"Runs its own ledger or payment rails": "Migrated to its own rails in the spring", "Go or Rust in production": "Rust",
                       "Engineering team of 50 to 400": "About 110 engineers", "Recent reorganisation or layoffs": ""},
      "people": [{"name": "Callie Nguyen", "title": "Senior Backend Engineer", "why": "Led the migration"}]},
@@ -299,13 +299,13 @@ FRAUD_MARKET = {
 FRAUD_COMPANIES = [
     {"company": "Calder Bank", "website": "calderbank.example", "segment": "Neobanks and wallets", "fit": 5, "size": "280 people",
      "location": "New York, NY", "why": "Hiring its first fraud analysts after a wave of account-takeover complaints.",
-     "signal": "Hiring for the problem we solve", "uses": "In-house rules",
+     "signal": "Hiring for the problem we solve", "uses": "In-house rules", "signal_days": 9,
      "requirements": {"Takes card or instant payments": "Debit card and instant transfers", "Risk team under ten people": "Three risk roles on the team page",
                       "Fraud losses are visible": "App reviews mention drained accounts", "Launching a new market or product": "Credit card launching in the spring"},
      "people": [{"name": "Noelle Ferrand", "title": "VP Risk", "why": "Posting the fraud analyst roles"}]},
     {"company": "Pinnacle Wallet", "website": "pinnaclewallet.example", "segment": "Neobanks and wallets", "fit": 4, "size": "150 people",
      "location": "Miami, FL", "why": "Instant payouts launched this year; fraud tooling is the processor's default.",
-     "signal": "New product launched", "uses": "Processor's built-in tool",
+     "signal": "New product launched", "uses": "Processor's built-in tool", "signal_days": 48,
      "requirements": {"Takes card or instant payments": "Instant payouts", "Risk team under ten people": "One risk lead",
                       "Fraud losses are visible": "", "Launching a new market or product": "Instant payouts went live in June"},
      "people": [{"name": "Diego Salazar", "title": "Head of Payments"}]},
@@ -321,7 +321,7 @@ FRAUD_COMPANIES = [
      "people": [{"name": "Hattie Brooks", "title": "Chief Operating Officer"}]},
     {"company": "Fernway Freelance", "website": "fernway.example", "segment": "Marketplaces", "fit": 5, "size": "210 people",
      "location": "Denver, CO", "why": "Payout fraud named as a risk in its funding announcement; reviews every payout by hand.",
-     "signal": "Fresh funding", "uses": "Manual review",
+     "signal": "Fresh funding", "uses": "Manual review", "signal_days": 16,
      "requirements": {"Takes card or instant payments": "Card pay-ins, instant payouts", "Risk team under ten people": "Four people in trust and safety",
                       "Fraud losses are visible": "Named in the funding announcement", "Launching a new market or product": "Opening in the UK"},
      "people": [{"name": "Marguerite Lowe", "title": "Head of Trust and Safety", "why": "Quoted on payout fraud"}]},
@@ -342,7 +342,7 @@ FRAUD_COMPANIES = [
      "people": [{"name": "Wyatt Greer", "title": "VP Operations"}]},
     {"company": "Brio Credit", "website": "briocredit.example", "segment": "Lenders and BNPL", "fit": 5, "size": "190 people",
      "location": "Charlotte, NC", "why": "New head of risk, and synthetic identities called out on the last earnings call.",
-     "signal": "New executive", "uses": "Legacy vendor",
+     "signal": "New executive", "uses": "Legacy vendor", "signal_days": 58,
      "requirements": {"Takes card or instant payments": "Instant loan disbursement", "Risk team under ten people": "Eight on the risk team",
                       "Fraud losses are visible": "Charge-offs blamed on synthetic identities", "Launching a new market or product": "Small-business loans"},
      "people": [{"name": "Cornelius Achebe", "title": "Head of Risk", "why": "Joined two months ago"}]},
@@ -358,7 +358,7 @@ FRAUD_COMPANIES = [
                       "Fraud losses are visible": "", "Launching a new market or product": ""}},
     {"company": "Encore Tickets", "website": "encoretickets.example", "segment": "Ticketing and travel", "fit": 5, "size": "160 people",
      "location": "Los Angeles, CA", "why": "Bots and stolen cards on every big sale; chargebacks named in a customer notice.",
-     "signal": "Public incident last month", "uses": "Processor's built-in tool",
+     "signal": "Public incident last month", "uses": "Processor's built-in tool", "signal_days": 24,
      "requirements": {"Takes card or instant payments": "Cards", "Risk team under ten people": "Two people",
                       "Fraud losses are visible": "Customer notice after a botted sale", "Launching a new market or product": "Resale marketplace"},
      "people": [{"name": "Josephine Tran", "title": "VP Payments", "why": "Signed the customer notice"}]},
@@ -452,7 +452,9 @@ def load_market(desk, which: str = "") -> int:
     if markets._market(name) is not None:
         return 0
     markets.define(dict(example["market"]))
-    added = len(markets.add({"market": name, "companies": example["companies"]})["added"])
+    companies = [dict(c, signal_date=(dt.date.today() - dt.timedelta(days=c["signal_days"])).isoformat()) if "signal_days" in c else c
+                 for c in example["companies"]]      # a sample signal is so many days old on whatever day the tour is opened
+    added = len(markets.add({"market": name, "companies": companies})["added"])
     markets.reading(dict(example["reading"], market=name))
     return added
 

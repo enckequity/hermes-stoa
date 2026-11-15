@@ -191,6 +191,7 @@ GTM_MARKET = {
                               "location": {"type": "string", "description": "'City, State' or 'City, Country'."},
                               "why": {"type": "string", "description": "One sentence of evidence for the fit."},
                               "signal": {"type": "string", "description": "A reason to reach out now: funding, hiring, a launch."},
+                              "signal_date": {"type": "string", "description": "The day the signal happened, as YYYY-MM-DD (YYYY-MM if only the month is known). Leave it out if you cannot tell; never guess."},
                               "source": {"type": "string", "description": "URL the evidence came from."},
                               "uses": {"type": "string", "description": "What it uses today for this job: a vendor's name, 'Spreadsheets', 'In-house tool'."},
                               "also": {"type": "string", "description": "A second segment it could just as well sit in, if any."},

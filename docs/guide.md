@@ -68,7 +68,8 @@ In the Hermes Desktop app and the Webapp, Stoa sits beside the conversation.
 - **Cards in the conversation.** Ask *"show me Dana"* and the reply contains the live card, with
   its buttons, not a description of it. *"Show me the market map"* draws the map the same way.
 - **A page of its own.** **Stoa** in the sidebar opens on **Today**, then the funnel with its
-  conversion rates and the pipeline board with the same filters, the market map with its reading,
+  conversion rates and the pipeline board with the same filters, the market map (a picture you pick
+  companies on, with its reading beside it),
   the activity log, and **Setup**.
 - **Your name on it.** Under **Setup**, type your business name and it is drawn in dots at the head of
   the page, lit the way the stoa is: in place of the stoa, or beside it with the stoa kept. It is saved
@@ -137,13 +138,15 @@ In the Hermes Desktop app and the Webapp, Stoa sits beside the conversation.
 
 ![A won record with its invoice, part paid and overdue](desktop-cash-record.jpg)
 
-- **Setup.** One tab that says where things stand: a short get-started list that ticks itself off,
-  what is connected (a key shows as set or not set, never its value), the rules in force (which
-  chats the desk answers in, who may press a Slack button, which folders it reads), the
-  automations you can switch on, your playbook and the others, your data with a CSV export, and a
-  cheat sheet of things to say, press and type.
+- **Setup.** One short list. **The two it needs**: say what the desk is for, and put your first
+  record on it. **Make it do more**, each optional: keys for company search and enrichment, your
+  call notes (paste the folder's path, **Check**, **Save**), Slack, and the automations, each shown
+  as on or off. A line says where each stands; press it and the way to do it is right there, or one
+  press away in Hermes's own settings. Under **Your desk**: the name on the page, your pipelines, the
+  rules in force, your data with a CSV export, and a cheat sheet of things to say, press and type.
+  [Setting up Stoa](setup.md) walks through it.
 
-![Setup: what is connected, the rules in force, and how to work the desk](desktop-setup.jpg)
+![Setup: the two steps a desk needs, then the optional ones, each opening onto the way to do it](desktop-setup.jpg)
 - **Talk to the page.** A dock at the foot of the page takes the same sentences the chat does:
   *"Add Nadia Rahim from Larkspur to the Northwind search"*, *"what needs me today?"*. The
   conversation opens above the dock and the board redraws behind it. The page keeps its own
@@ -170,7 +173,9 @@ In the Hermes Desktop app and the Webapp, Stoa sits beside the conversation.
 Switch it on once under **Capabilities → Plugins → Stoa**. Every colour comes from the app's own
 theme, accent included, so it looks like part of Hermes in whatever theme you run.
 
-![The market map page, here for the fraud prevention example](desktop-market.jpg)
+![The market map, here for the fraud prevention example: each ring a segment, each mark a company](desktop-market.jpg)
+
+![The same map by priority, with one company open: fit across, how fresh the reason to call is up the page](desktop-market-priority.jpg)
 
 ## What it looks like in chat
 

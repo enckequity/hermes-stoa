@@ -46,6 +46,8 @@ Then, in any Hermes chat: *"Map the market for us"*, *"What's on my plate?"*, or
 In Slack the command is `!gtm` (Slack keeps the slash for its own commands), and
 `!gtm Dana Whitfield` or `!gtm map` posts the card or the map itself, buttons included.
 
+![The market map: each ring a segment, each mark a company, picked to act on](docs/desktop-market.jpg)
+
 ![Today: everything that needs you, in groups that open, most pressing first](docs/desktop-today.jpg)
 
 ![The pipeline board, here for the recruiting example](docs/desktop-pipeline.jpg)
@@ -64,12 +66,13 @@ In Slack the command is `!gtm` (Slack keeps the slash for its own commands), and
    touches your desk.
 4. Tell it something: *"We are starting a Staff Backend search for Northwind. Add Dana Whitfield,
    call her Friday."* Or drop a spreadsheet of leads on the page and approve what it would add.
-5. Open **Setup** to see what is connected, what a scheduled job may do by itself, and how to work
-   the desk. `/blueprint` switches on the sweeps that keep it current from your email, calls and
+5. Open **Setup** to see what is connected, add a key for company search or enrichment if you want
+   one, set what a scheduled job may do by itself, and see how to work the desk. `/blueprint` switches on the sweeps that keep it current from your email, calls and
    notes; what they find waits for your approval.
 
 ## Read more
 
+- **[Setting up Stoa](docs/setup.md)**: one pass from install to keys, Slack and automations.
 - **[Using Stoa](docs/guide.md)**: two worked examples, talking to it, and what it looks like in chat.
 - **[What is in the plugin](docs/reference.md)**: the tools, market maps, intake, the pipeline,
   approvals and undo, cash, people, searches and accounts, playbooks, and every setting.
@@ -87,11 +90,15 @@ What the plugin does that you would want to know before installing it:
   phrase for a market-map search) and `public-api.granola.ai` (reads your note list and note
   summaries; transcripts are never requested). No telemetry, no usage reporting, no other
   outbound requests. Research the agent does with its own web tools is Hermes's, not the plugin's.
+  Pressing **Test** beside a key on the Setup page makes one small request to that key's service:
+  a lookup for a made-up address at People Data Labs (it bills a match only, so this is free), one
+  search for one result at Exa (billed like any search), or the first page of your note list at Granola.
 - **Dictation.** The microphone in the page's dock uses your browser's own speech recognition,
   not anything of the plugin's or the agent's. In Chrome that means the audio goes to Google's
   speech service while you dictate. It listens only while the button is on, and the button is not
   shown where the browser has no speech recognition.
-- **Paid lookups.** People Data Labs charges per result. Every lookup counts against
+- **Paid lookups.** People Data Labs charges per result. **Find buyers** on the map looks up at
+  most three people at each company picked that has nobody named. Every lookup counts against
   `pdl_monthly_cap`, and a buyer lookup returns at most five people.
 - **Slack.** Cards are posted and updated through the Slack app Hermes is already connected
   with. The plugin never reads, stores or sees the Slack token. A button moves a stage, applies a
@@ -127,6 +134,8 @@ What the plugin does that you would want to know before installing it:
 - **The Setup tab.** It shows, to anyone signed in to your Hermes, which chats and Slack members
   the desk is limited to, the folders it reads and writes, where its database file is, and whether
   each key is set. It never shows a key or a token.
+  **Add key** and **Change key** open Hermes's own settings page for the plugin, which is where a
+  key is typed and saved; Stoa's page has no box for one.
 - **Sample data.** A tour writes two things in the plugin's own data folder: `tour.json`, which
   says a tour is on, and one `tour-<id>.db` holding the made-up records. Both are deleted when
   you leave. While they are there the plugin does not read or write your own `desk.db`, apart
@@ -138,6 +147,14 @@ What the plugin does that you would want to know before installing it:
   `hermes stoa import <file>` reads the CSV you name.) It writes nowhere outside its own data
   folder: exports (the pipeline as CSV, a market map as a web page) always go to its `exports/`
   folder, and a file name is all the agent can choose.
+  On the Setup page, **Check** counts the note files in a folder you name, and **Look for a folder**
+  does the same for a short fixed list of usual places (`~/Documents/Meeting notes`,
+  `~/Documents/Meetings`, `~/Documents/Notes`, `~/Documents/Obsidian`, `~/Obsidian`, the iCloud
+  Obsidian folder, `~/Documents/Granola`, `~/Notes`), only when you press it. Neither opens a note.
+  **Save** there stores the folder as the plugin's own `notes_dir` setting, the way Hermes saves
+  any plugin setting.
+- **Hermes's scheduled jobs.** To show which of its automations are switched on, Setup reads the
+  name, schedule and on-or-off state of this profile's scheduled jobs. It changes none of them.
 - **Messages to the agent.** With `allow_gateway_injection` granted, a button click queues one
   instruction for the agent in the card's thread. The agent drafts; it is told not to send.
 - **Stored data.** Names, emails, notes and enrichment results for the people in your pipeline,

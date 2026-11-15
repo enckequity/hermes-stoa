@@ -1,12 +1,19 @@
-"""A market map as one self-contained web page: no scripts, no outside requests, nothing to host.
+"""A market map as one self-contained web page: no outside requests, nothing it depends on, one file to host or send.
 
 ``render(summary, terms, share)`` takes what ``Markets.summary`` computed and returns HTML. With
 ``share`` the page leaves out buyers' names and what is in the pipeline, so it can be sent on.
+
+The map at the head of the page is the one the Stoa page draws (three views, pick a company to open it, weigh the
+requirements), run by ``pagemap.js``, which is written into the page with the companies beside it. Nothing is fetched
+and nothing is sent. A browser that runs no scripts shows the still picture instead, and the rest of the page as before.
 """
 from __future__ import annotations
 
+import datetime as dt
+import json
 import math
 from html import escape as esc
+from pathlib import Path
 
 CSS = """
 :root { --bg:#ffffff; --ink:#1b1c20; --soft:#4b4e58; --mute:#7f8390; --line:#c9ccd4; --accent:#0053fd;
@@ -46,7 +53,95 @@ svg .name { font: 500 10.5px Inter, system-ui, sans-serif; letter-spacing: 0; fi
 svg circle.ring { fill: none; stroke: var(--mute); stroke-dasharray: 1.2 4.6; stroke-linecap: square; } svg circle.co { fill: var(--bg); stroke: var(--ink); } svg circle.in { fill: var(--ink); }
 svg .ini { fill: var(--ink); letter-spacing: .06em; font-size: 9.5px; } svg .ini.in { fill: var(--bg); }
 footer { margin-top: 56px; padding-top: 14px; border-top: 1px dotted var(--mute); color: var(--mute); font-size: 12.5px; }
+[hidden] { display: none !important; }
+.sm-sub { color: var(--mute); font-size: 12.5px; max-width: none; } .sm-sub.tagged { margin-top: 6px; }
+.sm-bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 8px; }
+.sm-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 2px; }
+.sm-seg button, .sm-quick button, .sm-btn { height: 26px; padding: 0 10px; border: 0; background: transparent; color: var(--soft); font: 500 10.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; cursor: pointer; }
+.sm-seg button + button { border-left: 1px solid var(--line); }
+.sm-seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.sm-quick { display: flex; flex-wrap: wrap; gap: 2px; flex: 1 1 auto; }
+.sm-quick button { border: 1px solid transparent; border-radius: 2px; text-transform: none; letter-spacing: 0; font-size: 11.5px; } .sm-quick button i { font-style: normal; }
+.sm-quick button[aria-pressed="true"] { border-color: var(--line); color: var(--ink); }
+.sm-btn { margin-top: 12px; border: 1px solid var(--line); border-radius: 2px; color: var(--ink); }
+button:focus-visible, #sm-find:focus-visible, .sm-co:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+#sm-find { height: 26px; width: 180px; max-width: 100%; padding: 0 8px; border: 1px solid var(--line); border-radius: 2px; background: transparent; color: var(--ink); font: 12px var(--mono); }
+.sm-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; } @media (min-width: 900px) { .sm-main { grid-template-columns: minmax(0, 1fr) 300px; } }
+#sm-map { position: relative; border: 1px solid var(--line); background-image: radial-gradient(var(--line) 1px, transparent 1.2px); background-size: 16px 16px; overflow: hidden; user-select: none; -webkit-user-select: none; }
+#sm-svg { position: absolute; inset: 0; width: auto; height: auto; }
+.sm-ring { fill: none; stroke: var(--mute); stroke-dasharray: 1.2 4.6; stroke-linecap: square; }
+.sm-link { stroke: var(--soft); stroke-dasharray: 1.2 3.6; stroke-linecap: square; } .sm-split { stroke: var(--line); stroke-dasharray: 1.2 4.6; stroke-linecap: square; } .sm-axis { stroke: var(--mute); }
+.sm-co { cursor: pointer; outline-offset: 4px; transition: transform .75s cubic-bezier(.2,.75,.2,1), opacity .3s; } .sm-co.dim { opacity: .12; }
+.sm-pop { animation: sm-pop .5s cubic-bezier(.2,1.25,.4,1) both; } @keyframes sm-pop { from { transform: scale(0); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.sm-edge { fill: none; opacity: .55; } .sm-co.in .sm-edge { opacity: 0; } .sm-sig { fill: none; stroke: var(--ink); opacity: .75; }
+.sm-brk { fill: none; stroke: var(--ink); stroke-width: 1.5; opacity: 0; } .sm-co.sel .sm-brk { opacity: 1; }
+svg text.sm-lbl { font: 500 11px Inter, ui-sans-serif, system-ui, sans-serif; letter-spacing: 0; fill: var(--soft); text-anchor: middle; opacity: 0; pointer-events: none;
+  transition: transform .75s cubic-bezier(.2,.75,.2,1), opacity .3s; paint-order: stroke; stroke: var(--bg); stroke-width: 4px; stroke-linejoin: round; }
+svg text.sm-lbl.on { opacity: 1; } svg text.sm-lbl.sel { fill: var(--ink); font-weight: 600; }
+#sm-over { position: absolute; inset: 0; pointer-events: none; } #sm-over > * { position: absolute; }
+.sm-cap { transform: translateX(-50%); text-align: center; } .sm-cap b { display: block; font: 600 10.5px/1.35 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+.sm-cap span { font: 11px var(--mono); color: var(--mute); }
+.sm-q { font: 10.5px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--mute); } .sm-q strong { color: var(--ink); } .sm-q em { display: block; font: 11.5px Inter, system-ui, sans-serif; letter-spacing: 0; text-transform: none; font-style: normal; }
+.sm-hint { right: 10px; top: 8px; font: 10px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--mute); } #sm-map.nar .sm-hint { display: none; }
+#sm-tip { position: absolute; z-index: 5; width: 232px; padding: 9px 11px; border: 1px solid var(--line); background: var(--bg); font-size: 12px; line-height: 1.4; pointer-events: none; } #sm-tip b { display: block; font-size: 13px; }
+#sm-lasso { position: absolute; z-index: 4; border: 1px dashed var(--ink); pointer-events: none; }
+.sm-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; padding-top: 9px; font: 10.5px var(--mono); color: var(--mute); } .sm-legend .sm-seg button { height: 22px; padding: 0 8px; font-size: 10px; }
+.sm-heat { display: inline-block; width: 60px; height: 6px; vertical-align: middle; background: linear-gradient(90deg, var(--h1), var(--h2), var(--h3), var(--h4), var(--h5), var(--h6), var(--h7)); -webkit-mask-image: var(--dots); mask-image: var(--dots); }
+#sm-side { border: 1px solid var(--line); padding: 14px 16px; min-width: 0; font-size: 13.5px; } #sm-side h3 { margin: 6px 0 2px; font-size: 20px; font-weight: 600; letter-spacing: -.015em; } #sm-side p { margin: 10px 0; color: var(--ink); }
+.sm-score { display: flex; align-items: baseline; gap: 8px; margin-top: 12px; } .sm-score .mono { flex: 1; } .sm-score b { font: 600 24px var(--mono); letter-spacing: -.02em; }
+.sm-req { display: grid; grid-template-columns: 26px minmax(0, 1fr); padding: 6px 0; border-bottom: 1px dotted var(--line); } .sm-req > span:first-child { font: 11px var(--mono); color: var(--line); } .sm-req.on > span:first-child { color: var(--h4); }
+.sm-req b { font-weight: 500; } .sm-req:not(.on) b { font-weight: 400; color: var(--mute); }
+.sm-facts { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 6px 10px; margin: 12px 0 0; } .sm-facts dt { font: 10.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--mute); padding-top: 2px; } .sm-facts dd { margin: 0; overflow-wrap: anywhere; }
+.sm-row { display: block; width: 100%; padding: 9px 0; border: 0; border-bottom: 1px dotted var(--line); background: none; color: var(--soft); font: inherit; text-align: left; cursor: pointer; } .sm-row b { color: var(--ink); font-weight: 600; } .sm-row span { display: block; }
+.sm-row .fit { display: inline; padding: 0; }
+.sm-what { margin-top: 26px; max-width: 560px; } .sm-weight { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; align-items: center; padding: 8px 0; border-bottom: 1px dotted var(--line); font-size: 13.5px; }
+.sm-weight small { display: block; font: 11px var(--mono); color: var(--mute); } .sm-weight .sm-seg button { height: 22px; padding: 0 7px; font-size: 10px; }
+@media (prefers-reduced-motion: reduce) { .sm-co, .sm-pop, svg text.sm-lbl { transition: none; animation: none; } }
+@media print { .sm-bar, .sm-what, .sm-hint, .sm-legend .sm-seg { display: none; } }
 """
+SCRIPT = Path(__file__).with_name("pagemap.js")
+
+
+def _live(summary: dict, share: bool) -> str:
+    """The working map: its frame, the companies it draws (as data in the page), and the script that draws them."""
+    segments = []
+    for seg in summary["segments"]:
+        rows = []
+        for c in seg["companies"]:
+            row = {k: c[k] for k in ("id", "company", "domain", "fit", "size", "location", "why", "signal", "signal_date", "source", "uses", "also",
+                                     "headcount", "requirements") if c.get(k) not in (None, "", [])}
+            if not share:                                    # the copy to send on names no buyer and says nothing of the pipeline
+                if c.get("people"):
+                    row["people"] = [{"name": p.get("name", ""), "title": p.get("title", "")} for p in c["people"][:3]]
+                if c.get("status") == "tracked":
+                    row["status"] = "tracked"
+            rows.append(row)
+        segments.append({"name": seg["segment"], "companies": rows})
+    data = {"name": summary["market"]["name"], "today": dt.date.today().isoformat(), "requirements": summary["market"]["requirements"],
+            "segments": segments, "size": "people"}
+    packed = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c")      # nothing in a company's words can end the block early
+    patterns = "".join('<pattern id="sm-st%d" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="2.2" height="2.2" style="fill:var(--h%d)"/></pattern>' % (k, k)
+                       for k in range(1, 8))
+    quick = [("all", "All"), ("best", "Best fit"), ("reason", "Reason to call")] + ([] if share else [("open", "Not in the pipeline")])
+    sizes = [("people", "People there")] + ([] if share else [("named", "People named")]) + [("same", "Same size")]
+    return "".join([
+        '<div id="sm-live" hidden><div class="sm-bar"><span class="sm-seg" role="group" aria-label="How the map is drawn">',
+        '<button data-lens="seg">Segments</button><button data-lens="pri">Priority</button><button data-lens="held">Held by</button></span>',
+        '<span class="sm-quick">%s</span>' % "".join('<button data-quick="%s">%s <i></i></button>' % item for item in quick),
+        '<input id="sm-find" type="search" placeholder="Find a company" aria-label="Find a company" autocomplete="off"></div>',
+        '<p id="sm-how" class="sm-sub"></p><div class="sm-main"><div>',
+        '<div id="sm-map"><svg id="sm-svg" role="group" aria-label="Market map"><defs>%s' % patterns,
+        '<pattern id="sm-wash" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="1.6" height="1.6" style="fill:var(--h6)" opacity=".5"/></pattern></defs>',
+        '<g id="sm-rings"></g><g id="sm-links"></g><g id="sm-nodes"></g><g id="sm-labels"></g></svg><div id="sm-over"></div><div id="sm-tip" hidden></div><div id="sm-lasso" hidden></div></div>',
+        '<div class="sm-legend"><span>Size by</span><span class="sm-seg" role="group" aria-label="What a mark\'s size shows">%s</span>'
+        % "".join('<button data-size="%s">%s</button>' % item for item in sizes),
+        '<span>Fit <i class="sm-heat"></i> cold to hot</span>%s<span>A ring is a reason to call</span></div></div>'
+        % ("" if share else "<span>Solid is in the pipeline</span>"),
+        '<aside id="sm-side" aria-live="polite"></aside></div>',
+        '<div class="sm-what"><h2>What matters</h2><p id="sm-weighnote" class="sm-sub"></p><div id="sm-weights"></div></div></div>' if summary["market"]["requirements"] else
+        '<div class="sm-what" hidden><p id="sm-weighnote"></p><div id="sm-weights"></div></div></div>',
+        '<script type="application/json" id="sm-data">%s</script>' % packed,
+        "<script>%s</script>" % SCRIPT.read_text(encoding="utf-8")])
 
 
 def _initials(name: str) -> str:
@@ -134,7 +229,7 @@ def render(summary: dict, terms: dict, share: bool = False) -> str:
             for i, x in enumerate(market.get("implications") or [])))
 
     if summary["segments"]:
-        out.append("<section><h2>The map</h2>%s</section>" % _sky(summary["segments"], share))
+        out.append('<section><h2>The map</h2><div id="sm-static">%s</div>%s</section>' % (_sky(summary["segments"], share), _live(summary, share)))
         rows = "".join(
             "<tr><td><strong>%s</strong><br>%s</td><td>%d (%d%%)</td><td>%s</td><td>%s</td><td>%s</td></tr>"
             % (esc(s["segment"]), esc(s["description"]), s["count"], s["share"], esc(str(s["avg_fit"])),

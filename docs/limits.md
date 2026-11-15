@@ -27,6 +27,10 @@
   open, the task waits on the record.
 - If your agent already keeps people somewhere else, it may look there first. Naming the desk ("on the Stoa
   desk") or using `!gtm <name>` settles it.
+- On the page's map, the weights under **What matters** and the **Size by** choice are kept with the
+  page on that computer, per map. Slack, the downloaded page and Hermes still show Hermes's own fit.
+  A reason to call recorded before signals carried dates has none, so *Priority* sets it in the middle until Hermes
+  looks at that company again. On the downloaded page, weights last until the page is reloaded.
 - A map is as good as the research behind it. Fit scores are the agent's judgement against your
   brief; the source link is there so you can check.
 - One Slack workspace per profile.
@@ -38,7 +42,8 @@
   list the people who may press such cards in `slack_users`, or ask for the card again.
 - The activity sweep is only as good as the tools your Hermes has connected and the model reading
   the mail. It summarises; check the record's log against the email when it matters.
-- Setup cannot tell which automations you have switched on, so it lists them all and says how.
+- Setup knows an automation is switched on by its name among Hermes's scheduled jobs. Rename the job
+  in Hermes and Setup shows that automation as off. Switching one on still happens in a chat.
   Today, approvals, undo, people and companies are in the Desktop app and Webapp page; the web
   dashboard tab has the pipeline, the map, the log and Setup.
 - The autonomy setting governs scheduled jobs. In a chat the agent can still change something you

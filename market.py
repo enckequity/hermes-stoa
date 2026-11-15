@@ -61,6 +61,31 @@ def region_of(location: str) -> str:
     return parts[-1][:40] if parts else ""
 
 
+def signal_day(value: Any) -> str:
+    """The day a signal happened, as ``YYYY-MM-DD``, from ``YYYY-MM-DD`` or ``YYYY-MM`` (taken as the middle of that
+    month). Anything else, or a day that does not exist, is no date at all."""
+    text = _clean(value, 20)
+    match = re.fullmatch(r"(\d{4})-(\d{2})(?:-(\d{2}))?", text)
+    if not match:
+        return ""
+    import datetime as dt
+    try:
+        return dt.date(int(match.group(1)), int(match.group(2)), int(match.group(3) or 15)).isoformat()
+    except ValueError:
+        return ""
+
+
+def headcount(size: str) -> int:
+    """How many people work there, when the size text says ('220 people', '1,200', 'Founded 2015, 80 staff'); else 0."""
+    text = (size or "").lower().replace(",", "")
+    number = r"(\d+(?:\.\d+)?)(k\b)?"
+    match = re.search(number + r"(?:\s*(?:-|–|to)\s*\d+(?:\.\d+)?k?\b)?\+?(?:\s+[a-z-]+){0,2}?\s*"
+                      r"(?:people|employees?|staff|headcount|ftes?|persons?)\b", text)
+    if not match and re.fullmatch(r"[\d\s.k+–-]+", text):
+        match = re.search(number, text)
+    return int(float(match.group(1)) * (1000 if match.group(2) else 1)) if match else 0
+
+
 def size_band(size: str) -> str:
     """A headcount band, when the size text gives a headcount ('220 people', 'Founded 2015, 80 staff', '1,200').
 
@@ -279,6 +304,10 @@ class Markets:
                 for key in ("uses", "also"):
                     if _clean(raw.get(key), 80):
                         detail[key] = _clean(raw.get(key), 80)
+                if values["signal"] and row and values["signal"] != row["signal"]:
+                    detail.pop("signal_date", None)                # a new signal does not keep the old one's date
+                if signal_day(raw.get("signal_date")):
+                    detail["signal_date"] = signal_day(raw.get("signal_date"))
                 given = raw.get("requirements") if isinstance(raw.get("requirements"), dict) else raw.get("criteria")
                 if isinstance(given, dict):
                     checked = dict(detail.get("criteria") or {})
@@ -580,6 +609,65 @@ class Markets:
             return {"ok": True, "dismissed": done}
         return {"ok": False, "error": "nothing matched (records already in the pipeline cannot be dismissed)"}
 
+    def restore(self, refs: list) -> dict:
+        """Put dismissed companies back on the map."""
+        done, touched = [], set()
+        for ref in list(refs)[:50]:
+            target = self.target(ref)
+            if target and target["status"] == "dismissed":
+                with self.store._conn() as conn:
+                    conn.execute("UPDATE targets SET status = 'new', signal = ?, updated_at = ? WHERE id = ?",
+                                 ("" if target["signal"].startswith("Dismissed: ") else target["signal"], st.now(), target["id"]))
+                done.append(target["company"])
+                touched.add(target["market_id"])
+        for market_id in touched:
+            self._refresh(market_id)
+        return {"ok": bool(done), "restored": done}
+
+    def move(self, ref: str, segment: str) -> dict:
+        """Put a company in another of its map's segments."""
+        target = self.target(ref)
+        if target is None:
+            return {"ok": False, "error": "That company is no longer on the map."}
+        market = self._market(target["market_id"])
+        names = {s["name"].lower(): s["name"] for s in (market or {}).get("segments") or []}
+        name = names.get(str(segment or "").strip().lower())
+        if not name:
+            return {"ok": False, "error": "This map has no segment called %s." % _clean(segment, 80)}
+        detail = dict(target["detail"])
+        if str(detail.get("also") or "").lower() == name.lower():
+            detail.pop("also", None)
+        with self.store._conn() as conn:
+            conn.execute("UPDATE targets SET segment = ?, detail = ?, updated_at = ? WHERE id = ?", (name, json.dumps(detail), st.now(), target["id"]))
+        self._refresh(target["market_id"])
+        return {"ok": True, "company": target["company"], "segment": name}
+
+    def track_many(self, refs: list, actor: str) -> dict:
+        """Add several companies to the pipeline in one go: a record each. No draft is asked for; that is one press away on each."""
+        added, already = [], []
+        for ref in list(refs)[:25]:
+            result = self.click_track(str(ref), actor)
+            if result.get("deal"):
+                added.append({"deal": result["deal"]["id"], "name": result["deal"]["name"]})
+            elif result.get("notice"):
+                already.append(result["notice"])
+        return {"ok": bool(added), "added": added, "skipped": already}
+
+    def buyers(self, refs: list) -> dict:
+        """Name a buyer at each company that has none yet: one People Data Labs lookup each, up to three people, inside
+        the monthly cap. Stops at the first refusal (no key, the cap) and says why."""
+        found, none, problem = [], [], ""
+        for ref in list(refs)[:25]:
+            target = self.target(str(ref))
+            if target is None or (target["detail"].get("people") or []):
+                continue
+            result = self.people({"target": target["id"], "limit": 3})
+            if not result.get("ok"):
+                problem = result.get("error") or "the lookup failed"
+                break
+            (found if result.get("people") else none).append(target["company"])
+        return {"ok": bool(found) or not problem, "found": found, "none": none, "problem": problem}
+
     def post(self, args: dict, session: dict) -> dict:
         market = self._market(args.get("market"))
         if market is None:
@@ -697,6 +785,8 @@ def _view(row: dict, criteria: Optional[list] = None, segment: str = "") -> dict
     out = {k: row[k] for k in ("id", "company", "domain", "fit", "size", "location", "why", "signal", "source", "status")}
     detail = row.get("detail") or {}
     out["uses"], out["also"] = detail.get("uses", ""), detail.get("also", "")
+    if row["signal"] and detail.get("signal_date"):
+        out["signal_date"] = detail["signal_date"]
     if row["deal_id"]:
         out["deal"] = row["deal_id"]
     out = {k: v for k, v in out.items() if v not in ("", None)}
@@ -709,6 +799,10 @@ def _view(row: dict, criteria: Optional[list] = None, segment: str = "") -> dict
                                for c in criteria if c["key"] in checked]
     if detail.get("people"):
         out["people"] = detail["people"]
+    count = headcount(row["size"])
+    if count:
+        out["headcount"] = count
+    out["added"] = (row.get("created_at") or "")[:10]
     return out
 
 
