@@ -152,7 +152,7 @@ function drawMap() {
       '<circle class="sm-edge" r="' + n.r.toFixed(1) + '" style="stroke:var(--h' + k + ')"/>' +
       '<path class="sm-brk" d="M' + -s + ',' + (-s + q) + 'V' + -s + 'H' + (-s + q) + 'M' + (s - q) + ',' + -s + 'H' + s + 'V' + (-s + q) + 'M' + s + ',' + (s - q) + 'V' + s + 'H' + (s - q) + 'M' + (-s + q) + ',' + s + 'H' + -s + 'V' + (s - q) + '"/>';
     let t = lbls.get(c.id);
-    if (!t) { t = document.createElementNS(NS, 'text'); t.textContent = c.company; gT.appendChild(t); lbls.set(c.id, t); }
+    if (!t) { t = document.createElementNS(NS, 'text'); t.textContent = c.company.length > 22 ? c.company.slice(0, 21).trimEnd() + '…' : c.company; gT.appendChild(t); lbls.set(c.id, t); }
     t.style.transform = 'translate(' + n.x.toFixed(1) + 'px,' + (n.bridge && n.y > n.g.cy + n.g.R * 0.45 ? n.y - n.r - 7 : n.y + n.r + 15).toFixed(1) + 'px)';
     t.setAttribute('class', 'sm-lbl' + ((n.show || picked) && shown(c) ? ' on' : '') + (picked ? ' sel' : ''));
   });

@@ -3763,6 +3763,14 @@ class MapOnThePageTests(unittest.TestCase):
         self.desk.markets.add({"market": name, "companies": [{"company": "Meridian Freight", "signal": "Raised a round", "signal_date": "2026-11"}]})
         self.assertEqual(self.companies()["Meridian Freight"]["signal_date"], "2026-11-15")
 
+    def test_a_long_requirement_is_still_matched_when_a_company_is_checked_against_it(self):
+        long = "Processes more than a hundred thousand card transactions a month across several countries"
+        self.desk.markets.define({"name": "Long words", "segments": ["One"], "requirements": [long, "Small team"]})
+        out = self.desk.markets.add({"market": "Long words", "companies": [{"company": "Ada", "segment": "One", "requirements": {long: "Its annual report says so", "Small team": True}}]})
+        self.assertNotIn("problems", out)
+        company = self.desk.markets.summary(self.desk.markets._market("Long words")["id"], text=False)["segments"][0]["companies"][0]
+        self.assertEqual([req["shown"] for req in company["requirements"]], [True, True])
+
     def test_several_are_added_to_the_pipeline_at_once(self):
         rows = self.companies()
         result = self.desk.markets.track_many([rows["Meridian Freight"]["id"], rows["Tidewater Logistics"]["id"]], "tester")

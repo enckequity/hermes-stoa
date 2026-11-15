@@ -312,7 +312,7 @@ class Markets:
                 if isinstance(given, dict):
                     checked = dict(detail.get("criteria") or {})
                     for label, evidence in given.items():
-                        key = known.get(_key(str(label)))
+                        key = known.get(_key(_clean(label, 80)))      # a requirement is kept to 80 characters, so match it the same length
                         if key is None:
                             problems.append("%s: '%s' is not one of this market's requirements" % (company, label))
                             continue

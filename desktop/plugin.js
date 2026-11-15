@@ -415,7 +415,9 @@ const CSS = `
 .stoa-chip[data-tone="bad"] { color: var(--ui-red); }
 .stoa-chip[data-tone="warn"] { color: var(--ui-orange); }
 .stoa-chip[data-tone="good"] { color: var(--stoa-accent-text); }
+.stoa-chip[data-wrap="1"] { white-space: normal; overflow-wrap: anywhere; }
 .stoa-chips { display: flex; flex-wrap: wrap; gap: 5px 9px; margin-top: 7px; }
+.stoa-chips > * { min-width: 0; }
 .stoa-foot { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px; border-top: 1px dotted var(--ui-stroke-primary); }
 /* Tabs: a strip of cells. Where you are is shown the way a terminal shows it, light on dark turned round. */
 .stoa-tabs { display: inline-flex; margin: 18px 0 18px; border: 1px solid var(--ui-stroke-secondary); border-radius: var(--stoa-r); }
@@ -441,7 +443,9 @@ const CSS = `
 .stoa-card h5 { display: flex; justify-content: space-between; gap: 8px; margin: 0; font-size: 13px; font-weight: 550; }
 .stoa-empty { padding: 10px 2px; color: var(--ui-text-quaternary); }
 .stoa-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
-.stoa-company { padding: 10px 0; border-top: 1px dotted var(--ui-stroke-primary); }
+/* A column is as wide as its share and no wider: whatever is in it folds, so one long word or tag cannot push a card past its edge. */
+.stoa-cols > * { min-width: 0; }
+.stoa-company { padding: 10px 0; border-top: 1px dotted var(--ui-stroke-primary); overflow-wrap: anywhere; }
 .stoa-company:first-of-type { border-top: 0; }
 /* Fit is heat: a better fit is a hotter mark. */
 .stoa-fit { font-family: var(--stoa-mono); font-size: 9px; letter-spacing: 2px; color: var(--stoa-h4); white-space: nowrap; }
@@ -783,7 +787,8 @@ const CSS = `
 .stoa-mapfind { width: 190px; max-width: 100%; margin-top: 0; }
 .stoa-mapmain { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
 @container (min-width: 980px) { .stoa-mapmain { grid-template-columns: minmax(0, 1fr) 340px; } }
-.stoa-mapside { min-width: 0; }
+.stoa-mapside { min-width: 0; overflow-wrap: anywhere; }
+.stoa-mapside .stoa-select { width: 100%; max-width: 100%; text-overflow: ellipsis; }      /* a list of long segment names is as wide as the panel, not as its longest name */
 .stoa-mapside .stoa-sechead { margin-top: 14px; padding-top: 10px !important; border-top: 1px dotted var(--ui-stroke-primary); }
 .stoa-mapside > div > .stoa-sechead:first-child { margin-top: 0; padding-top: 0 !important; border-top: 0; }
 .stoa-mapside .stoa-btns { margin-top: 10px; }
@@ -837,6 +842,7 @@ const CSS = `
 .stoa-maphint { right: 10px; top: 8px; font-family: var(--stoa-mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--ui-text-tertiary); pointer-events: none !important; }
 .stoa-maptip { z-index: 5; width: 232px; padding: 9px 11px; border: 1px solid var(--ui-stroke-primary); border-radius: var(--stoa-r); background: var(--stoa-page); font-size: 12px; line-height: 1.4; pointer-events: none !important; animation: none !important; }
 .stoa-maptip b { display: block; font-size: 13px; }
+.stoa-maptip { overflow-wrap: anywhere; }
 .stoa-maplasso { z-index: 4; border: 1px dashed var(--ui-text-primary); background: color-mix(in srgb, var(--ui-text-primary) 7%, transparent); pointer-events: none !important; animation: none !important; }
 .stoa-maplegend { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; padding: 9px 2px 0; font-family: var(--stoa-mono); font-size: 10.5px; color: var(--ui-text-secondary); }
 .stoa-maplegend > span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
@@ -856,6 +862,7 @@ const CSS = `
   background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .stoa-mapfacet:hover { background: var(--ui-row-hover-background); }
 .stoa-mapfacet[aria-pressed="true"] { box-shadow: inset 2px 0 0 var(--ui-text-primary); padding-left: 8px; }
+.stoa-mapfacet > span { min-width: 0; overflow-wrap: anywhere; }
 .stoa-mapfacet b { font-family: var(--stoa-mono); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .stoa-mapfacet small { font-family: var(--stoa-mono); font-size: 11px; color: var(--ui-text-secondary); }
 .stoa-mapmeter { display: block; height: 4px; margin-top: 5px; background: var(--ui-stroke-primary); text-decoration: none; -webkit-mask-image: var(--stoa-grid); mask-image: var(--stoa-grid); -webkit-mask-composite: source-in; mask-composite: intersect; }
@@ -865,7 +872,7 @@ const CSS = `
 .stoa-maptable th { padding: 0; text-align: left; border-bottom: 1px dotted var(--ui-text-tertiary); white-space: nowrap; }
 .stoa-maptable th button { width: 100%; padding: 9px 10px; border: 0; background: none; text-align: left; font-family: var(--stoa-mono); font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--ui-text-secondary); cursor: pointer; }
 .stoa-maptable th button:hover, .stoa-maptable th button[aria-pressed="true"] { color: var(--ui-text-primary); }
-.stoa-maptable td { padding: 9px 10px; border-bottom: 1px dotted var(--ui-stroke-primary); vertical-align: top; }
+.stoa-maptable td { padding: 9px 10px; border-bottom: 1px dotted var(--ui-stroke-primary); vertical-align: top; overflow-wrap: break-word; max-width: 260px; }
 .stoa-maptable td b { font-weight: 600; }
 .stoa-maptable tbody tr { cursor: pointer; } .stoa-maptable tbody tr:hover { background: var(--ui-row-hover-background); }
 .stoa-maptable tbody tr[data-sel="1"] { background: var(--stoa-accent-soft); box-shadow: inset 2px 0 0 var(--stoa-accent); }
@@ -974,7 +981,8 @@ const CSS = `
 `
 
 const Style = () => h('style', null, CSS)
-const Chip = ({ tone, children }) => h('span', { className: 'stoa-chip', 'data-tone': tone || '' }, children)
+// A tag is one short word or two and never breaks. `wrap` is for a tag that carries someone's own sentence (a signal), which must fold inside its box.
+const Chip = ({ tone, wrap, children }) => h('span', { className: 'stoa-chip', 'data-tone': tone || '', 'data-wrap': wrap ? '1' : '0' }, children)
 const Btn = ({ kind, children, ...props }) => h('button', { type: 'button', className: 'stoa-btn', 'data-kind': kind || '', ...props }, children)
 
 function Fit({ value }) {
@@ -3865,7 +3873,7 @@ function Company({ company, sessionId }) {
       company.status === 'tracked' ? h(Chip, { tone: 'good' }, 'in the pipeline')
         : company.status === 'dismissed' ? h(Chip, null, 'dismissed')
           : h(Btn, { disabled: busy, onClick: () => { setBusy(true); track(company, sessionId).then(() => setBusy(false)) } }, 'Add to pipeline'),
-      company.signal ? h(Chip, null, company.signal) : null))
+      company.signal ? h(Chip, { wrap: true }, company.signal) : null))
 }
 
 // -- the market map: one picture of a market, to read, act on, grow and adjust ---------------------------------------
@@ -3884,6 +3892,8 @@ const squaresOf = score => Math.max(1, Math.ceil(score / 20))
 const hashOf = text => { let n = 2166136261; for (let i = 0; i < text.length; i++) { n ^= text.charCodeAt(i); n = Math.imul(n, 16777619) } return n >>> 0 }
 /** How long ago a reason to call happened, in words; nothing when it carries no date. */
 const agoWords = days => (days === null || days === undefined ? '' : days === 0 ? 'today' : days === 1 ? 'yesterday' : days < 60 ? days + ' days ago' : Math.round(days / 30) + ' months ago')
+/** A company's name as it is written on the map: whole when short, cut with an ellipsis when long. The panel and the table give it in full. */
+const shortName = name => (String(name).length > 22 ? String(name).slice(0, 21).trimEnd() + '…' : String(name))
 const namesOf = list => (list.length <= 2 ? list.map(c => c.company).join(' and ') : list[0].company + ', ' + list[1].company + ' and ' + (list.length - 2) + ' more')
 
 /** Every company on a map, with what the picture needs worked out: a fit out of 100 (Hermes's judgement, or the
@@ -4090,7 +4100,7 @@ function MapPicture({ market, list, lens, sizeBy, sel, shown, onPick, onLasso, o
             h('path', { className: 'stoa-mapbrk', d: brackets(n.r + 5) })))
       }),
       L.ns.map(n => h('text', { key: 'l' + n.id, className: 'stoa-maplbl', 'data-on': (n.show || sel.has(n.id)) && shown(n.c) ? '1' : '0', 'data-sel': sel.has(n.id) ? '1' : '0',
-        style: { transform: 'translate(' + n.x.toFixed(1) + 'px,' + (n.bridge && n.y > n.g.cy + n.g.R * 0.45 ? n.y - n.r - 7 : n.y + n.r + 15).toFixed(1) + 'px)' } }, n.c.company))) : null,
+        style: { transform: 'translate(' + n.x.toFixed(1) + 'px,' + (n.bridge && n.y > n.g.cy + n.g.R * 0.45 ? n.y - n.r - 7 : n.y + n.r + 15).toFixed(1) + 'px)' } }, shortName(n.c.company)))) : null,
     L ? h('div', { className: 'stoa-mapover' },
       h('div', { className: 'stoa-maphint' }, 'Click to open · shift-click or drag to pick several'),
       pri ? [
@@ -4114,7 +4124,7 @@ function MapPicture({ market, list, lens, sizeBy, sel, shown, onPick, onLasso, o
       }),
       hovered ? h('div', { className: 'stoa-maptip', style: { left: Math.max(4, hovered.x + hovered.r + 14 + 236 > L.W ? hovered.x - hovered.r - 14 - 232 : hovered.x + hovered.r + 14), top: Math.max(4, Math.min(L.H - 120, hovered.y - 24)) } },
         h('b', null, hovered.c.company), h(Fit, { value: squaresOf(hovered.c.score) }), h('span', { className: 'stoa-sub' }, '  fit ' + hovered.c.score + (hovered.c.size ? ' · ' + hovered.c.size : '')),
-        hovered.c.signal ? h('div', null, h(Chip, null, hovered.c.signal), agoWords(hovered.c.days) ? h('span', { className: 'stoa-sub' }, '  ' + agoWords(hovered.c.days)) : null) : null, hovered.c.why ? h('div', { className: 'stoa-sub' }, hovered.c.why) : null) : null,
+        hovered.c.signal ? h('div', null, h(Chip, { wrap: true }, hovered.c.signal), agoWords(hovered.c.days) ? h('span', { className: 'stoa-sub' }, '  ' + agoWords(hovered.c.days)) : null) : null, hovered.c.why ? h('div', { className: 'stoa-sub' }, hovered.c.why) : null) : null,
       lasso ? h('div', { className: 'stoa-maplasso', style: { left: lasso.l, top: lasso.t, width: lasso.w, height: lasso.h } }) : null) : null)
 }
 
@@ -4213,7 +4223,7 @@ function MarketMap({ market, shape, openRecord }) {
       h('div', { className: 'stoa-eyebrow' }, c.segment + (c.also ? ' · also fits ' + c.also : '')),
       h('div', { className: 'stoa-maph' }, c.company),
       h('div', { className: 'stoa-sub' }, [c.domain, c.location].filter(Boolean).join(' · ')),
-      h('div', { className: 'stoa-chips' }, status(c), c.signal ? h(Chip, { tone: 'warn' }, c.signal) : null,
+      h('div', { className: 'stoa-chips' }, status(c), c.signal ? h(Chip, { tone: 'warn', wrap: true }, c.signal) : null,
         c.signal ? h('span', { className: 'stoa-sub' }, agoWords(c.days) || 'no date on it') : null),
       h('div', { className: 'stoa-mapscore' }, h('span', { className: 'stoa-eyebrow' }, c.weighed ? 'Fit, by your weights' : 'Fit, Hermes\'s judgement'), h('b', null, c.score), h(Fit, { value: squaresOf(c.score) })),
       c.why ? h('p', { style: { margin: '10px 0' } }, c.why) : null,
