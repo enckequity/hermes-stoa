@@ -26,6 +26,10 @@ FIELDS = ("domain", "segment", "size", "location", "why", "signal", "source")
 ACCOUNT_WORDS = ("account", "client", "company", "customer", "buyer")
 SIZE_BANDS = ((50, "1–49"), (200, "50–199"), (1000, "200–999"), (10 ** 12, "1,000+"))
 MAX_PEOPLE, MAX_CRITERIA, MAX_FIRST_CALLS = 6, 8, 7
+# Words in a job title that say how senior someone is or where they sit, not what they do.
+TITLE_NOISE = frozenset("""manager managing head director senior junior vice president chief officer lead leader principal associate assistant
+    executive global regional national north south east west america american americas europe emea apac latam international interim
+    acting deputy staff team group general founder cofounder partner owner""".split())
 
 
 def _norm(company: str) -> str:
@@ -682,20 +686,39 @@ class Markets:
                 already.append(result["notice"])
         return {"ok": bool(added), "added": added, "skipped": already}
 
+    def buyer_titles(self, market_id: str) -> list:
+        """What a buyer's title looks like on this map: the words that say what the buyers already named here do
+        ("fraud", "risk", "payments"), commonest first. A whole title as someone wrote it ("Manager, Fraud
+        Investigations (US & Latam)") matches nobody else; the words in it do. Rank and region words are left out."""
+        seen: Counter = Counter()
+        for row in self.targets(market_id):
+            for person in row["detail"].get("people") or []:
+                for word in set(re.findall(r"[a-z]{4,}", _clean(person.get("title"), 80).lower())):
+                    if word not in TITLE_NOISE:
+                        seen[word] += 1
+        return [word for word, _ in seen.most_common(6)]
+
     def buyers(self, refs: list) -> dict:
-        """Name a buyer at each company that has none yet: one People Data Labs lookup each, up to three people, inside
-        the monthly cap. Stops at the first refusal (no key, the cap) and says why."""
-        found, none, problem = [], [], ""
+        """Name one buyer at each company that has none: one People Data Labs lookup each, for one person whose title
+        is like those of the buyers already named on the map, inside the monthly cap. One person is one credit, so the
+        most this can spend is the number of companies. With no buyer named anywhere on the map there is no title to
+        look for, and it says so rather than pay for whoever comes back. Stops at the first refusal and says why."""
+        found, none, problem, titles = [], [], "", None
         for ref in list(refs)[:25]:
             target = self.target(str(ref))
             if target is None or (target["detail"].get("people") or []):
                 continue
-            result = self.people({"target": target["id"], "limit": 3})
+            if titles is None:
+                titles = self.buyer_titles(target["market_id"])
+                if not titles:
+                    return {"ok": False, "found": [], "none": [], "no_titles": True,
+                            "problem": "No buyer is named on this map yet, so there is no job title to look for."}
+            result = self.people({"target": target["id"], "limit": 1, "titles": titles})
             if not result.get("ok"):
                 problem = result.get("error") or "the lookup failed"
                 break
             (found if result.get("people") else none).append(target["company"])
-        return {"ok": bool(found) or not problem, "found": found, "none": none, "problem": problem}
+        return {"ok": bool(found) or not problem, "found": found, "none": none, "problem": problem, "titles": titles or []}
 
     def post(self, args: dict, session: dict) -> dict:
         market = self._market(args.get("market"))
@@ -832,6 +855,7 @@ def _view(row: dict, criteria: Optional[list] = None, segment: str = "") -> dict
     if count:
         out["headcount"] = count
     out["added"] = (row.get("created_at") or "")[:10]
+    out["added_at"] = row.get("created_at") or ""
     return out
 
 

@@ -774,7 +774,7 @@ const CSS = `
 .stoa-code { padding: 1px 5px; border: 1px solid var(--ui-stroke-secondary); border-radius: var(--stoa-r); font-family: var(--stoa-mono); font-size: 11.5px; white-space: nowrap; }
 .stoa-linkbtn { padding: 0; border-width: 0 0 1px; background: transparent; font: inherit; cursor: pointer; }
 /* The market map. A mark is a disc of dots: colour is fit (the heat ramp, leaned toward the page's ink so it reads on a
-   light theme too), size is what "Size by" says. Solid is in the pipeline, a dashed edge was added today, a ring is a reason to call. */
+   light theme too), size is what "Size by" says. Solid is in the pipeline, a dashed edge arrived since you last looked, a ring is a reason to call. */
 .stoa-mapwrap { --stoa-m1: color-mix(in oklab, var(--stoa-h1) 84%, var(--ui-text-primary)); --stoa-m2: color-mix(in oklab, var(--stoa-h2) 84%, var(--ui-text-primary));
   --stoa-m3: color-mix(in oklab, var(--stoa-h3) 84%, var(--ui-text-primary)); --stoa-m4: color-mix(in oklab, var(--stoa-h4) 84%, var(--ui-text-primary));
   --stoa-m5: color-mix(in oklab, var(--stoa-h5) 84%, var(--ui-text-primary)); --stoa-m6: color-mix(in oklab, var(--stoa-h6) 84%, var(--ui-text-primary));
@@ -3942,11 +3942,10 @@ const namesOf = list => (list.length <= 2 ? list.map(c => c.company).join(' and 
 
 /** Every company on a map, with what the picture needs worked out: a fit out of 100 (Hermes's judgement, or the
     requirements weighed the way the person set them), whether there is a reason to call now, and who the buyer is. */
-function mapCompanies(market, weights) {
+function mapCompanies(market, weights, seenAt) {
   const own = Object.values(weights || {}).some(weight => weight !== 2)
-  const today = new Date().toISOString().slice(0, 10)
-  // "Added today" marks what is new on a map that was already there. On a map made today, everything is new and nothing is marked.
-  const older = market.segments.some(segment => segment.companies.some(c => c.added && c.added < today))
+  // "New" is a company that arrived since you last had this map open: what Hermes has just found, not the whole of a map you are seeing for the first time.
+  const isFresh = c => { const at = Date.parse(c.added_at || '') || 0; return Boolean(at) && Boolean(seenAt) && at > seenAt }
   const out = []
   for (const segment of market.segments) {
     for (const c of segment.companies) {
@@ -3969,7 +3968,7 @@ function mapCompanies(market, weights) {
       const days = c.signal && c.signal_date ? Math.max(0, Math.round((Date.now() - new Date(c.signal_date + 'T12:00:00').getTime()) / 86400000)) : null
       const timing = !c.signal ? 6 + hashOf(c.id) % 14 : days === null || isNaN(days) ? 58 : Math.max(30, Math.min(100, Math.round(100 - days * 0.9)))
       out.push({ ...c, segment: c.segment || segment.name, score, weighed, buyer, reason: Boolean(c.signal), days: isNaN(days) ? null : days, timing,
-        fresh: older && c.status === 'new' && c.added === today, band: bandOf(c.headcount), uses: c.uses || '', rank: Math.round(score * 0.65 + timing * 0.35) + (buyer ? 2 : 0) })
+        fresh: c.status === 'new' && isFresh(c), band: bandOf(c.headcount), uses: c.uses || '', rank: Math.round(score * 0.65 + timing * 0.35) + (buyer ? 2 : 0) })
     }
   }
   return out
@@ -4218,6 +4217,8 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
   const [mode, setMode] = useState('')      // a form open under the map's name: new | rename | delete
   const [draft, setDraft] = useState('')
   const rail = useRef(null)
+  const who = shape === 'roles' ? { one: 'person', many: 'people', Cap: 'Person', find: ['Find a person', 'Find people'], ask: 'Ask Hermes who to approach', likely: 'the best person to approach' }
+    : { one: 'buyer', many: 'buyers', Cap: 'Buyer', find: ['Find a buyer', 'Find buyers'], ask: 'Ask Hermes who the buyer is', likely: 'the most likely buyer' }
   const [picked, setPicked] = useState([])
   const [quick, setQuick] = useState('all')
   const [find, setFind] = useState('')
@@ -4234,7 +4235,10 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
   useEffect(() => { setWeightsNow(kept('mapweights') || {}); setSizeNow(kept('mapsize') || (shape === 'roles' ? 'named' : 'people')); setPicked([]); setFacet(null); setFind(''); setQuick('all'); setMode('') }, [market.id])
   const setWeights = next => { setWeightsNow(next); keep('mapweights', next) }
   const setSize = next => { setSizeNow(next); keep('mapsize', next) }
-  const list = useMemo(() => mapCompanies(market, weights), [market, weights])
+  // When this map was last looked at, from the visit before this one. Companies that arrived after it are marked new for the whole of this visit.
+  const [seenAt, setSeenAt] = useState(() => Number(kept('mapseen')) || Date.now())
+  useEffect(() => { const id = market.id; setSeenAt(Number(kept('mapseen')) || Date.now()); return () => { try { if (storage) storage.set('mapseen:' + id, Date.now()) } catch { /* no storage */ } } }, [market.id])
+  const list = useMemo(() => mapCompanies(market, weights, seenAt), [market, weights, seenAt])
   const byId = useMemo(() => new Map(list.map(c => [c.id, c])), [list])
   const sel = useMemo(() => new Set(picked.filter(id => byId.has(id))), [picked, byId])
   const chosen = [...sel].map(id => byId.get(id))
@@ -4268,11 +4272,21 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
     add: companies => send('track', companies.filter(c => c.status !== 'tracked'), null, result => (result.added || []).length
       ? plural(result.added.length, 'record', 'records') + ' opened in the pipeline, each with its evidence.' : 'Nothing was added: ' + ((result.skipped || [])[0] || 'they are already in the pipeline.')),
     dismiss: companies => send('dismiss', companies.filter(c => c.status !== 'tracked'), null, result => { setPicked([]); return (result.dismissed || []).length ? plural(result.dismissed.length, 'company', 'companies') + ' taken off the map. “Dismissed” above the map puts one back.' : 'Records already in the pipeline stay on the map.' }),
-    buyers: companies => send('buyers', companies.filter(c => !c.buyer), null, result => [(result.found || []).length ? 'Named a buyer at ' + plural(result.found.length, 'company', 'companies') + '.' : '',
-      (result.none || []).length ? 'Nobody found at ' + result.none.join(', ') + '.' : '', result.problem || ''].filter(Boolean).join(' ') || 'Every company picked already has a buyer.'),
+    // One person at each company, with a title like the buyers already named on this map: one lookup apiece, never more.
+    // With a key but no buyer named yet there is no title to look for, so Hermes works out who the buyer is instead.
+    buyers: companies => {
+      const need = companies.filter(c => !c.buyer)
+      if (!need.length) return null
+      if (!(market.buyer_titles || []).length || !market.lookups) {
+        return ask('Work out who ' + who.likely + ' is at each of these companies on' + here + ': ' + need.map(c => c.company).join(', ') + '. Name one person at each, with their title and why them, and save each on the map. '
+          + (market.lookups ? 'People Data Labs is set up: use it with the job titles that fit what we sell, and ask for one person per company.' : 'Use your web search; no paid lookup is set up.'))
+      }
+      return send('buyers', need, null, result => [(result.found || []).length ? 'Named a buyer at ' + plural(result.found.length, 'company', 'companies') + '.' : '',
+        (result.none || []).length ? 'Nobody with a title like that at ' + result.none.join(', ') + '.' : '', result.problem || ''].filter(Boolean).join(' ') || 'Every company picked already has a buyer.')
+    },
     move: (company, segment) => send('move', [company], { segment }, result => (result.ok ? result.company + ' now sits in ' + result.segment + '.' : result.error)),
     draft: companies => ask(companies.length === 1
-      ? 'Draft a first outreach note to ' + (companies[0].buyer ? companies[0].buyer.name + ' at ' : 'the most likely buyer at ') + companies[0].company + ', leading with the evidence on' + here + '. Show me the draft. Do not send anything.'
+      ? 'Draft a first outreach note to ' + (companies[0].buyer ? companies[0].buyer.name + ' at ' : who.likely + ' at ') + companies[0].company + ', leading with the evidence on' + here + '. Show me the draft. Do not send anything.'
       : 'Draft a first outreach note for each of these companies from' + here + ', each leading with its own evidence: ' + companies.map(c => c.company).join(', ') + '. Show me the drafts. Do not send anything.'),
     more: companies => ask('Find up to five more companies like ' + namesOf(companies) + ' for' + here + '. Keep to the map\'s requirements, check each one against them with the evidence, and add them to the map. Then tell me who you added and why.'),
     grow: segment => ask('Find up to five more companies for the “' + segment + '” segment of' + here + '. Keep to the map\'s requirements, check each one against them with the evidence, and add them to the map. Then tell me who you added and why.'),
@@ -4294,13 +4308,16 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
     const open = companies.filter(c => c.status !== 'tracked'), nobody = companies.filter(c => !c.buyer)
     return [
       open.length ? h(Btn, { key: 'add', kind: 'primary', disabled: Boolean(busy), onClick: () => act.add(companies) }, busy === 'track' ? 'Adding…' : companies.length === 1 ? 'Add to pipeline' : 'Add ' + open.length + ' to pipeline') : null,
-      nobody.length ? h(Btn, { key: 'buy', disabled: Boolean(busy) || !market.lookups, title: market.lookups ? 'One People Data Labs lookup for each company, inside your monthly cap' : 'Needs a People Data Labs key: Setup, “Find companies and fill in people”',
-        onClick: () => act.buyers(companies) }, busy === 'buyers' ? 'Looking…' : (companies.length === 1 ? 'Find a buyer' : 'Find buyers') + ' · ' + plural(nobody.length, 'lookup', 'lookups')) : null,
+      nobody.length ? (market.lookups && (market.buyer_titles || []).length
+        ? h(Btn, { key: 'buy', disabled: Boolean(busy), title: 'One People Data Labs lookup per company, for one person with a title like the buyers already on this map (' + market.buyer_titles.slice(0, 3).join(', ') + '). One person is one credit, so this spends at most ' + plural(nobody.length, 'credit', 'credits') + ', inside your monthly cap.',
+          onClick: () => act.buyers(companies) }, busy === 'buyers' ? 'Looking…' : (companies.length === 1 ? who.find[0] : who.find[1]) + ' · ' + plural(nobody.length, 'lookup', 'lookups'))
+        : h(Btn, { key: 'buy', title: market.lookups ? 'No buyer is named on this map yet, so there is no job title to look for. Hermes works out who the buyer is at each company.' : 'Hermes works out who the buyer is with its web search. A People Data Labs key (Setup) lets it look people up.',
+          onClick: () => act.buyers(companies) }, who.ask)) : null,
       h(Btn, { key: 'draft', onClick: () => act.draft(companies) }, 'Draft outreach'),
       h(Btn, { key: 'more', onClick: () => act.more(companies) }, companies.length === 1 ? 'More like this' : 'More like these'),
       open.length ? h(Btn, { key: 'no', kind: 'quiet', disabled: Boolean(busy), onClick: () => act.dismiss(companies) }, 'Dismiss') : null]
   }
-  const status = c => (c.status === 'tracked' ? h(Chip, { tone: 'good' }, 'in the pipeline') : c.fresh ? h(Chip, { tone: 'warn' }, 'added today') : h(Chip, null, 'on the map'))
+  const status = c => (c.status === 'tracked' ? h(Chip, { tone: 'good' }, 'in the pipeline') : c.fresh ? h(Chip, { tone: 'warn' }, 'new') : h(Chip, null, 'on the map'))
   const label = text => h('div', { className: 'stoa-sechead', style: { padding: '0 0 6px' } }, h('span', { className: 'stoa-eyebrow' }, text))
 
   let side
@@ -4319,7 +4336,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
         h('span', null, req.shown ? '[x]' : '[ ]'), h('span', null, h('b', null, req.label), h('span', { className: 'stoa-sub', style: { display: 'block' } }, req.shown ? (req.evidence || 'Shown; the source is on the map') : 'No evidence found'))))] : null,
       label('Facts'),
       h('div', { className: 'stoa-facts', style: { marginTop: 0, paddingTop: 0, borderTop: 0 } },
-        [['Size', c.size || 'Not known'], ['Uses today', c.uses || 'Not known'], ['Buyer', c.buyer ? [c.buyer.name, c.buyer.title].filter(Boolean).join(', ') : 'Nobody named yet'],
+        [['Size', c.size || 'Not known'], ['Uses today', c.uses || 'Not known'], [who.Cap, c.buyer ? [c.buyer.name, c.buyer.title].filter(Boolean).join(', ') : 'Nobody named yet'],
           ['Source', c.source || 'None recorded']].map(pair => h('div', { key: pair[0], style: { gridColumn: '1 / -1' } }, h('small', { className: 'stoa-eyebrow' }, pair[0]),
           pair[0] === 'Source' && /^https?:\/\//.test(pair[1]) ? h('a', { className: 'stoa-alink', href: pair[1], target: '_blank', rel: 'noreferrer', style: { overflowWrap: 'anywhere' } }, bareLink(pair[1])) : h('span', { style: { overflowWrap: 'anywhere' } }, pair[1])))),
       c.status !== 'tracked' && market.segments.length > 1 ? [label('Adjust'), h('select', { key: 'move', className: 'stoa-select', value: c.segment, disabled: Boolean(busy), 'aria-label': 'Move to another segment',
@@ -4329,7 +4346,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
     const avg = Math.round(chosen.reduce((sum, c) => sum + c.score, 0) / chosen.length)
     side = h('div', null,
       h('div', { className: 'stoa-eyebrow' }, 'Picked'), h('div', { className: 'stoa-maph' }, chosen.length + ' companies'),
-      h('div', { className: 'stoa-sub' }, 'Average fit ' + avg + ' · ' + chosen.filter(c => c.reason).length + ' with a reason to call · ' + chosen.filter(c => !c.buyer).length + ' without a buyer'),
+      h('div', { className: 'stoa-sub' }, 'Average fit ' + avg + ' · ' + chosen.filter(c => c.reason).length + ' with a reason to call · ' + chosen.filter(c => !c.buyer).length + (shape === 'roles' ? ' with nobody named' : ' without a buyer')),
       h('div', { className: 'stoa-btns' }, actions(chosen)),
       label('Who'),
       chosen.slice().sort((a, b) => b.rank - a.rank).map(c => h('div', { key: c.id, className: 'stoa-setrow', style: { alignItems: 'center', padding: '6px 0' } },
@@ -4369,7 +4386,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
       .then(result => { setBusy(''); return result })
   }
   const clamp = (text, lines) => h('span', { className: 'stoa-clamp', style: lines ? { WebkitLineClamp: lines } : undefined, title: text }, text)
-  const cols = [['company', 'Company', '18%'], ['segment', 'Segment', null], ['score', 'Fit', '104px'], ['reason', 'Why now', null], ['headcount', 'People', '74px'], ['uses', 'Uses today', null], ['buyer', 'Buyer', null], ['status', 'Pipeline', '128px']]
+  const cols = [['company', 'Company', '18%'], ['segment', 'Segment', null], ['score', 'Fit', '104px'], ['reason', 'Why now', null], ['headcount', 'People', '74px'], ['uses', 'Uses today', null], ['buyer', who.Cap, null], ['status', 'Pipeline', '128px']]
   return h('div', { className: 'stoa-mapwrap' },
     h('div', { className: 'stoa-maptop' },
       h('div', { className: 'stoa-grow', style: { minWidth: 0 } },
@@ -4381,7 +4398,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
           h(MenuItem, { title: 'Rename this map…', onClick: () => { setDraft(market.name); setMode('rename') } }),
           h(MenuItem, { title: 'Delete this map…', danger: true, onClick: () => setMode('delete') })),
         h('div', { className: 'stoa-sub' }, [plural(list.length, 'company', 'companies'), market.numbers.in_pipeline + ' in the pipeline', list.filter(c => c.reason).length + ' with a reason to call',
-          plural(list.filter(c => c.buyer).length, 'buyer named', 'buyers named'), shortDay(market.updated) ? 'updated ' + shortDay(market.updated) : ''].filter(Boolean).join(' · '))),
+          plural(list.filter(c => c.buyer).length, who.one + ' named', who.many + ' named'), shortDay(market.updated) ? 'updated ' + shortDay(market.updated) : ''].filter(Boolean).join(' · '))),
       h('div', { className: 'stoa-btns', style: { margin: 0 } },
         h(Btn, { disabled: Boolean(saving), title: 'The whole map as one web page, with buyers\' names and what is in your pipeline', onClick: () => save(false) }, saving === 'own' ? 'Saving…' : 'Download page'),
         h(Btn, { disabled: Boolean(saving), title: 'The same page without buyers\' names or your pipeline: the one to host or send to a client', onClick: () => save(true) }, saving === 'share' ? 'Saving…' : 'Download a copy to share'))),
@@ -4407,7 +4424,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
           h('div', { className: 'stoa-tabs', style: { margin: 0 }, role: 'group', 'aria-label': 'How the map is drawn' }, MAP_LENSES.map(item => h('button', { type: 'button', key: item[0], className: 'stoa-tab', style: { height: 28 },
             'data-on': lens === item[0] ? '1' : '0', 'aria-pressed': lens === item[0], onClick: () => setLens(item[0]) }, item[1]))),
           h('div', { className: 'stoa-mapquick' },
-            [['all', 'All'], ['open', 'Not in the pipeline'], ['reason', 'Reason to call'], ['nobuyer', 'No buyer named'], ['fresh', 'Added today']].filter(item => item[0] !== 'fresh' || count('fresh')).map(item =>
+            [['all', 'All'], ['open', 'Not in the pipeline'], ['reason', 'Reason to call'], ['nobuyer', shape === 'roles' ? 'Nobody named' : 'No buyer named'], ['fresh', 'New']].filter(item => item[0] !== 'fresh' || count('fresh')).map(item =>
               h(Btn, { key: item[0], kind: 'quiet', 'aria-pressed': quick === item[0], 'data-on': quick === item[0] ? '1' : '0', onClick: () => setQuick(item[0]) }, item[1] + ' ' + count(item[0]))),
             facet ? h(Btn, { title: 'Show every company again', onClick: () => setFacet(null) }, facet.label + ' ×') : null,
             filtered && showing.length ? h(Btn, { onClick: () => setPicked(showing.map(c => c.id)) }, 'Pick these ' + showing.length) : null,
@@ -4420,7 +4437,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
           h('div', null,
             h('span', null, 'Fit ', h('i', { className: 'stoa-mapheat' }), ' cold to hot'),
             h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'on' }), 'on the map'), h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'in' }), 'in the pipeline'),
-            h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'fresh' }), 'added today'), h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'sig' }), 'a reason to call')),
+            h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'fresh' }), 'new since you last looked'), h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'sig' }), 'a reason to call')),
           h('div', null, h('span', null, 'Size by'), h('span', { className: 'stoa-tabs', style: { margin: 0 }, role: 'group', 'aria-label': 'What a mark\'s size shows' }, MAP_SIZES.map(item => h('button', { type: 'button', key: item[0], className: 'stoa-tab',
             style: { height: 22, padding: '0 8px', fontSize: 10.5 }, title: item[2], 'data-on': sizeBy === item[0] ? '1' : '0', 'aria-pressed': sizeBy === item[0], onClick: () => setSize(item[0]) }, item[1])))))),
       h('aside', { ref: rail, className: 'stoa-box stoa-mapside', 'aria-live': 'polite' }, side),
@@ -4462,7 +4479,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
             h('td', { className: 'stoa-num', 'data-num': '1' }, c.headcount ? c.headcount.toLocaleString() : ''),
             h('td', null, c.uses ? clamp(c.uses, 2) : null),
             h('td', null, c.buyer ? [h('span', { key: 'n' }, clamp(c.buyer.name, 2)), c.buyer.title ? h('span', { key: 't', className: 'stoa-sub stoa-clamp', style: { WebkitLineClamp: 1 }, title: c.buyer.title }, c.buyer.title) : null] : h('span', { className: 'stoa-sub' }, 'Not named')),
-            h('td', null, c.status === 'tracked' ? h(Chip, { tone: 'good' }, 'in the pipeline') : h(Btn, { disabled: Boolean(busy), title: 'Add ' + c.company + ' to the pipeline', onClick: () => act.add([c]) }, c.fresh ? 'Add · new today' : 'Add'))))))),
+            h('td', null, c.status === 'tracked' ? h(Chip, { tone: 'good' }, 'in the pipeline') : h(Btn, { disabled: Boolean(busy), title: 'Add ' + c.company + ' to the pipeline', onClick: () => act.add([c]) }, c.fresh ? 'Add · new' : 'Add'))))))),
         chosen.length > 1 ? h('div', { className: 'stoa-mapabar' }, h('b', null, chosen.length + ' picked'), actions(chosen), h(Btn, { kind: 'quiet', onClick: () => setPicked([]) }, 'Clear')) : null)))
 }
 

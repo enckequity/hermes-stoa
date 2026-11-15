@@ -197,6 +197,7 @@ def state() -> dict:
             "first_calls": summary["first_calls"],
             "dismissed": [{"id": row["id"], "company": row["company"], "segment": row["segment"]} for row in d.markets.targets(market["id"], "dismissed")][:60],
             "lookups": bool(d.secret("PDL_API_KEY")),
+            "buyer_titles": d.markets.buyer_titles(market["id"]),
             "counts": {"mapped": summary["numbers"]["companies"], "tracked": summary["numbers"]["in_pipeline"],
                        "dismissed": summary["numbers"]["dismissed"]}})
     last = d.store.undoables()      # per record, the last action that still stands

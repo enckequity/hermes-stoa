@@ -97,8 +97,9 @@ What the plugin does that you would want to know before installing it:
   not anything of the plugin's or the agent's. In Chrome that means the audio goes to Google's
   speech service while you dictate. It listens only while the button is on, and the button is not
   shown where the browser has no speech recognition.
-- **Paid lookups.** People Data Labs charges per result. **Find buyers** on the map looks up at
-  most three people at each company picked that has nobody named. Every lookup counts against
+- **Paid lookups.** People Data Labs charges per person returned. **Find buyers** on the map asks
+  for one person at each company picked that has nobody named, with a job title like the buyers
+  already named on that map, so it spends at most one credit a company. Every lookup counts against
   `pdl_monthly_cap`, and a buyer lookup returns at most five people.
 - **Slack.** Cards are posted and updated through the Slack app Hermes is already connected
   with. The plugin never reads, stores or sees the Slack token. A button moves a stage, applies a

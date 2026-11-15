@@ -80,14 +80,16 @@ The *Market watch* automation re-checks a map every week and adds at most five n
   groups companies by what they use today.
 - **Reading a mark.** Colour is fit, cold to hot. Size is what **Size by** says: the people who work
   there, the people you have named there (how a recruiting desk starts), or all the same. Solid
-  is in the pipeline, a dashed edge was added today, a ring is a reason to call. A dotted line
+  is in the pipeline, a dashed edge arrived since you last looked, a ring is a reason to call. A dotted line
   joins a company to a second segment it also fits.
 - **Act.** Click a company to open it; shift-click, drag across the map or tick rows in the table to
-  pick several. Then add them to the pipeline, name a buyer at each (a People Data Labs lookup
-  apiece), have Hermes draft outreach, or dismiss them. **Dismissed** puts one back.
+  pick several. Then add them to the pipeline, name a buyer at each, have Hermes draft outreach, or
+  dismiss them. **Dismissed** puts one back. **Find buyers** is one People Data Labs lookup a
+  company, for one person whose title is like the buyers already named on the map; the button says
+  the most it can spend. With no buyer named yet, or no key, Hermes works out who the buyer is.
 - **Grow.** **+ Grow** under a segment, **More like this** on a company and the faint ring for a
   neighbouring segment each send Hermes a line in the box at the foot of the page. What it finds
-  lands on the map, marked as added today.
+  lands on the map, marked as new until the next time you open it.
 - **Adjust.** Under **What matters**, set each requirement to Off, Nice, Matters or Must and fit is
   worked out from your weights for every company Hermes checked. A new requirement typed there
   goes to Hermes to check against every company. A company moves to another segment from its panel.

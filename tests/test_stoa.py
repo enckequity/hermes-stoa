@@ -3827,6 +3827,34 @@ class MapOnThePageTests(unittest.TestCase):
         self.assertEqual(self.companies()["Halcyon Transport"]["segment"], "Hybrid carriers")
         self.assertFalse(self.desk.markets.move(target, "A segment nobody made")["ok"])
 
+    def test_finding_buyers_spends_one_credit_a_company_and_looks_for_the_titles_on_the_map(self):
+        calls = []
+
+        def http(url, **kw):
+            calls.append(kw)
+            return 200, {"data": [{"full_name": "sam ito", "job_title": "director of carrier compliance"}], "total": 9}
+
+        desk = make_desk(self.tmp.name, playbook="b2b-sales", secrets={"PDL_API_KEY": "pdl-secret-value"}, http=http)
+        rows = {c["company"]: c for seg in desk.markets.summary(self.market["id"], text=False)["segments"] for c in seg["companies"]}
+        nobody = [c["id"] for c in rows.values() if not c.get("people")]
+        words = desk.markets.buyer_titles(self.market["id"])
+        self.assertIn("compliance", words)      # what the buyers named on the map do
+        self.assertFalse({"director", "chief", "officer"} & set(words))      # not how senior they are
+        out = desk.markets.buyers(nobody + [rows["Meridian Freight"]["id"]])      # Meridian already has a buyer: not looked up
+        self.assertEqual((out["ok"], len(out["found"]), len(calls)), (True, len(nobody), len(nobody)))
+        self.assertTrue(all(call["data"]["size"] == 1 for call in calls))      # one person asked for, so one credit at most
+        self.assertTrue(all("job_title LIKE" in call["data"]["sql"] for call in calls))      # and only someone with a buyer's title
+        self.assertEqual(desk.setup()["keys"][1]["note"], "%d of 50 lookups used this month." % len(nobody))
+
+    def test_with_no_buyer_named_on_the_map_no_lookup_is_paid_for(self):
+        calls = []
+        desk = make_desk(self.tmp.name, playbook="b2b-sales", secrets={"PDL_API_KEY": "pdl-secret-value"}, http=lambda *a, **k: calls.append(k) or (200, {"data": []}))
+        desk.markets.define({"name": "Nobody named", "segments": ["One"]})
+        desk.markets.add({"market": "Nobody named", "companies": [{"company": "Ada", "segment": "One"}]})
+        target = desk.markets.target("Ada")["id"]
+        out = desk.markets.buyers([target])
+        self.assertEqual((out["ok"], out["no_titles"], calls), (False, True, []))
+
     def test_buyers_are_looked_up_only_where_nobody_is_named_and_say_why_they_stop(self):
         rows = self.companies()
         nobody = [c["id"] for c in rows.values() if not c.get("people")]
