@@ -4561,9 +4561,53 @@ class CommandTests(unittest.TestCase):
 
     def test_the_talk_box_takes_a_command_to_a_chat_instead_of_sending_it(self):
         send = self.page[self.page.index("const send = line => {"):]
-        send = send[:send.index("say(words, file)")]
+        send = send[:send.index("say(words, files)")]
         self.assertIn("isCommand(words)", send)
         self.assertIn("typeInChat(words.trim())", send)
+
+    def test_the_talk_box_hands_any_file_to_hermes_the_way_the_apps_chat_box_does(self):
+        page = self.page
+        # a PDF, a Word file or a picture is no longer turned away: it waits by the box and goes with the next message
+        self.assertNotIn("goes through the full chat", page)
+        hand = page[page.index("async function handOver("):page.index("async function say(")]
+        self.assertIn("host.request('file.attach', { session_id: sessionId, data_url: url, name: item.name }", hand)
+        self.assertIn("host.request('image.attach_bytes', { session_id: sessionId, content_base64:", hand)
+        say = page[page.index("async function say("):page.index("function openTalk()")]
+        self.assertIn("[refs.join('\\n'), sent].filter(Boolean).join('\\n\\n')", say)      # references first, then the words, as the app sends them
+        self.assertLess(say.index("await handOver(id, whole)"), say.index("host.request('prompt.submit'"))
+        self.assertIn("...(pictures.length ? { attachments: pictures } : {})", say)      # a staged picture is named on the message, or the model never sees it
+        self.assertIn("if (got.path && got.mime) pictures.push({ path: String(got.path), mime: String(got.mime) })", hand)
+        self.assertIn("MAX_FILE_BYTES = 25 * 1024 * 1024", page)
+        # a list is still read by the desk itself, with no model in between
+        take = page[page.index("async function takeFile("):page.index("// -- look")]
+        self.assertLess(take.index("LIST_FILE.test(file.name)"), take.index("MAX_FILE_BYTES"))
+        self.assertIn("rest('/intake'", take)
+
+    def test_the_model_menu_and_replies_are_the_apps_own_where_it_has_them(self):
+        page = self.page
+        self.assertIn("import * as SDK from '@hermes/plugin-sdk'", page)
+        self.assertIn("h(ModelCatalogMenu, { controller,", page)
+        # where the app has not got one, or one of them fails to draw, the page's own plain version takes over
+        self.assertIn("return APP_MENU ? h(Guard, { what: 'the app\\'s model menu', fallback: h(ModelPickPlain, { lane }) }, h(ModelPickApp, { lane })) : h(ModelPickPlain, { lane })", page)
+        self.assertIn("if (!MessageTextContent) return plain", page)
+        self.assertIn("h(Guard, { what: 'the app\\'s message renderer', fallback: plain }", page)
+        self.assertIn("static getDerivedStateFromError() { return { failed: true } }", page)
+
+    def test_a_send_that_never_reached_hermes_gives_the_words_and_files_back(self):
+        say = self.page[self.page.index("async function say("):self.page.index("function openTalk()")]
+        self.assertLess(say.index("host.request('prompt.submit'"), say.index("reached = true"))
+        self.assertIn("const back = !reached && lane === 'desk' && files.length > 0", say)
+        self.assertIn("if (!$attached.get().length) $attached.set(files)", say)
+        self.assertIn("if (line) $draft.set(line)", say)
+
+    def test_resuming_a_conversation_does_not_set_its_model_again(self):
+        # Hermes keeps a conversation's model with it; setting it on every visit would move a long conversation
+        # to another model without the warning Hermes gives for that
+        opened = self.page[self.page.index("async function talkOpen("):self.page.index("async function handOver(")]
+        resumed = opened[opened.index("host.request('session.resume'"):opened.index("catch { /* that conversation is gone")]
+        self.assertNotIn("modelTo(", resumed)
+        self.assertNotIn("config.set", resumed)
+        self.assertIn("reasoning_effort: pick.effort", opened)      # a new one begins on the pick, depth included
 
     def test_the_skill_names_every_automation_as_hermes_lists_it(self):
         from stoa.blueprints import BLUEPRINTS

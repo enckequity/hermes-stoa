@@ -11,11 +11,26 @@
  * same as typing it) and the agent writes the draft there. The page, which has no chat beside it,
  * keeps a conversation of its own for its talk box (see "talking to the desk" below).
  */
+import * as SDK from '@hermes/plugin-sdk'
 import { atom, host, queryClient, useQuery, useValue } from '@hermes/plugin-sdk'
-import { createElement as h, useEffect, useMemo, useRef, useState } from 'react'
+import { Component, createElement as h, useEffect, useMemo, useRef, useState } from 'react'
 
 let rest = null // ctx.rest, set in register()
 let storage = null // ctx.storage, set in register()
+// The talk box is a thin shell over Hermes's own parts wherever the app hands them to a plugin: the model menu the
+// real chat box uses, the app's message renderer, and the gateway's own way of attaching a file. Each is looked up
+// rather than assumed, so on a Hermes without one the page falls back to its own plain version instead of breaking.
+const { ModelCatalogMenu, ModelMenuCloseContext, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, MessageTextContent } = SDK
+const APP_MENU = Boolean(ModelCatalogMenu && ModelMenuCloseContext && DropdownMenu && DropdownMenuContent && DropdownMenuItem && DropdownMenuTrigger)
+
+/** Draws `children`; if they throw while drawing, draws `fallback` instead and says so once in the console. The app's
+    parts are the app's to change, and a change there must cost the page a nicer menu, never the page. */
+class Guard extends Component {
+  constructor(props) { super(props); this.state = { failed: false } }
+  static getDerivedStateFromError() { return { failed: true } }
+  componentDidCatch(error) { console.warn('[stoa] ' + (this.props.what || 'a part of the app') + ' could not be drawn; using the plain one.', error) }
+  render() { return this.state.failed ? this.props.fallback : this.props.children }
+}
 
 // What the pane and the page are narrowed to. One store, so both show the same thing. `stage` is
 // not a filter: it is the stage picked out on the board, where every column keeps its cards.
@@ -210,7 +225,7 @@ async function typeInChat(line) {
 // is submitted to it, and the reply is read off the gateway's event stream (see register) and
 // shown above the dock.
 const $talk = atom({ busy: false, open: false, turns: [] })
-const $attached = atom(null) // a small text file waiting to go with the next message: { name, text }
+const $attached = atom([]) // files waiting to go with the next message: { name, text } for a small text file, { name, file, image } for anything else
 // The page keeps two conversations of its own. The desk's is the talk box: what you say, and what the buttons on a
 // record ask for. The map's is research: starting a map, growing it, filling it in. They are kept apart so each can
 // run on the model that suits it (a small one is plenty for "what needs me today"; finding and checking companies
@@ -244,26 +259,50 @@ const hasTalk = (lane = 'desk') => Boolean(sessions[lane].runtime || sessions[la
     the one form the app turns into a change to that conversation alone; a bare "reset" is refused, seen on a real run). */
 async function modelTo(sessionId, pick, sure) {
   const result = await host.request('config.set', { key: 'model', session_id: sessionId, value: pick.model + ' --provider ' + pick.provider + ' --session', ...(sure ? { confirm_expensive_model: true } : {}) })
+  if (pick.effort && !(result && result.confirm_required)) await effortTo(sessionId, pick.effort)
   return result || {}
+}
+
+/** How hard a conversation thinks, set the way the app's own menu sets it (`config.set reasoning <level>` for that
+    conversation). A level Hermes will not take for the model is said, and the model pick stands. */
+async function effortTo(sessionId, effort) {
+  try { await host.request('config.set', { key: 'reasoning', session_id: sessionId, value: effort }) } catch (error) {
+    host.notify({ kind: 'warning', message: 'Hermes did not set thinking to ' + effort + ': ' + why(error) })
+  }
+}
+
+/** The person changed the thinking level on a row of the model menu. On the model in use it changes only that; on
+    another row it is a pick of that model at that level. */
+async function pickEffort(row, effort, lane = 'desk') {
+  const now = $model.get()[lane]
+  if (!row.isActive || !now || now.model !== row.model || now.provider !== row.provider) return pickModel({ model: row.model, provider: row.provider, effort }, false, null, lane)
+  if ($talk.get().busy) { host.notify({ kind: 'info', message: 'Hermes is still on the last thing. Change it when it has answered.' }); return false }
+  const pick = { ...now, effort }
+  if (hasTalk(lane)) await effortTo(await talkOpen(true, lane), effort)
+  keep(lane, { model: pick })
+  setModel({ [lane]: pick })
+  return true
 }
 
 /** The person picked a model for one of the page's conversations. Kept for later ones; the one in hand is switched
     now. `pick` null is "Hermes's default": nothing is kept, and the conversation in hand goes to `usual`, the
     profile's own model. */
 async function pickModel(pick, sure, usual, lane = 'desk') {
-  if ($talk.get().busy) return host.notify({ kind: 'info', message: 'Hermes is still on the last thing. Change the model when it has answered.' })
+  if ($talk.get().busy) { host.notify({ kind: 'info', message: 'Hermes is still on the last thing. Change the model when it has answered.' }); return false }
   const target = pick || usual
   try {
     if (hasTalk(lane) && target && target.model && target.provider) {
       const result = await modelTo(await talkOpen(true, lane), target, sure)
-      if (result.confirm_required) return setModel({ asking: { lane, pick, usual, message: String(result.confirm_message || 'Hermes asks you to confirm this model.') } })
+      if (result.confirm_required) { setModel({ asking: { lane, pick, usual, message: String(result.confirm_message || 'Hermes asks you to confirm this model.') } }); return true }
       if (result.warning) host.notify({ kind: 'warning', message: String(result.warning) })
     }
     keep(lane, { model: pick })
     setModel({ [lane]: pick, asking: null })
     host.notify({ kind: 'success', message: LANES[lane].name + (pick ? ' now runs on ' + pick.model + '.' : ' is back on Hermes\'s default model.') })
+    return true
   } catch (error) {
     host.notifyError(error, 'Hermes could not change the model')
+    return false
   }
 }
 
@@ -309,17 +348,18 @@ async function talkOpen(bare, lane = 'desk') {
   if (session.runtime) return session.runtime
   const stored = session.stored || kept(lane).stored || ''
   if (!session.left) session.left = kept(lane).left || ''      // a reload between leaving one and starting the next
-  // The pick goes to a conversation as it opens. Its yes was given when it was picked, so Hermes is not made to ask
-  // again; and if Hermes will not take it (the model is gone, the key was removed) the conversation still opens, on
-  // Hermes's default, and says so. `bare` is the picker itself opening the conversation, about to set the model.
+  // A new conversation begins on the pick. If Hermes will not take it (the model is gone, the key was removed) the
+  // conversation still opens, on Hermes's default, and says so. `bare` is the picker opening the conversation to
+  // set a model on it itself.
   const refused = (pick, error) => host.notify({ kind: 'warning', message: 'Hermes could not use ' + pick.model + ' (' + why(error) + '), so this is on its default model. Pick another ' + LANES[lane].where + '.' })
   if (stored) {
     try {
       const resumed = await host.request('session.resume', { session_id: stored, omit_messages: true })
       if (resumed && resumed.session_id) {
+        // Nothing is set here. Hermes keeps a conversation's model with the conversation (it survives a restart), and
+        // setting it again on every visit would push a long conversation onto another model without the warning
+        // Hermes gives for that. A pick reaches a conversation when it is made, and when one is created.
         Object.assign(session, { runtime: resumed.session_id, stored, primed: true })
-        const pick = $model.get()[lane]
-        if (pick && !bare) { try { await modelTo(session.runtime, pick, true) } catch (error) { refused(pick, error) } }
         return session.runtime
       }
     } catch { /* that conversation is gone: start another */ }
@@ -334,7 +374,7 @@ async function talkOpen(bare, lane = 'desk') {
   const create = async seconds => {
     const ask = { title: left ? LANES[lane].title + ' · ' + stamp(seconds) : LANES[lane].title, request_id: newId() }
     try {
-      return await host.request('session.create', pick ? { ...ask, model: pick.model, provider: pick.provider } : ask)
+      return await host.request('session.create', pick ? { ...ask, model: pick.model, provider: pick.provider, ...(pick.effort ? { reasoning_effort: pick.effort } : {}) } : ask)
     } catch (error) {
       if (!pick) throw error
       refused(pick, error)
@@ -352,23 +392,62 @@ async function talkOpen(bare, lane = 'desk') {
   return runtime
 }
 
-/** Send a line to one of the page's conversations: the desk's, or (lane 'maps') the map's research. */
+const readAsDataUrl = file => new Promise((resolve, reject) => {
+  const reader = new FileReader()
+  reader.onload = () => resolve(String(reader.result || ''))
+  reader.onerror = () => reject(reader.error || new Error('the browser could not read ' + file.name))
+  reader.readAsDataURL(file)
+})
+
+/** Hand files to Hermes the way the app's own chat box does, before the message that goes with them: an image is
+    staged with `image.attach_bytes`, anything else is put in the conversation's workspace (`file.attach`) and comes
+    back as a reference that goes at the head of the message, where Hermes's own file tools read it. Returns those
+    references, and the pictures to name on the message itself: the gateway the Webapp and Desktop app talk to only
+    stages a picture and answers with its path and type, and the message must then carry them (seen on a real run:
+    without that the model is told nothing of the picture). An older gateway queues the picture itself and answers
+    with no type, and then there is nothing to carry. */
+async function handOver(sessionId, files) {
+  const refs = [], pictures = []
+  for (const item of files) {
+    setTurn({ note: 'Handing ' + item.name + ' to Hermes…' })
+    const url = await readAsDataUrl(item.file)
+    if (item.image) {
+      const got = await host.request('image.attach_bytes', { session_id: sessionId, content_base64: url.replace(/^data:[^,]*,/, ''), filename: item.name }, 120000)
+      if (!got || got.attached === false) throw new Error((got && got.message) || 'Hermes did not take ' + item.name)
+      if (got.path && got.mime) pictures.push({ path: String(got.path), mime: String(got.mime) })
+    } else {
+      const got = await host.request('file.attach', { session_id: sessionId, data_url: url, name: item.name }, 120000)
+      if (!got || !got.ref_text) throw new Error((got && got.message) || 'Hermes did not take ' + item.name)
+      refs.push(got.ref_text)
+    }
+  }
+  return { refs, pictures }
+}
+
+/** Send a line to one of the page's conversations: the desk's, or (lane 'maps') the map's research. `file` is one
+    file or several: a small text file rides in the message itself, anything else is handed to Hermes first. */
 async function say(text, file, lane = 'desk') {
   const line = String(text || '').trim()
-  if ((!line && !file) || $talk.get().busy) return
+  const files = [].concat(file || []).filter(Boolean)
+  if ((!line && !files.length) || $talk.get().busy) return
   const turn = ++talking.turn
   talking.lane = lane
   const session = sessions[lane]
-  const shown = line || 'Here is ' + file.name + '.'
-  const typed = file ? shown + '\n\nAttached file "' + file.name + '":\n```\n' + file.text + '\n```' : shown
+  const shown = line || (files.length === 1 ? 'Here is ' + files[0].name + '.' : 'Here are ' + files.length + ' files.')
+  const typed = files.filter(item => typeof item.text === 'string').reduce((all, item) => all + '\n\nAttached file "' + item.name + '":\n```\n' + item.text + '\n```', shown)
+  const whole = files.filter(item => item.file)
   const here = onScreen()
   const sent = here ? '(On the Stoa page I am looking at the pipeline “' + here + '”.)\n\n' + typed : typed
   $talk.set({ busy: true, open: true,
-    turns: $talk.get().turns.slice(-7).concat([{ you: shown, file: file ? file.name : '', lane, reply: '', note: 'Sending…', error: '' }]) })
+    turns: $talk.get().turns.slice(-7).concat([{ you: shown, file: files.map(item => item.name).join(', '), lane, reply: '', note: 'Sending…', error: '' }]) })
+  let reached = false      // whether Hermes took the message: until it has, a failure gives the words and the files back
   const submit = async () => {
     const id = await talkOpen(false, lane)
-    await host.request('prompt.submit', { session_id: id, text: session.primed ? sent : (lane === 'maps' ? PRIME_MAPS : PRIME) + sent })
+    const { refs, pictures } = whole.length ? await handOver(id, whole) : { refs: [], pictures: [] }
+    const body = [refs.join('\n'), sent].filter(Boolean).join('\n\n')      // the same order the app's chat box uses: references, then the words
+    await host.request('prompt.submit', { session_id: id, text: session.primed ? body : (lane === 'maps' ? PRIME_MAPS : PRIME) + body, ...(pictures.length ? { attachments: pictures } : {}) })
     session.primed = true
+    reached = true
   }
   try {
     try {
@@ -386,7 +465,13 @@ async function say(text, file, lane = 'desk') {
     }, 180000)
   } catch (error) {
     setTalk({ busy: false })
-    setTurn({ note: '', error: 'Hermes could not take that: ' + String((error && error.message) || error) })
+    const back = !reached && lane === 'desk' && files.length > 0
+    const said = String((error && error.message) || error).trim()
+    setTurn({ note: '', error: 'Hermes could not take that: ' + said + (/[.!?]$/.test(said) ? '' : '.') + (back ? ' Your words and files are back in the box.' : '') })
+    if (back) {      // typed words and picked files are a person's work: a failed hand-over does not throw them away
+      if (!$attached.get().length) $attached.set(files)
+      if (line) $draft.set(line)
+    }
   }
 }
 
@@ -400,10 +485,14 @@ function openTalk() {
 }
 
 // A file handed to the desk. A CSV is read by the desk itself and comes back as a review, with no
-// model in between. A small text file rides along with the next message. Anything else (a PDF, an
-// image, a spreadsheet) needs the full chat, which can read it.
+// model in between. A small text file rides along in the next message. Anything else (a PDF, a Word
+// file, a spreadsheet, a picture) waits by the box and is handed to Hermes with the next message, the
+// way the app's own chat box hands one over, so Hermes reads it with its own tools.
 const LIST_FILE = /\.(csv|tsv)$/i
 const TEXT_FILE = /\.(txt|md|markdown|json|vcf|log|ya?ml)$/i
+const IMAGE_FILE = /\.(png|jpe?g|gif|webp)$/i      // what Hermes takes as a picture to look at; any other picture goes as a file
+const MAX_FILES = 6
+const MAX_FILE_BYTES = 25 * 1024 * 1024               // Hermes's own limit for a picture sent as bytes; kept for every file, so the box stays quick
 
 async function takeFile(file) {
   if (!file) return
@@ -424,11 +513,16 @@ async function takeFile(file) {
       if (result.waiting && page) page.scrollTo({ top: 0, behavior: 'smooth' })
       return
     }
+    const waiting = $attached.get()
+    if (waiting.length >= MAX_FILES) return host.notify({ kind: 'info', message: 'That is ' + MAX_FILES + ' files already. Send these, then add more.' })
+    if (waiting.some(item => item.name === file.name)) return host.notify({ kind: 'info', message: 'A file called ' + file.name + ' is already waiting by the box.' })
     if ((TEXT_FILE.test(file.name) || String(file.type || '').startsWith('text/')) && file.size <= 60000) {
-      $attached.set({ name: file.name, text: await file.text() })
+      $attached.set(waiting.concat([{ name: file.name, text: await file.text() }]))
       return
     }
-    host.notify({ kind: 'info', message: 'A PDF, an image or a spreadsheet goes through the full chat: press "Open the conversation" and drop it there.' })
+    if (!file.size) return host.notify({ kind: 'info', message: file.name + ' is empty.' })
+    if (file.size > MAX_FILE_BYTES) return host.notify({ kind: 'warning', message: file.name + ' is over 25 MB, which is more than the box here hands over. Press "Open the conversation" and drop it there.' })
+    $attached.set(waiting.concat([{ name: file.name, file, image: IMAGE_FILE.test(file.name) && String(file.type || '').startsWith('image/') }]))
   } catch (error) {
     host.notifyError(error, 'Stoa could not read that file')
   }
@@ -603,6 +697,8 @@ const CSS = `
 .stoa-reply { margin-top: 10px; overflow-wrap: anywhere; }
 .stoa-reply p { margin: 0 0 8px; }
 .stoa-reply p:last-child { margin-bottom: 0; }
+.stoa-reply-app { font-size: 13.5px; line-height: 1.55; }
+.stoa-reply-app table { display: block; max-width: 100%; overflow-x: auto; }
 /* The dock floats at the foot of the page; the board fades out beneath it instead of running into it. */
 .stoa-dockzone { position: sticky; bottom: 0; z-index: 6; margin: 26px -34px 0; padding: 54px 34px 16px; background: linear-gradient(to top, var(--stoa-page) 46%, transparent); pointer-events: none; }
 .stoa-dock { width: min(780px, 100%); margin: 0 auto; pointer-events: auto; }
@@ -620,6 +716,8 @@ const CSS = `
 .stoa-menu[data-right="1"] .stoa-menulist { left: auto; right: 0; }
 .stoa-menu[data-up="1"] .stoa-menulist { top: auto; bottom: calc(100% + 6px); left: 0; max-height: min(420px, 56vh); }
 .stoa-footbtn .stoa-menucaret { font-size: 11px; }
+.stoa-appmenurow { display: block; }
+.stoa-appmenurow small { display: block; font-size: 11.5px; opacity: .7; }
 .stoa-turn + .stoa-turn { margin-top: 14px; padding-top: 14px; border-top: 1px dotted var(--ui-stroke-primary); }
 .stoa-youline { display: flex; justify-content: flex-end; }
 .stoa-you { max-width: 86%; padding: 6px 12px; border-radius: var(--stoa-r); background: var(--stoa-accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--stoa-accent) 24%, transparent); overflow-wrap: anywhere; white-space: pre-wrap; }
@@ -641,6 +739,8 @@ const CSS = `
 .stoa-icon[data-kind="send"]:hover { background: var(--stoa-accent); opacity: .88; }
 .stoa-icon[data-kind="send"]:disabled { opacity: .32; }
 .stoa-icon[data-on="1"] { color: var(--ui-red); background: color-mix(in srgb, var(--ui-red) 14%, transparent); animation: stoa-pulse 1.4s ease-in-out infinite; }
+.stoa-turnhint { margin-top: 10px; padding: 8px 10px; border: 1px dotted var(--ui-stroke-primary); border-radius: var(--stoa-r); color: var(--ui-text-primary); font-size: 13px; }
+.stoa-filechips { display: flex; flex-wrap: wrap; gap: 0 2px; }
 .stoa-filechip { display: inline-flex; align-items: center; gap: 6px; margin: 1px 0 6px 4px; padding: 2px 3px 2px 9px; border: 1px solid var(--ui-stroke-secondary); border-radius: var(--stoa-r); font-family: var(--stoa-mono); font-size: 11.5px; color: var(--ui-text-secondary); }
 .stoa-hints { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-bottom: 8px; }
 .stoa-hint { height: 28px; padding: 0 12px; border: 1px solid var(--ui-stroke-secondary); border-radius: var(--stoa-r); background: color-mix(in srgb, var(--ui-bg-elevated, var(--background, #14161b)) 86%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); color: var(--ui-text-secondary); font-family: var(--stoa-mono); font-size: 11.5px; cursor: pointer; transition: color .15s ease, border-color .15s ease; }
@@ -1964,8 +2064,11 @@ const Icon = ({ name, size }) => h('svg', { width: size || 17, height: size || 1
 function Words({ text }) {
   const clean = String(text || '').replace(/^[ \t]*::stoa-[a-z]+\{[^}\n]*\}[ \t]*$/gm, '').trim()
   const bold = line => line.split(/(\*\*[^*]+\*\*)/g).map((part, index) => (/^\*\*[^*]+\*\*$/.test(part) ? h('b', { key: index }, part.slice(2, -2)) : part))
-  return h('div', { className: 'stoa-reply' }, clean.split(/\n{2,}/).map((block, index) => h('p', { key: index },
+  const plain = h('div', { className: 'stoa-reply' }, clean.split(/\n{2,}/).map((block, index) => h('p', { key: index },
     block.split('\n').map((line, at) => h('span', { key: at, style: { display: 'block' } }, bold(line.replace(/^\s*[-*]\s+/, '•  ').replace(/^#+\s+/, '')))))))
+  // Hermes's own renderer where the app gives it: tables, lists, code and links then look as they do in a chat.
+  if (!MessageTextContent) return plain
+  return h(Guard, { what: 'the app\'s message renderer', fallback: plain }, h('div', { className: 'stoa-reply stoa-reply-app' }, h(MessageTextContent, { text: clean })))
 }
 
 // Dictation is the browser's own speech recognition, where it has one (Chrome, Edge and Safari do;
@@ -1973,9 +2076,50 @@ function Words({ text }) {
 const Recognition = typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null
 
 /** Which model one of the page's conversations runs on: the desk's (under the talk box) or the map's research (beside
-    Map facts). Hermes's own list of every model this profile can use, with Hermes's price for each where it has one.
-    Nothing is left out and nothing is steered: the choice is the person's. */
+    Map facts). The menu is Hermes's own, the one the real chat box opens: search, providers, favourites, a custom
+    model by name, and how hard to think on each row. What a pick MEANS is ours: it is kept for that conversation
+    and set on it (see pickModel and pickEffort). */
 function ModelPick({ lane = 'desk' }) {
+  return APP_MENU ? h(Guard, { what: 'the app\'s model menu', fallback: h(ModelPickPlain, { lane }) }, h(ModelPickApp, { lane })) : h(ModelPickPlain, { lane })
+}
+
+function ModelPickApp({ lane }) {
+  const picked = useValue($model)[lane]
+  const talk = useValue($talk)
+  const [open, setOpen] = useState(false)
+  const query = useQuery({ queryKey: ['stoa', 'models'], queryFn: () => host.request('model.options', {}), staleTime: 60000, retry: false })      // only for the name of Hermes's default
+  const data = query.data || {}
+  const usual = data.model && data.provider ? { model: String(data.model), provider: String(data.provider) } : null
+  const short = name => String(name || '').replace(/^.*\//, '')
+  const now = picked || usual || { model: '', provider: '' }
+  const maps = lane === 'maps'
+  const controller = {
+    allowSpeed: false,
+    current: { model: now.model, provider: now.provider, effort: (picked && picked.effort) || '', fast: false },
+    presetFor: () => ({}),      // what the chat box last used for a model is the chat box's; a pick here starts on Hermes's default depth
+    applyPreset: () => {},
+    // Thinking depth, from the row's own submenu. Speed is not offered (allowSpeed): there is no way to carry it here yet.
+    setOptions: (patch, row) => { if (patch.effort !== undefined) pickEffort(row, patch.effort, lane) },
+    select: (model, provider) => pickModel({ model, provider }, false, null, lane)
+  }
+  const row = (key, label, sub, onSelect) => h(DropdownMenuItem, { key, className: 'stoa-appmenurow', onSelect }, h('span', null, label), sub ? h('small', null, sub) : null)
+  return h(DropdownMenu, { open, onOpenChange: setOpen },
+    h(DropdownMenuTrigger, { asChild: true },
+      h('button', { type: 'button', className: maps ? 'stoa-btn' : 'stoa-footbtn', 'aria-label': maps ? 'The model for map research' : 'The model for the desk\'s conversation',
+        title: maps ? 'The model Hermes researches your maps with: starting a map, growing it, filling in what is missing. It is kept apart from the talk box\'s model, and has a conversation of its own.'
+          : 'The model the desk\'s conversation runs on. Map research has its own, beside Map facts on the Market map tab.' },
+        (maps ? 'Research: ' : '') + (short(now.model) || 'Model'), '\u00a0', h('span', { className: 'stoa-menucaret', 'aria-hidden': true }, '▾'))),
+    h(DropdownMenuContent, { align: maps ? 'end' : 'start', side: maps ? 'bottom' : 'top', className: 'w-72 p-0' },
+      h(ModelMenuCloseContext.Provider, { value: () => setOpen(false) },
+        h(ModelCatalogMenu, { controller, request: (method, params) => host.request(method, params || {}),
+          footer: [
+            picked && usual ? row('usual', 'Use Hermes\'s default', short(usual.model), () => pickModel(null, false, usual, lane)) : null,
+            maps && hasTalk('maps') ? row('fresh', 'New research conversation', 'The next request starts afresh; the maps keep everything', () => freshTalk('maps')) : null,
+            talk.busy ? h('div', { key: 'busy', className: 'stoa-sub', style: { padding: '6px 10px' } }, 'Hermes is answering; a change waits until it is done.') : null] }))))
+}
+
+/** The same choice on a Hermes whose app does not hand a plugin its model menu: a plain list of every model Hermes names. */
+function ModelPickPlain({ lane = 'desk' }) {
   const picked = useValue($model)[lane]
   const talk = useValue($talk)
   const query = useQuery({ queryKey: ['stoa', 'models'], queryFn: () => host.request('model.options', {}), staleTime: 60000, retry: false })      // no conversation named: the profile's own default, which is what "Hermes's default" means here
@@ -2009,7 +2153,7 @@ function ModelPick({ lane = 'desk' }) {
 
 function Dock({ state }) {
   const talk = useValue($talk)
-  const file = useValue($attached)
+  const files = useValue($attached)
   const { asking } = useValue($model)
   const [text, setText] = useState('')
   const [listening, setListening] = useState(false)
@@ -2035,17 +2179,17 @@ function Dock({ state }) {
   const hush = () => { try { if (ear.current) ear.current.stop() } catch { /* already stopped */ } }
   const send = line => {
     const words = typeof line === 'string' ? line : text
-    if (isCommand(words) && !file) {          // a command is for a chat, not for the agent (see typeInChat)
+    if (isCommand(words) && !files.length) {          // a command is for a chat, not for the agent (see typeInChat)
       hush()
       setText('')
       typeInChat(words.trim())
       return
     }
-    if ((!words.trim() && !file) || talk.busy) return
+    if ((!words.trim() && !files.length) || talk.busy) return
     hush()
-    say(words, file)
+    say(words, files)
     setText('')
-    $attached.set(null)
+    $attached.set([])
   }
   const dictate = () => {
     if (listening) return hush()
@@ -2087,10 +2231,11 @@ function Dock({ state }) {
         h('div', { className: 'stoa-youline' }, h('span', { className: 'stoa-you' }, turn.you, turn.file ? h('small', null, turn.file) : null, turn.lane === 'maps' ? h('small', null, 'Map research') : null)),
         turn.reply ? h(Words, { text: turn.reply }) : null,
         turn.note ? h('div', { className: 'stoa-sub stoa-working', style: { marginTop: 8 } }, turn.note) : null,
-        turn.error ? h('div', { style: { marginTop: 8, color: 'var(--ui-red)' } }, turn.error) : null)))
+        turn.error ? h('div', { style: { marginTop: 8, color: 'var(--ui-red)' } }, turn.error) : null,
+        turn.hint ? h('div', { className: 'stoa-turnhint', role: 'note' }, turn.hint) : null)))
       : talk.turns.length ? h('div', { className: 'stoa-hints' },
         h('button', { type: 'button', className: 'stoa-hint', onClick: () => setTalk({ open: true }) }, 'Show the conversation'))
-        : !text && !file ? h('div', { className: 'stoa-hints' }, hints.map(hint =>
+        : !text && !files.length ? h('div', { className: 'stoa-hints' }, hints.map(hint =>
           h('button', { type: 'button', key: hint, className: 'stoa-hint', disabled: talk.busy, onClick: () => send(hint) }, hint))) : null,
     asking ? h('div', { className: 'stoa-glass stoa-ask', role: 'alertdialog', 'aria-label': 'Confirm the model' },
       h('span', { className: 'stoa-askwords' }, asking.message.replace(/^[!\s]+[A-Z ]+[!\s]+/, '')),
@@ -2099,13 +2244,14 @@ function Dock({ state }) {
       h(Btn, { onClick: () => pickModel(asking.pick, true, asking.usual, asking.lane || 'desk') }, 'Switch this conversation'),
       h(Btn, { kind: 'quiet', onClick: () => setModel({ asking: null }) }, 'Cancel')) : null,
     h('div', { className: 'stoa-glass stoa-composer' },
-      file ? h('div', { className: 'stoa-filechip' }, h(Icon, { name: 'clip', size: 13 }), file.name,
-        h('button', { type: 'button', className: 'stoa-icon', style: { width: 22, height: 22 }, 'aria-label': 'Remove the file', onClick: () => $attached.set(null) }, h(Icon, { name: 'x', size: 13 }))) : null,
+      files.length ? h('div', { className: 'stoa-filechips' }, files.map(item => h('div', { key: item.name, className: 'stoa-filechip', title: typeof item.text === 'string' ? 'Goes in the message as text' : item.image ? 'Hermes is shown this picture with your message' : 'Handed to Hermes with your message, to read with its own tools' },
+        h(Icon, { name: 'clip', size: 13 }), item.name,
+        h('button', { type: 'button', className: 'stoa-icon', style: { width: 22, height: 22 }, 'aria-label': 'Remove ' + item.name, onClick: () => $attached.set($attached.get().filter(other => other !== item)) }, h(Icon, { name: 'x', size: 13 }))))) : null,
       h('div', { className: 'stoa-composerrow' },
-        h('button', { type: 'button', className: 'stoa-icon', title: 'Hand it a file: a CSV becomes a review, a text file goes with your message', 'aria-label': 'Attach a file',
+        h('button', { type: 'button', className: 'stoa-icon', title: 'Hand it a file. A CSV becomes a review to approve. Anything else (a PDF, a Word file, a spreadsheet, a picture, a text file) goes to Hermes with your next message.', 'aria-label': 'Attach a file',
           onClick: () => picker.current && picker.current.click() }, h(Icon, { name: 'clip' })),
-        h('input', { ref: picker, type: 'file', hidden: true, accept: '.csv,.tsv,.txt,.md,.json,.vcf,text/*',
-          onChange: event => { takeFile(event.target.files[0]); event.target.value = '' } }),
+        h('input', { ref: picker, type: 'file', hidden: true, multiple: true,
+          onChange: async event => { const picked = [...event.target.files]; event.target.value = ''; for (const one of picked) await takeFile(one) } }),
         h('span', { className: 'stoa-prompt', 'aria-hidden': true }, '›'),
         h('textarea', { ref: area, rows: 1, value: text, disabled: talk.busy, 'aria-label': 'Talk to the desk',
           placeholder: listening ? 'Listening…' : 'Tell Stoa what happened, ask it anything, or drop a list on the page…',
@@ -2117,7 +2263,7 @@ function Dock({ state }) {
         Recognition ? h('button', { type: 'button', className: 'stoa-icon', 'data-on': listening ? '1' : '0', disabled: talk.busy,
           title: listening ? 'Stop dictating' : 'Dictate (your browser\'s speech recognition)', 'aria-label': listening ? 'Stop dictating' : 'Dictate', onClick: dictate },
           h(Icon, { name: 'mic' })) : null,
-        h('button', { type: 'button', className: 'stoa-icon', 'data-kind': 'send', disabled: talk.busy || (!text.trim() && !file), title: 'Send', 'aria-label': 'Send',
+        h('button', { type: 'button', className: 'stoa-icon', 'data-kind': 'send', disabled: talk.busy || (!text.trim() && !files.length), title: 'Send', 'aria-label': 'Send',
           onClick: () => send() }, h(Icon, { name: 'up' }))),
       h('div', { className: 'stoa-composerfoot' },
         h(ModelPick, { lane: 'desk' }),
@@ -4917,9 +5063,9 @@ function Page() {
   return h('div', { className: 'stoa stoa-page', 'data-drop': dropping ? '1' : '0',
     onDragOver: event => { if (carrying(event)) { event.preventDefault(); if (!dropping) setDropping(true) } },
     onDragLeave: event => { if (!event.currentTarget.contains(event.relatedTarget)) setDropping(false) },
-    onDrop: event => { if (!carrying(event)) return; event.preventDefault(); setDropping(false); takeFile(event.dataTransfer.files[0]) } },
+    onDrop: async event => { if (!carrying(event)) return; event.preventDefault(); setDropping(false); for (const one of [...event.dataTransfer.files]) await takeFile(one) } },
   h(Style),
-  dropping ? h('div', { className: 'stoa-dropnote' }, 'Drop it on the desk: a CSV becomes a review to approve') : null,
+  dropping ? h('div', { className: 'stoa-dropnote' }, 'Drop it on the desk: a CSV becomes a review to approve, anything else goes to Hermes with your next message') : null,
   h('div', { className: 'stoa-wrap' },
     state.tour ? h('div', { className: 'stoa-tour', role: 'status' },
       h('span', null, h('b', null, 'Sample data'), ' · ' + state.tour.title + '. Everyone on it is made up, and your own desk is untouched.'),
@@ -5026,7 +5172,7 @@ export default {
     try { $folds.set({ ...(storage.get('folds', {}) || {}) }) } catch { /* no storage: every group starts closed */ }
     for (const lane of Object.keys(LANES)) {
       const was = (ctx.storage.get(LANES[lane].key, {}) || {}).model
-      if (was && typeof was.model === 'string' && typeof was.provider === 'string') setModel({ [lane]: { model: was.model, provider: was.provider } })
+      if (was && typeof was.model === 'string' && typeof was.provider === 'string') setModel({ [lane]: { model: was.model, provider: was.provider, ...(typeof was.effort === 'string' && was.effort ? { effort: was.effort } : {}) } })
     }
     const kept = ctx.storage.get('filter', {}) || {}      // an older version kept every filter, a picked-out stage included: take only these two
     $filter.set({ ...NO_FILTER, owner: typeof kept.owner === 'string' ? kept.owner : '', group: typeof kept.group === 'string' ? kept.group : '' })
@@ -5046,13 +5192,20 @@ export default {
     ctx.onEvent('tool.start', event => {
       if (mine(event)) setTurn(last => ({ note: 'Working on the desk…', reply: last.reply && !last.reply.endsWith('\n') ? last.reply + '\n\n' : last.reply }))
     })
+    // A model that will not take the thinking level picked for a conversation refuses every turn in it, and what
+    // Hermes then says points at commands the talk box does not run. The box adds the way out that is on this page.
+    const wayOut = text => {
+      const pick = $model.get()[talking.lane]
+      return pick && pick.effort && /reasoning[ _]effort|thinking (level|budget)|reasoning\.effort/i.test(String(text || ''))
+        ? 'This conversation is set to think at “' + pick.effort + '”, which this model did not accept. Open the model menu ' + LANES[talking.lane].where + ', choose another level on the model\'s row, and send it again.' : ''
+    }
     ctx.onEvent('message.complete', event => {
       if (!mine(event)) return
       const payload = (event && event.payload) || {}
       const failed = typeof payload.error === 'string' ? payload.error : ''
       setTurn(last => {
         const final = [payload.text, payload.rendered].find(value => typeof value === 'string' && value.trim()) || last.reply
-        return { note: '', reply: final || (failed ? '' : 'Done.'), error: failed }
+        return { note: '', reply: final || (failed ? '' : 'Done.'), error: failed, hint: wayOut(final + ' ' + failed) }
       })
       setTalk({ busy: false })
       refresh()
@@ -5060,7 +5213,8 @@ export default {
     ctx.onEvent('error', event => {
       if (!mine(event)) return
       const payload = (event && event.payload) || {}
-      setTurn({ note: '', error: String(payload.message || payload.error || 'Hermes could not answer that.') })
+      const said = String(payload.message || payload.error || 'Hermes could not answer that.')
+      setTurn({ note: '', error: said, hint: wayOut(said) })
       setTalk({ busy: false })
     })
     ctx.registerMany([

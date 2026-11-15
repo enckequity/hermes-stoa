@@ -172,7 +172,12 @@ What the plugin does that you would want to know before installing it:
   `--session`, the call the app's own picker makes); the pick is kept in the plugin's page storage
   on that computer, and the profile's default model is never changed. A file is read only
   when you pick it or drop it on the page: a CSV's text goes to the plugin's backend to be held as a
-  review, and a small text file goes to the agent with your message. The picture at the head of the page is drawn in the browser from a grid of
+  review; a small text file goes to the agent inside your message; and any other file (a PDF, a Word
+  file, a picture, up to 25 MB) is handed to Hermes with your next message through the gateway's own
+  attach calls, the ones the app's chat box uses (`file.attach` puts it in that conversation's
+  workspace, `image.attach_bytes` stages a picture), so it is Hermes that stores and reads it. The model
+  menu is the app's own (`ModelCatalogMenu`), and a thinking level picked in it is set on that
+  conversation with `config.set reasoning`. The picture at the head of the page is drawn in the browser from a grid of
   dots that ships with the plugin (`desktop/art.json`), and a name you type under Setup is kept in the
   plugin's own database (with whether the two are in color, in one ink, or follow the theme) and drawn the same way; neither is sent anywhere. It does not touch the app's
   DOM or other plugins' storage, and it checks in with the backend every 30 seconds while open so

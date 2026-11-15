@@ -75,6 +75,9 @@
 - The models picked under the dock and for map research are kept per computer and apply to the
   page's own two conversations only: Slack, scheduled jobs and other chats stay on Hermes's default. The list shows a price where
   Hermes has one for that provider, which it does not for every provider.
-- The dock on the page runs a turn of your agent's model, the same as typing in a chat. It takes
-  CSV and small text files; a PDF, an image or a spreadsheet goes through the full chat, which is
-  one click away. Dictation is not available in the Desktop app; the full chat's microphone is.
+- The dock on the page runs a turn of your agent's model, the same as typing in a chat. A file
+  handed to it goes to Hermes as it would from the chat box, so what Hermes makes of a PDF, a Word
+  file or a picture depends on the model and tools your Hermes has. A file over 25 MB, or more than
+  six at once, goes through the full chat, which is one click away. Speed (fast mode) is not offered
+  in the box's model menu. A thinking level the model does not accept makes it refuse the turn; the
+  box then says so and how to change it. Dictation is not available in the Desktop app; the full chat's microphone is.

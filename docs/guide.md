@@ -156,7 +156,8 @@ In the Hermes Desktop app and the Webapp, Stoa sits beside the conversation.
   `/gtm today`) is run by the app's own chat box, so the page opens a new chat with it typed
   and leaves it for you to send.
 - **Pick the model, and start again when it gets long.** Under the dock is the model the desk's
-  conversation runs on. Press it for every model Hermes can use and pick one. The pick is kept on
+  conversation runs on. Press it and Hermes's own model menu opens, the one the chat box uses:
+  search, your favourites, a custom model by name, and how hard to think on each row. The pick is kept on
   that computer and goes to every conversation the talk box starts. Map research has a model of its
   own: on the Market map tab, **Research:** beside **Map facts** sets the model Hermes uses to start
   a map, grow it and fill in what is missing, in a conversation of its own called **Stoa map
@@ -172,7 +173,10 @@ In the Hermes Desktop app and the Webapp, Stoa sits beside the conversation.
 - **Say it or hand it over.** The microphone dictates into the dock where the browser has speech
   recognition. Drop a CSV anywhere on the page, or attach one, and the desk reads it itself and
   shows the review, with no model in between, whatever the headers are called. If it cannot tell
-  which column is the name, Hermes reads the file instead. A small text file goes along with your message.
+  which column is the name, Hermes reads the file instead. Anything else you drop or attach (a PDF,
+  a Word file, a spreadsheet, a picture, a text file; several at once if you like) waits by the box
+  and goes to Hermes with your next message, the way the app's own chat box hands a file over, so
+  Hermes reads it with its own tools: *"here is the signed order form, update Northwind"*.
 - **Or do it by hand.** Drag a card to another column to move it. **+ New** adds a record from a
   short form. **Edit** on any record changes its next step, stage, value, owner and the rest, and
   adds a line to its log. Press a stage in the funnel to pick out its column on the board. No model involved.
