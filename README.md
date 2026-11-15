@@ -12,9 +12,47 @@ keeps the pipeline. Stoa is that, in one plugin:
 
 **Map the market → find the leads → run the pipeline.**
 
-- **Map any market.** Tell Hermes what you sell. It segments the market, researches companies,
-  scores each against your brief with the evidence, and posts the map. One tap on a company puts
-  it in the pipeline and sets Hermes to finding the buyer and drafting the first note.
+![The market map: each ring a segment that would get a different pitch, each mark a company, the best fit in the middle](docs/desktop-market.jpg)
+
+## The market map
+
+Say what you sell and who you are after. Hermes names the market, splits it into segments that
+would each get a different pitch, researches the companies, checks every one against your
+requirements with the evidence and its source, and saves the map. Then it is yours to work:
+
+- **See the market three ways.** *Segments* shows who is where. *Priority* puts fit against how
+  fresh the reason to call is, so the top right is who to call first. *Held by* groups companies by
+  what they use today, so you can see who you would be replacing.
+- **Act on what you see.** Click a company to open it: why it fits, each requirement with its
+  evidence, headcount, what it uses today, the buyer, the source. Shift-click or drag to pick
+  several. One press adds them to the pipeline, names a buyer at each, or has Hermes draft the first
+  note from the evidence.
+- **Grow it.** **+ Grow** under a segment, **More like these** on companies you picked, or the
+  faint ring beside the map for a neighbouring segment. Hermes finds more and checks each one the
+  same way.
+- **Adjust it.** Weigh each requirement (off, nice to have, matters, must) and the map re-scores
+  on the spot. Add a requirement and Hermes checks every company against it. Move a company to
+  another segment, or dismiss it.
+- **Know what it holds and what it cost.** **Map facts** shows how complete the map is, where its
+  evidence came from, and what Hermes's work on it has cost, by Hermes's own estimate, with paid
+  lookups and searches beside it. Set limits there: companies, dollars a month, lookups, searches.
+- **Pick the model that researches it.** Map research runs in a conversation of its own, on any
+  model Hermes can use, apart from the one the talk box runs on.
+- **Hand it to a client.** **Download a copy to share** saves the whole map as one web page with
+  the same working map at its head, without buyers' names or your pipeline. Host it or send it.
+
+![Priority: fit against how fresh the reason to call is, with one company open beside it](docs/desktop-market-priority.jpg)
+
+![Several companies picked: add them to the pipeline, draft outreach, or find more like them](docs/desktop-market-picked.jpg)
+
+![Map facts: what is on the map, where it came from, what it has cost, and its limits](docs/desktop-map-facts.jpg)
+
+![The copy to share, as a client sees it: the working map, with no buyers' names and nothing about your pipeline](docs/page-market.jpg)
+
+The pictures show the sample map that comes with the tour; every company in it is made up.
+
+## And the desk behind it
+
 - **Send it anything.** A PDF of leads, a spreadsheet, a photo of a sign-up sheet. Hermes reads it,
   Stoa shows what it would add and what it would change, and nothing is written until you press Apply.
 - **Click a button, the stage changes at once.** No model in the loop, no waiting, no wrong stage.
@@ -23,6 +61,8 @@ keeps the pipeline. Stoa is that, in one plugin:
   or no with the evidence beside it, a no is remembered, and any change can be taken back.
 - **Then Hermes does the writing.** The same click hands the follow-up (the outreach note, the
   proposal email, the decline) to the agent, in the card's thread.
+- **Talk to it on the page.** A talk box at the foot of the desk takes plain sentences, runs on
+  the model you pick for it, and folds away when you are done.
 - **Make it yours.** Type your business name under Setup and it is drawn in dots at the head of
   the desk, lit the way the stoa is: in color on a dark theme, in one ink on a light one, or
   whichever you fix it to.
@@ -45,8 +85,6 @@ hermes gateway restart    # so the Slack buttons bind
 Then, in any Hermes chat: *"Map the market for us"*, *"What's on my plate?"*, or `/gtm`.
 In Slack the command is `!gtm` (Slack keeps the slash for its own commands), and
 `!gtm Dana Whitfield` or `!gtm map` posts the card or the map itself, buttons included.
-
-![The market map: each ring a segment, each mark a company, picked to act on](docs/desktop-market.jpg)
 
 ![Today: everything that needs you, in groups that open, most pressing first](docs/desktop-today.jpg)
 
@@ -124,13 +162,13 @@ What the plugin does that you would want to know before installing it:
   the Hermes plugin SDK and React and calls the plugin's own backend (`/api/plugins/stoa/`). After a
   click that calls for writing it sends one line into the open chat through `host.composer.submit`,
   the same as typing it. The dock on the page keeps one conversation of its own, named **Stoa
-  desk**: it is created and resumed through the gateway (`host.request`: `session.create`,
+  desk**, and the market map keeps another for its research, named **Stoa map research**: each is created and resumed through the gateway (`host.request`: `session.create`,
   `session.resume`, `prompt.submit`; **New conversation** makes another, with the day and time
-  in its name), it is sent only what you type or dictate there (with a short
+  in its name), it is sent only what you type or dictate there or what a button you press on the page asks for (with a short
   note of context on its first message and, on a desk with more than one pipeline, a line saying
   which pipeline the page is showing; both can be read in that conversation), and the page listens
-  to the gateway's events for that conversation alone to show you the reply. The model picker under the dock asks Hermes for the models this profile can
-  use (`model.options`) and sets the one you pick on that conversation alone (`config.set` with
+  to the gateway's events for those two conversations alone to show you the reply. The model pickers (under the dock, and **Research:** on the market map) ask Hermes for the models this profile can
+  use (`model.options`) and set the one you pick on that conversation alone (`config.set` with
   `--session`, the call the app's own picker makes); the pick is kept in the plugin's page storage
   on that computer, and the profile's default model is never changed. A file is read only
   when you pick it or drop it on the page: a CSV's text goes to the plugin's backend to be held as a
@@ -139,12 +177,16 @@ What the plugin does that you would want to know before installing it:
   plugin's own database (with whether the two are in color, in one ink, or follow the theme) and drawn the same way; neither is sent anywhere. It does not touch the app's
   DOM or other plugins' storage, and it checks in with the backend every 30 seconds while open so
   the agent knows a card can be drawn in the conversation.
-- **Web dashboard.** The tab's backend adds routes under `/api/plugins/stoa/`, behind the
-  dashboard's own sign-in. They read and change the pipeline, start and end a tour of the sample
-  data, hand the pipeline to your browser as a CSV download when you press Export, and switch the
-  active playbook (the plugin's own `playbook` setting, saved through `ctx.set_config`; where the
-  page cannot save it, it asks Hermes to in the dock instead). They call no model and no outside
-  service, except that the Enrich button makes the same People Data Labs lookup as in Slack.
+- **Web dashboard.** The tab is set-up and status only: it shows what is set up and the desk in
+  totals (counts, and the names of pipelines and maps; no person or company), and it has no pipeline
+  board or map. It calls only the plugin's own routes under `/api/plugins/stoa/`, behind the
+  dashboard's own sign-in: it reads the set-up and the totals, checks and saves the notes folder,
+  saves what a scheduled job may change, ends a tour, and hands the pipeline to your browser as a
+  CSV download when you press Export. It has no box for a key and makes no call to the dashboard's
+  key store: **Open Keys** takes you to the dashboard's own Keys page. Those routes are shared with
+  the page in the Desktop app and Webapp, which is what reads and changes the pipeline. They call no
+  model and no outside service, except **Test** beside a key (above) and the paid lookups described
+  above.
 - **The Setup tab.** It shows, to anyone signed in to your Hermes, which chats and Slack members
   the desk is limited to, the folders it reads and writes, where its database file is, and whether
   each key is set. It never shows a key or a token.

@@ -17,7 +17,7 @@ Every part of Stoa, and its settings. For how a day on the desk goes, see [the g
 | **Market maps** | Segments, fit scores, evidence and sources, with an **Add to pipeline** button per company |
 | **Slack cards** | Advance, Draft follow-up, Enrich, close with a reason, snooze, reopen |
 | **Desktop app and Webapp** | A live pane beside the chat, a Stoa page (Today, pipeline, searches or accounts, companies, cash, market map, activity, setup), and cards and maps drawn inside the conversation |
-| **Web dashboard tab** | Live funnel, pipeline board, market map, activity feed, record side panels with actions |
+| **Web dashboard tab** | Setup and status: the six set-up steps with how to do each from the dashboard, what the desk holds in totals, each pipeline and map, the month's paid work, the rules in force and your data |
 | **`/gtm`** | The board, today, cash, the brief, a map or one record, on every surface Hermes runs on (CLI, Telegram, Desktop…). In Slack, `!gtm`, where a record or a map arrives with its buttons |
 | **`hermes stoa`** | Status, board, brief, map, the ledger (`history`), autonomy, sample data, CSV import and export from a terminal |
 | **7 automations** | Morning brief, email-call-and-Slack activity sweep, meeting-notes sweep, weekly market watch, Friday review, mirror to a Google Sheet, bring Sheet edits back, under `/blueprint` |
@@ -108,6 +108,14 @@ The *Market watch* automation re-checks a map every week and adds at most five n
 
 ![The map by priority, with one company open](desktop-market-priority.jpg)
 
+**The research model.** **Research:** beside **Map facts** is the model Hermes researches maps
+with. Starting a map, **+ Grow**, **More like these**, a new requirement, a neighbouring segment,
+working out a buyer and **Ask Hermes to fill in what is missing** all go to a conversation of their
+own, **Stoa map research**, on that model. It starts on Hermes's default and does not follow the
+model picked under the talk box. Pick any model Hermes can use; the pick is kept on that computer.
+**New research conversation**, at the foot of the same list, starts a fresh one when it has grown
+long. **Draft outreach** is writing, not research, and goes to the talk box's conversation.
+
 **Map facts.** The **Map facts** button opens a window with the map by the numbers:
 
 - **What is on it.** Companies, segments, how many are in your pipeline or dismissed, and how
@@ -128,6 +136,8 @@ The *Market watch* automation re-checks a map every week and adds at most five n
   company, search or lookup and tells Hermes to stop and tell you. A limit cannot stop a turn that
   is already running: the budget is checked each time Hermes goes to add or search, and a turn's
   cost is written when the turn ends.
+
+![Map facts: what is on the map, where it came from, what it has cost, and its limits](desktop-map-facts.jpg)
 
 **A page to send.** **Download page** on the Market map tab saves the whole map as one
 self-contained web page, with the same working map at its head: the three views, a company opened by

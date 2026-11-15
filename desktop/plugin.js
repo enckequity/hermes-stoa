@@ -124,13 +124,13 @@ function useDesk() {
 }
 
 /** Send one line into the chat, as if typed: the conversation the card is in, else the one in focus. */
-function toChat(text, sessionId) {
+function toChat(text, sessionId, lane) {
   if (onPage) {
     if ($talk.get().busy) {
       host.notify({ kind: 'info', message: 'Hermes is still on the last thing. Ask again when it has answered.' })
       return false
     }
-    say(text)
+    say(text, null, lane === 'maps' ? 'maps' : 'desk')
     return true
   }
   const composer = host.composer
@@ -211,21 +211,34 @@ async function typeInChat(line) {
 // shown above the dock.
 const $talk = atom({ busy: false, open: false, turns: [] })
 const $attached = atom(null) // a small text file waiting to go with the next message: { name, text }
-const talkSession = { runtime: '', stored: '', primed: false, turn: 0, left: '' } // left: the conversation New conversation walked away from, until the next one exists
+// The page keeps two conversations of its own. The desk's is the talk box: what you say, and what the buttons on a
+// record ask for. The map's is research: starting a map, growing it, filling it in. They are kept apart so each can
+// run on the model that suits it (a small one is plenty for "what needs me today"; finding and checking companies
+// wants the strongest) and so neither has to re-read the other's history at every step.
+// `key` is where each is kept in the page's storage; `left` is the conversation New conversation walked away from,
+// until the next one exists.
+const LANES = {
+  desk: { key: 'talk', title: 'Stoa desk', name: 'The desk\'s conversation', where: 'under the talk box' },
+  maps: { key: 'research', title: 'Stoa map research', name: 'Map research', where: 'beside Map facts' }
+}
+const sessions = { desk: { runtime: '', stored: '', primed: false, left: '' }, maps: { runtime: '', stored: '', primed: false, left: '' } }
+const talking = { turn: 0, lane: 'desk' }      // the turn in flight, and which conversation it went to
 const setTalk = patch => $talk.set({ ...$talk.get(), ...patch })
-const keepTalk = patch => { if (storage) storage.set('talk', { ...((storage.get('talk', {})) || {}), ...patch }) }
-// The model the desk's conversation runs on. A conversation in Hermes keeps the model it began with, so the page keeps
-// the person's pick on this computer and gives it to the conversation: the one it has, and any it starts afterwards.
-// `picked` is { model, provider }, or null for whatever Hermes's own default is. `asking` holds a pick Hermes wants a
-// second yes for (a costly model), with Hermes's own words for why.
-const $model = atom({ picked: null, asking: null })
+const kept = lane => (storage && storage.get(LANES[lane].key, {})) || {}
+const keep = (lane, patch) => { if (storage) storage.set(LANES[lane].key, { ...kept(lane), ...patch }) }
+// The model each conversation runs on. A conversation in Hermes keeps the model it began with, so the page keeps the
+// person's pick on this computer and gives it to the conversation: the one it has, and any it starts afterwards.
+// A pick is { model, provider }, or null for whatever Hermes's own default is; the map's research does not follow the
+// desk's, so a cheap model picked for the talk box never does the market research. `asking` holds a pick Hermes
+// wants a second yes for, with Hermes's own words for why.
+const $model = atom({ desk: null, maps: null, asking: null })
 const setModel = patch => $model.set({ ...$model.get(), ...patch })
 
 const newId = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID()
   : 'xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx'.replace(/x/g, () => Math.floor(Math.random() * 16).toString(16)))
 
-/** Whether the desk has a conversation in hand: open now, or kept from an earlier visit. */
-const hasTalk = () => Boolean(talkSession.runtime || talkSession.stored || ((storage && storage.get('talk', {})) || {}).stored)
+/** Whether the page has that conversation in hand: open now, or kept from an earlier visit. */
+const hasTalk = (lane = 'desk') => Boolean(sessions[lane].runtime || sessions[lane].stored || kept(lane).stored)
 
 /** Put a conversation on a model, the way the app's own picker does (`config.set model "<model> --provider <id> --session"`,
     the one form the app turns into a change to that conversation alone; a bare "reset" is refused, seen on a real run). */
@@ -234,38 +247,43 @@ async function modelTo(sessionId, pick, sure) {
   return result || {}
 }
 
-/** The person picked a model in the talk box. Kept for later conversations; the one in hand is switched now. `pick`
-    null is "Hermes's default": nothing is kept, and the conversation in hand goes to `usual`, the profile's own model. */
-async function pickModel(pick, sure, usual) {
+/** The person picked a model for one of the page's conversations. Kept for later ones; the one in hand is switched
+    now. `pick` null is "Hermes's default": nothing is kept, and the conversation in hand goes to `usual`, the
+    profile's own model. */
+async function pickModel(pick, sure, usual, lane = 'desk') {
   if ($talk.get().busy) return host.notify({ kind: 'info', message: 'Hermes is still on the last thing. Change the model when it has answered.' })
   const target = pick || usual
   try {
-    if (hasTalk() && target && target.model && target.provider) {
-      const result = await modelTo(await talkOpen(true), target, sure)
-      if (result.confirm_required) return setModel({ asking: { pick, usual, message: String(result.confirm_message || 'Hermes asks you to confirm this model.') } })
+    if (hasTalk(lane) && target && target.model && target.provider) {
+      const result = await modelTo(await talkOpen(true, lane), target, sure)
+      if (result.confirm_required) return setModel({ asking: { lane, pick, usual, message: String(result.confirm_message || 'Hermes asks you to confirm this model.') } })
       if (result.warning) host.notify({ kind: 'warning', message: String(result.warning) })
     }
-    keepTalk({ model: pick })
-    setModel({ picked: pick, asking: null })
-    queryClient.invalidateQueries({ queryKey: ['stoa', 'models'] })
-    host.notify({ kind: 'success', message: pick ? 'The desk\'s conversation now runs on ' + pick.model + '.' : 'The desk\'s conversation is back on Hermes\'s default model.' })
+    keep(lane, { model: pick })
+    setModel({ [lane]: pick, asking: null })
+    host.notify({ kind: 'success', message: LANES[lane].name + (pick ? ' now runs on ' + pick.model + '.' : ' is back on Hermes\'s default model.') })
   } catch (error) {
     host.notifyError(error, 'Hermes could not change the model')
   }
 }
 
-/** Leave the conversation in hand and begin another with the next thing said. The old one stays in the sidebar. */
-function freshTalk() {
+/** Leave a conversation and begin another with the next thing sent to it. The old one stays in the sidebar. */
+function freshTalk(lane = 'desk') {
   if ($talk.get().busy) return host.notify({ kind: 'info', message: 'Hermes is still on the last thing. Start a new conversation when it has answered.' })
-  const left = talkSession.stored || ((storage && storage.get('talk', {})) || {}).stored || talkSession.left || ''
-  Object.assign(talkSession, { runtime: '', stored: '', primed: false, left })
-  keepTalk({ stored: '', left })
-  $talk.set({ busy: false, open: false, turns: [] })
-  host.notify({ kind: 'success', message: 'The next thing you say starts a new conversation. The old one is still in the sidebar.' })
+  const session = sessions[lane]
+  const left = session.stored || kept(lane).stored || session.left || ''
+  Object.assign(session, { runtime: '', stored: '', primed: false, left })
+  keep(lane, { stored: '', left })
+  if (lane === 'desk') $talk.set({ busy: false, open: false, turns: [] })
+  host.notify({ kind: 'success', message: lane === 'desk' ? 'The next thing you say starts a new conversation. The old one is still in the sidebar.'
+    : 'The next thing you ask of a map starts a new research conversation. The old one is still in the sidebar.' })
 }
 const PRIME = 'This conversation is the talk box on the Stoa desk page. Act on the Stoa desk with the gtm tools, and answer in a few '
   + 'short lines: the page already shows the pipeline. What is said here is for the desk: do not also write it to another system '
   + '(a spreadsheet, another CRM, email) unless asked to.\n\n'
+const PRIME_MAPS = 'This conversation is the Stoa page\'s research on market maps. Each request names the map it is about. Do the research with '
+  + 'your web tools and gtm_market, record what you find on that map with its source, and answer in a few short lines: the page '
+  + 'already shows the map. Never guess a fact; leave out what no source says.\n\n'
 
 /** The name of the pipeline the page is showing, when the desk has more than one ('' otherwise). */
 function onScreen() {
@@ -286,44 +304,40 @@ function setTurn(patch) {
   $talk.set({ ...talk, turns })
 }
 
-async function talkOpen(bare) {
-  if (talkSession.runtime) return talkSession.runtime
-  const stored = talkSession.stored || ((storage && storage.get('talk', {})) || {}).stored || ''
-  if (!talkSession.left) talkSession.left = ((storage && storage.get('talk', {})) || {}).left || ''      // a reload between leaving one and starting the next
+async function talkOpen(bare, lane = 'desk') {
+  const session = sessions[lane]
+  if (session.runtime) return session.runtime
+  const stored = session.stored || kept(lane).stored || ''
+  if (!session.left) session.left = kept(lane).left || ''      // a reload between leaving one and starting the next
   // The pick goes to a conversation as it opens. Its yes was given when it was picked, so Hermes is not made to ask
   // again; and if Hermes will not take it (the model is gone, the key was removed) the conversation still opens, on
   // Hermes's default, and says so. `bare` is the picker itself opening the conversation, about to set the model.
-  const dress = async runtime => {
-    const pick = $model.get().picked
-    if (!pick || bare) return
-    try { await modelTo(runtime, pick, true) } catch (error) {
-      host.notify({ kind: 'warning', message: 'Hermes could not use ' + pick.model + ' (' + why(error) + '), so this is on its default model. Pick another under the talk box.' })
-    }
-  }
+  const refused = (pick, error) => host.notify({ kind: 'warning', message: 'Hermes could not use ' + pick.model + ' (' + why(error) + '), so this is on its default model. Pick another ' + LANES[lane].where + '.' })
   if (stored) {
     try {
       const resumed = await host.request('session.resume', { session_id: stored, omit_messages: true })
       if (resumed && resumed.session_id) {
-        Object.assign(talkSession, { runtime: resumed.session_id, stored, primed: true })
-        await dress(talkSession.runtime)
-        return talkSession.runtime
+        Object.assign(session, { runtime: resumed.session_id, stored, primed: true })
+        const pick = $model.get()[lane]
+        if (pick && !bare) { try { await modelTo(session.runtime, pick, true) } catch (error) { refused(pick, error) } }
+        return session.runtime
       }
     } catch { /* that conversation is gone: start another */ }
   }
   // A title is a conversation's identity in Hermes: asking for a new one called "Stoa desk" while one of that name
-  // exists hands back the one that exists (seen on a real run). So the first is "Stoa desk" and one begun with New
-  // conversation carries the day and time, to the second if the minute is taken. The pick rides on the request, so
-  // the conversation begins on that model; if Hermes will not have it, it begins on the default.
-  const pick = bare ? null : $model.get().picked
-  const left = talkSession.left
+  // exists hands back the one that exists (seen on a real run). So the first carries the plain title and one begun
+  // with New conversation carries the day and time, to the second if the minute is taken. The pick rides on the
+  // request, so the conversation begins on that model; if Hermes will not have it, it begins on the default.
+  const pick = bare ? null : $model.get()[lane]
+  const left = session.left
   const stamp = seconds => new Date().toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', ...(seconds ? { second: '2-digit' } : {}) })
   const create = async seconds => {
-    const ask = { title: left ? 'Stoa desk · ' + stamp(seconds) : 'Stoa desk', request_id: newId() }
+    const ask = { title: left ? LANES[lane].title + ' · ' + stamp(seconds) : LANES[lane].title, request_id: newId() }
     try {
       return await host.request('session.create', pick ? { ...ask, model: pick.model, provider: pick.provider } : ask)
     } catch (error) {
       if (!pick) throw error
-      host.notify({ kind: 'warning', message: 'Hermes could not use ' + pick.model + ' (' + why(error) + '), so this is on its default model. Pick another under the talk box.' })
+      refused(pick, error)
       return host.request('session.create', ask)
     }
   }
@@ -333,37 +347,40 @@ async function talkOpen(bare) {
   if (same(made)) throw new Error('Hermes handed back the conversation you just left instead of a new one')
   const runtime = (made && made.session_id) || ''
   if (!runtime) throw new Error('Hermes did not open a conversation')
-  Object.assign(talkSession, { runtime, stored: made.stored_session_id || runtime, primed: false, left: '' })
-  keepTalk({ stored: talkSession.stored, left: '' })
+  Object.assign(session, { runtime, stored: made.stored_session_id || runtime, primed: false, left: '' })
+  keep(lane, { stored: session.stored, left: '' })
   return runtime
 }
 
-async function say(text, file) {
+/** Send a line to one of the page's conversations: the desk's, or (lane 'maps') the map's research. */
+async function say(text, file, lane = 'desk') {
   const line = String(text || '').trim()
   if ((!line && !file) || $talk.get().busy) return
-  const turn = ++talkSession.turn
+  const turn = ++talking.turn
+  talking.lane = lane
+  const session = sessions[lane]
   const shown = line || 'Here is ' + file.name + '.'
   const typed = file ? shown + '\n\nAttached file "' + file.name + '":\n```\n' + file.text + '\n```' : shown
   const here = onScreen()
   const sent = here ? '(On the Stoa page I am looking at the pipeline “' + here + '”.)\n\n' + typed : typed
   $talk.set({ busy: true, open: true,
-    turns: $talk.get().turns.slice(-7).concat([{ you: shown, file: file ? file.name : '', reply: '', note: 'Sending…', error: '' }]) })
+    turns: $talk.get().turns.slice(-7).concat([{ you: shown, file: file ? file.name : '', lane, reply: '', note: 'Sending…', error: '' }]) })
   const submit = async () => {
-    const id = await talkOpen()
-    await host.request('prompt.submit', { session_id: id, text: talkSession.primed ? sent : PRIME + sent })
-    talkSession.primed = true
+    const id = await talkOpen(false, lane)
+    await host.request('prompt.submit', { session_id: id, text: session.primed ? sent : (lane === 'maps' ? PRIME_MAPS : PRIME) + sent })
+    session.primed = true
   }
   try {
     try {
       await submit()
     } catch (first) {
-      if (!talkSession.runtime) throw first
-      talkSession.runtime = '' // the gateway let the idle session go: resume it (or start another) and send once more
+      if (!session.runtime) throw first
+      session.runtime = '' // the gateway let the idle session go: resume it (or start another) and send once more
       await submit()
     }
-    if (talkSession.turn === turn && $talk.get().busy) setTurn(last => (last.reply ? {} : { note: 'Hermes is working on it…' }))
+    if (talking.turn === turn && $talk.get().busy) setTurn(last => (last.reply ? {} : { note: lane === 'maps' ? 'Hermes is researching…' : 'Hermes is working on it…' }))
     setTimeout(() => {
-      if (talkSession.turn !== turn || !$talk.get().busy) return
+      if (talking.turn !== turn || !$talk.get().busy) return
       setTalk({ busy: false })
       setTurn({ note: 'Still working. Open the conversation to follow it; the desk updates when it is done.' })
     }, 180000)
@@ -373,8 +390,12 @@ async function say(text, file) {
   }
 }
 
+/** Open, in the app's own chat, the conversation the last thing on the sheet went to. */
 function openTalk() {
-  if (talkSession.stored) Promise.resolve(host.openSession(talkSession.stored)).catch(() => {})
+  const turns = $talk.get().turns
+  const lane = (turns.length && turns[turns.length - 1].lane) || 'desk'
+  const stored = sessions[lane].stored || kept(lane).stored
+  if (stored) Promise.resolve(host.openSession(stored)).catch(() => {})
   else host.notify({ kind: 'info', message: 'Say something to the desk first; the conversation starts then.' })
 }
 
@@ -596,6 +617,7 @@ const CSS = `
 .stoa-footbtn:hover, .stoa-footbtn[aria-expanded="true"] { background: var(--ui-control-hover-background); color: var(--ui-text-primary); }
 .stoa-footbtn:focus-visible { outline: 2px solid var(--stoa-accent); outline-offset: -2px; }
 .stoa-footbtn:disabled { opacity: .45; cursor: default; }
+.stoa-menu[data-right="1"] .stoa-menulist { left: auto; right: 0; }
 .stoa-menu[data-up="1"] .stoa-menulist { top: auto; bottom: calc(100% + 6px); left: 0; max-height: min(420px, 56vh); }
 .stoa-footbtn .stoa-menucaret { font-size: 11px; }
 .stoa-turn + .stoa-turn { margin-top: 14px; padding-top: 14px; border-top: 1px dotted var(--ui-stroke-primary); }
@@ -1950,10 +1972,11 @@ function Words({ text }) {
 // the Desktop app does not, and there the microphone in the full chat is the one to use).
 const Recognition = typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null
 
-/** Which model the desk's conversation runs on, under the talk box: Hermes's own list of the models this profile can
-    use, with Hermes's price for each where it has one. */
-function ModelPick() {
-  const { picked } = useValue($model)
+/** Which model one of the page's conversations runs on: the desk's (under the talk box) or the map's research (beside
+    Map facts). Hermes's own list of every model this profile can use, with Hermes's price for each where it has one.
+    Nothing is left out and nothing is steered: the choice is the person's. */
+function ModelPick({ lane = 'desk' }) {
+  const picked = useValue($model)[lane]
   const talk = useValue($talk)
   const query = useQuery({ queryKey: ['stoa', 'models'], queryFn: () => host.request('model.options', {}), staleTime: 60000, retry: false })      // no conversation named: the profile's own default, which is what "Hermes's default" means here
   const data = query.data || {}
@@ -1966,21 +1989,21 @@ function ModelPick() {
     return cost.input && cost.output ? cost.input + ' in · ' + cost.output + ' out, per million tokens' : ''
   }
   const rows = (data.providers || []).filter(row => row.authenticated !== false && (row.models || []).length)
-  const label = picked ? short(picked.model) : usual ? short(usual) : 'Model'
-  return h(Menu, { kind: 'foot', up: true, label, title: 'The model the desk\'s conversation runs on. A cheaper one is enough for most desk work; keep the strongest for research such as a new market map.' },
-    h(MenuItem, { title: 'Hermes\'s default', sub: picked ? 'Whatever this profile is set to use' : (usual ? short(usual) + ' · in use' : 'In use'), on: !picked, onClick: () => { if (picked) pickModel(null, false, data.model && data.provider ? { model: String(data.model), provider: String(data.provider) } : null) } }),
+  const name = picked ? short(picked.model) : usual ? short(usual) : 'Model'
+  const maps = lane === 'maps'
+  return h(Menu, { kind: maps ? '' : 'foot', up: !maps, right: maps, label: maps ? 'Research: ' + name : name,
+    title: maps ? 'The model Hermes researches your maps with: starting a map, growing it, filling in what is missing. It is kept apart from the talk box\'s model, and has a conversation of its own.'
+      : 'The model the desk\'s conversation runs on. Map research has its own, beside Map facts on the Market map tab.' },
+    h(MenuItem, { title: 'Hermes\'s default', sub: picked ? 'Whatever this profile is set to use' : (usual ? short(usual) + ' · in use' : 'In use'), on: !picked,
+      onClick: () => { if (picked) pickModel(null, false, data.model && data.provider ? { model: String(data.model), provider: String(data.provider) } : null, lane) } }),
     query.isLoading ? h('div', { className: 'stoa-sub', style: { padding: '8px 10px' } }, 'Asking Hermes for its models…') : null,
     query.error ? h('div', { className: 'stoa-sub', style: { padding: '8px 10px' } }, 'Hermes did not give its list of models: ' + why(query.error)) : null,
-    rows.map(row => {
-      const all = row.models || []
-      const first = (row.featured_models && row.featured_models.length ? row.featured_models.filter(model => all.includes(model)) : all).slice(0, 24)
-      const shown = picked && picked.provider === row.slug && all.includes(picked.model) && !first.includes(picked.model) ? [picked.model].concat(first) : first
-      return [h('div', { key: row.slug + ':rule', className: 'stoa-menurule' }),
-        h('div', { key: row.slug + ':name', className: 'stoa-eyebrow', style: { padding: '4px 10px 2px' } }, row.name || row.slug),
-        shown.map(model => h(MenuItem, { key: row.slug + ':' + model, title: short(model), sub: price(row, model), on: Boolean(picked) && picked.model === model && picked.provider === row.slug,
-          onClick: () => pickModel({ model, provider: row.slug }) })),
-        all.length > shown.length ? h('div', { key: row.slug + ':more', className: 'stoa-sub', style: { padding: '4px 10px 6px' } }, plural(all.length - shown.length, 'more model', 'more models') + ' under Settings → Models') : null]
-    }),
+    rows.map(row => [h('div', { key: row.slug + ':rule', className: 'stoa-menurule' }),
+      h('div', { key: row.slug + ':name', className: 'stoa-eyebrow', style: { padding: '4px 10px 2px' } }, row.name || row.slug),
+      (row.models || []).map(model => h(MenuItem, { key: row.slug + ':' + model, title: short(model), sub: price(row, model), on: Boolean(picked) && picked.model === model && picked.provider === row.slug,
+        onClick: () => pickModel({ model, provider: row.slug }, false, null, lane) }))]),
+    maps && hasTalk('maps') ? [h('div', { key: 'rule', className: 'stoa-menurule' }),
+      h(MenuItem, { key: 'fresh', title: 'New research conversation', sub: 'The next request starts afresh; the maps keep everything', onClick: () => freshTalk('maps') })] : null,
     talk.busy ? h('div', { className: 'stoa-sub', style: { padding: '6px 10px' } }, 'Hermes is answering; a change waits until it is done.') : null)
 }
 
@@ -2061,7 +2084,7 @@ function Dock({ state }) {
           h(Btn, { kind: 'quiet', onClick: openTalk }, 'Open the conversation'),
           h(Btn, { kind: 'quiet', 'aria-label': 'Hide the conversation', title: 'Hide the conversation (Esc). It carries on, and the desk updates when Hermes is done.', onClick: () => setTalk({ open: false }) }, 'Hide', h(Icon, { name: 'down', size: 13 })))),
       talk.turns.map((turn, index) => h('div', { key: index, className: 'stoa-turn' },
-        h('div', { className: 'stoa-youline' }, h('span', { className: 'stoa-you' }, turn.you, turn.file ? h('small', null, turn.file) : null)),
+        h('div', { className: 'stoa-youline' }, h('span', { className: 'stoa-you' }, turn.you, turn.file ? h('small', null, turn.file) : null, turn.lane === 'maps' ? h('small', null, 'Map research') : null)),
         turn.reply ? h(Words, { text: turn.reply }) : null,
         turn.note ? h('div', { className: 'stoa-sub stoa-working', style: { marginTop: 8 } }, turn.note) : null,
         turn.error ? h('div', { style: { marginTop: 8, color: 'var(--ui-red)' } }, turn.error) : null)))
@@ -2072,8 +2095,8 @@ function Dock({ state }) {
     asking ? h('div', { className: 'stoa-glass stoa-ask', role: 'alertdialog', 'aria-label': 'Confirm the model' },
       h('span', { className: 'stoa-askwords' }, asking.message.replace(/^[!\s]+[A-Z ]+[!\s]+/, '')),
       h(Btn, { kind: 'primary', title: 'Leaves this conversation as it is and begins a new one on the model you picked, so nothing long is re-read. The desk keeps everything.',
-        onClick: () => { keepTalk({ model: asking.pick }); setModel({ picked: asking.pick, asking: null }); freshTalk() } }, 'Start a new conversation on it'),
-      h(Btn, { onClick: () => pickModel(asking.pick, true, asking.usual) }, 'Switch this conversation'),
+        onClick: () => { const lane = asking.lane || 'desk'; keep(lane, { model: asking.pick }); setModel({ [lane]: asking.pick, asking: null }); freshTalk(lane) } }, 'Start a new conversation on it'),
+      h(Btn, { onClick: () => pickModel(asking.pick, true, asking.usual, asking.lane || 'desk') }, 'Switch this conversation'),
       h(Btn, { kind: 'quiet', onClick: () => setModel({ asking: null }) }, 'Cancel')) : null,
     h('div', { className: 'stoa-glass stoa-composer' },
       file ? h('div', { className: 'stoa-filechip' }, h(Icon, { name: 'clip', size: 13 }), file.name,
@@ -2097,11 +2120,11 @@ function Dock({ state }) {
         h('button', { type: 'button', className: 'stoa-icon', 'data-kind': 'send', disabled: talk.busy || (!text.trim() && !file), title: 'Send', 'aria-label': 'Send',
           onClick: () => send() }, h(Icon, { name: 'up' }))),
       h('div', { className: 'stoa-composerfoot' },
-        h(ModelPick),
+        h(ModelPick, { lane: 'desk' }),
         h('span', { className: 'stoa-grow' }),
         talk.turns.length || hasTalk() ? h('button', { type: 'button', className: 'stoa-footbtn', disabled: talk.busy,
           title: 'Begin a new conversation with the next thing you say. Hermes re-reads the whole conversation on every step, so a long one costs more each time; the desk itself keeps everything, so nothing is lost by starting again.',
-          onClick: freshTalk }, 'New conversation') : null))))
+          onClick: () => freshTalk('desk') }, 'New conversation') : null))))
 }
 
 // -- Today: what wants you, most pressing first, one move per row ---------------------------------
@@ -4336,7 +4359,7 @@ function MapPicture({ market, list, lens, sizeBy, sel, shown, onPick, onLasso, o
 }
 
 /** A button that opens a short list beneath it. It closes on a choice, a click anywhere else, or Escape. */
-function Menu({ label, title, kind, up, children }) {
+function Menu({ label, title, kind, up, right, children }) {
   const [open, setOpen] = useState(false)
   const box = useRef(null)
   useEffect(() => {
@@ -4347,7 +4370,7 @@ function Menu({ label, title, kind, up, children }) {
     document.addEventListener('keydown', key)
     return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', key) }
   }, [open])
-  return h('div', { ref: box, className: 'stoa-menu', 'data-up': up ? '1' : '0' },
+  return h('div', { ref: box, className: 'stoa-menu', 'data-up': up ? '1' : '0', 'data-right': right ? '1' : '0' },
     h('button', { type: 'button', className: kind === 'title' ? 'stoa-menutitle' : kind === 'foot' ? 'stoa-footbtn' : 'stoa-btn', title, 'aria-haspopup': 'menu', 'aria-expanded': open, onClick: () => setOpen(!open) },
       label, '\u00a0', h('span', { className: 'stoa-menucaret', 'aria-hidden': true }, '▾')),
     open ? h('div', { className: 'stoa-menulist', role: 'menu', onClick: event => { if (event.target.closest('[role="menuitem"]')) setOpen(false) } }, children) : null)
@@ -4362,7 +4385,7 @@ function NewMap({ first, onClose }) {
     const said = text.trim()
     if (!said) return
     const sent = toChat('Map a new market for me and keep it on the desk as a map of its own: ' + said + ' Name the market, split it into segments that would each get a different pitch, set the requirements, '
-      + 'then research companies. For each one record the evidence and its source, its headcount, what it uses today for the job we do, any signal with the date it happened, and the likely buyer if you come across one. Tell me when it is on the desk.', null)
+      + 'then research companies. For each one record the evidence and its source, its headcount, what it uses today for the job we do, any signal with the date it happened, and the likely buyer if you come across one. Tell me when it is on the desk.', null, 'maps')
     if (!sent) return
     host.notify({ kind: 'info', message: 'Hermes is mapping it. The map appears here when it is saved, which takes a few minutes.' })
     setText('')
@@ -4502,7 +4525,8 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
       .catch(error => { host.notifyError(error, 'Stoa could not do that'); return null })
       .then(result => { setBusy(''); return result })
   }
-  const ask = line => toChat(line, null)
+  const ask = line => toChat(line, null)                 // the desk's conversation: writing, such as a first note
+  const research = line => toChat(line, null, 'maps')   // the map's own: finding, checking and filling in companies
   const here = ' my market map “' + market.name + '”'
   // How many more companies to ask Hermes for: five, or what the limits a person set on this map leave room for. At a
   // limit it says so and asks for nothing, so no research is paid for that the map would then refuse.
@@ -4524,7 +4548,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
       const need = companies.filter(c => !c.buyer)
       if (!need.length) return null
       if (!(market.buyer_titles || []).length || !market.lookups) {
-        return ask('Work out who ' + who.likely + ' is at each of these companies on' + here + ': ' + need.map(c => c.company).join(', ') + '. Name one person at each, with their title and why them, and save each on the map. '
+        return research('Work out who ' + who.likely + ' is at each of these companies on' + here + ': ' + need.map(c => c.company).join(', ') + '. Name one person at each, with their title and why them, and save each on the map. '
           + (market.lookups ? 'People Data Labs is set up: use it with the job titles that fit what we sell, and ask for one person per company.' : 'Use your web search; no paid lookup is set up.'))
       }
       return send('buyers', need, null, result => [(result.found || []).length ? 'Named a buyer at ' + plural(result.found.length, 'company', 'companies') + '.' : '',
@@ -4534,11 +4558,11 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
     draft: companies => ask(companies.length === 1
       ? 'Draft a first outreach note to ' + (companies[0].buyer ? companies[0].buyer.name + ' at ' : who.likely + ' at ') + companies[0].company + ', leading with the evidence on' + here + '. Show me the draft. Do not send anything.'
       : 'Draft a first outreach note for each of these companies from' + here + ', each leading with its own evidence: ' + companies.map(c => c.company).join(', ') + '. Show me the drafts. Do not send anything.'),
-    more: companies => roomFor() && ask('Find up to ' + roomFor() + ' more ' + (roomFor() === 'one' ? 'company' : 'companies') + ' like ' + namesOf(companies) + ' for' + here + '. Keep to the map\'s requirements and check each one against them with the evidence. ' + RECORD + ' Add them to the map, then tell me who you added and why.'),
-    grow: segment => roomFor() && ask('Find up to ' + roomFor() + ' more ' + (roomFor() === 'one' ? 'company' : 'companies') + ' for the “' + segment + '” segment of' + here + '. Keep to the map\'s requirements and check each one against them with the evidence. ' + RECORD + ' Add them to the map, then tell me who you added and why.'),
-    fill: gaps => ask('On' + here + ', fill in what is missing. For each company that lacks it: ' + gaps.map(gap => gap.ask).join('; ') + '. Keep what is already there, give a source for anything you add, leave out what no source says, and tell me what you could not find.'),
-    suggest: () => ask('Suggest two neighbouring segments for' + here + ': who they are, and why they would be worth mapping. Do not add anything yet; I will say which.'),
-    require: text => ask('Add this requirement to' + here + ' and check every company on it against it, with the evidence: ' + text)
+    more: companies => roomFor() && research('Find up to ' + roomFor() + ' more ' + (roomFor() === 'one' ? 'company' : 'companies') + ' like ' + namesOf(companies) + ' for' + here + '. Keep to the map\'s requirements and check each one against them with the evidence. ' + RECORD + ' Add them to the map, then tell me who you added and why.'),
+    grow: segment => roomFor() && research('Find up to ' + roomFor() + ' more ' + (roomFor() === 'one' ? 'company' : 'companies') + ' for the “' + segment + '” segment of' + here + '. Keep to the map\'s requirements and check each one against them with the evidence. ' + RECORD + ' Add them to the map, then tell me who you added and why.'),
+    fill: gaps => research('On' + here + ', fill in what is missing. For each company that lacks it: ' + gaps.map(gap => gap.ask).join('; ') + '. Keep what is already there, give a source for anything you add, leave out what no source says, and tell me what you could not find.'),
+    suggest: () => research('Suggest two neighbouring segments for' + here + ': who they are, and why they would be worth mapping. Do not add anything yet; I will say which.'),
+    require: text => research('Add this requirement to' + here + ' and check every company on it against it, with the evidence: ' + text)
   }
   const save = share => { setSaving(share ? 'share' : 'own'); savePage(market, share).then(() => setSaving('')) }
   const facetBtn = (kind, value, label, big, pct, text, small) => {
@@ -4585,7 +4609,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
       h('div', { className: 'stoa-facts', style: { marginTop: 0, paddingTop: 0, borderTop: 0 } },
         [['Size', c.size || 'Not known'], ['Uses today', c.uses || 'Not known'], [who.Cap, c.buyer ? [c.buyer.name, c.buyer.title].filter(Boolean).join(', ') : 'Nobody named yet'],
           ['Source', c.source || 'None recorded']].map(pair => h('div', { key: pair[0], style: { gridColumn: '1 / -1' } }, h('small', { className: 'stoa-eyebrow' }, pair[0]),
-          pair[0] === 'Source' && /^https?:\/\//.test(pair[1]) ? h('a', { className: 'stoa-alink', href: pair[1], target: '_blank', rel: 'noreferrer', style: { overflowWrap: 'anywhere' } }, bareLink(pair[1])) : h('span', { style: { overflowWrap: 'anywhere' } }, pair[1])))),
+          pair[0] === 'Source' && /^https?:\/\//.test(pair[1]) ? h('a', { className: 'stoa-alink', href: pair[1], target: '_blank', rel: 'noreferrer', style: { display: 'block', overflowWrap: 'anywhere' } }, bareLink(pair[1])) : h('span', { style: { overflowWrap: 'anywhere' } }, pair[1])))),
       c.status !== 'tracked' && market.segments.length > 1 ? [label('Adjust'), h('select', { key: 'move', className: 'stoa-select', value: c.segment, disabled: Boolean(busy), 'aria-label': 'Move to another segment',
         onChange: event => act.move(c, event.target.value) }, market.segments.map(segment => h('option', { key: segment.name, value: segment.name }, (segment.name === c.segment ? 'In ' : 'Move to ') + segment.name)))] : null,
       h('div', { className: 'stoa-btns' }, h(Btn, { kind: 'quiet', onClick: () => setPicked([]) }, 'Close')))
@@ -4647,6 +4671,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
         h('div', { className: 'stoa-sub' }, [plural(list.length, 'company', 'companies'), market.numbers.in_pipeline + ' in the pipeline', list.filter(c => c.reason).length + ' with a reason to call',
           plural(list.filter(c => c.buyer).length, who.one + ' named', who.many + ' named'), shortDay(market.updated) ? 'updated ' + shortDay(market.updated) : ''].filter(Boolean).join(' · '))),
       h('div', { className: 'stoa-btns', style: { margin: 0 } },
+        h(ModelPick, { lane: 'maps' }),
         h(Btn, { title: 'This map by the numbers: what is on it, where it came from, what it has cost, and its limits', onClick: () => setMode('facts') }, 'Map facts'),
         h(Btn, { disabled: Boolean(saving), title: 'The whole map as one web page, with buyers\' names and what is in your pipeline', onClick: () => save(false) }, saving === 'own' ? 'Saving…' : 'Download page'),
         h(Btn, { disabled: Boolean(saving), title: 'The same page without buyers\' names or your pipeline: the one to host or send to a client', onClick: () => save(true) }, saving === 'share' ? 'Saving…' : 'Download a copy to share'))),
@@ -4999,8 +5024,10 @@ export default {
       return ctx.rest(pipe && pipe !== 'main' ? path + (path.includes('?') ? '&' : '?') + 'pipeline=' + encodeURIComponent(pipe) : path, options)
     }
     try { $folds.set({ ...(storage.get('folds', {}) || {}) }) } catch { /* no storage: every group starts closed */ }
-    const keptModel = (ctx.storage.get('talk', {}) || {}).model
-    if (keptModel && typeof keptModel.model === 'string' && typeof keptModel.provider === 'string') setModel({ picked: { model: keptModel.model, provider: keptModel.provider } })
+    for (const lane of Object.keys(LANES)) {
+      const was = (ctx.storage.get(LANES[lane].key, {}) || {}).model
+      if (was && typeof was.model === 'string' && typeof was.provider === 'string') setModel({ [lane]: { model: was.model, provider: was.provider } })
+    }
     const kept = ctx.storage.get('filter', {}) || {}      // an older version kept every filter, a picked-out stage included: take only these two
     $filter.set({ ...NO_FILTER, owner: typeof kept.owner === 'string' ? kept.owner : '', group: typeof kept.group === 'string' ? kept.group : '' })
     // While the app is open the desk knows it can draw cards and maps in the conversation here.
@@ -5010,8 +5037,8 @@ export default {
     // The agent, a Slack click or another window changed the desk: redraw now, not at the next poll.
     ctx.onEvent('plugin.stoa.changed', refresh)
     // The dock on the page: hear its own conversation, and nobody else's.
-    const mine = event => Boolean(talkSession.runtime) && $talk.get().busy
-      && String((event && (event.session_id || event.sessionId)) || '') === talkSession.runtime
+    const mine = event => Boolean(sessions[talking.lane].runtime) && $talk.get().busy
+      && String((event && (event.session_id || event.sessionId)) || '') === sessions[talking.lane].runtime
     ctx.onEvent('message.delta', event => {
       const text = event && event.payload && event.payload.text
       if (mine(event) && typeof text === 'string') setTurn(last => ({ reply: last.reply + text, note: '' }))

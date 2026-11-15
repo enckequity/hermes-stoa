@@ -454,6 +454,10 @@ def load_market(desk, which: str = "") -> int:
     markets.define(dict(example["market"]))
     companies = [dict(c, signal_date=(dt.date.today() - dt.timedelta(days=c["signal_days"])).isoformat()) if "signal_days" in c else c
                  for c in example["companies"]]      # a sample signal is so many days old on whatever day the tour is opened
+    # A real map says where each company's evidence came from. The sample companies get a page on their own made-up
+    # site (.example, a name nobody can own), so the tour shows a source line and Map facts has sources to count.
+    companies = [c if c.get("source") or not c.get("website") else dict(c, source="https://%s/%s" % (c["website"], "press" if c.get("signal") else "about"))
+                 for c in companies]
     added = len(markets.add({"market": name, "companies": companies})["added"])
     markets.reading(dict(example["reading"], market=name))
     return added

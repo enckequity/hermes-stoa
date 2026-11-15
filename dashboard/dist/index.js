@@ -1,664 +1,336 @@
 (function () {
   "use strict";
-  // Stoa dashboard tab. Plain React.createElement against the host's Plugin SDK: no build step,
-  // no bundled libraries, no network calls except to this plugin's own /api/plugins/stoa routes.
+  // Stoa's tab in the Hermes dashboard: set-up and status, on one page. The desk itself (the pipeline, the market
+  // map, the conversation) is worked in the Hermes Desktop app or Webapp, in Slack and in chat; this tab does not
+  // mirror it. It says what is set up, how to set up the rest, and what the desk holds, in totals.
+  //
+  // Plain React.createElement against the host's Plugin SDK: no build step, no bundled libraries, and no network
+  // calls except to this plugin's own /api/plugins/stoa routes. A key is never typed here: the dashboard's own Keys
+  // page holds keys, and this tab sends you to it.
   var SDK = window.__HERMES_PLUGIN_SDK__;
   if (!SDK || !window.__HERMES_PLUGINS__) return;
   var React = SDK.React;
-  var useState = SDK.hooks.useState, useEffect = SDK.hooks.useEffect, useRef = SDK.hooks.useRef,
-    useMemo = SDK.hooks.useMemo, useCallback = SDK.hooks.useCallback;
+  var useState = SDK.hooks.useState, useEffect = SDK.hooks.useEffect, useRef = SDK.hooks.useRef, useCallback = SDK.hooks.useCallback;
   var h = React.createElement;
   var API = "/api/plugins/stoa";
-  var POLL_MS = 4000;
+  var POLL_MS = 15000;
 
   function get(path) { return SDK.fetchJSON(API + path); }
   function post(path, body) {
     return SDK.fetchJSON(API + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
   }
-
-  // -- formatting -------------------------------------------------------------------------------
-  function money(value, currency) {
-    if (!value) return "";
-    var sym = { USD: "$", EUR: "€", GBP: "£" }[currency || "USD"] || "";
-    var text = value >= 1e6 ? (value / 1e6).toFixed(1) + "M" : value >= 1e4 ? Math.round(value / 1e3) + "k" : Math.round(value).toLocaleString();
-    return sym ? sym + text : text + " " + currency;
+  function why(e) { return String((e && e.message) || e || "it did not say why"); }
+  function plural(n, one, many) { return n + " " + (n === 1 ? one : many); }
+  function usd(n) { return "$" + Number(n || 0).toFixed(2); }
+  function size(bytes) {
+    if (!bytes) return "empty";
+    return bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(bytes / 1024)) + " KB";
   }
-  function ago(iso) {
-    var t = Date.parse(iso);
-    if (!t) return "";
-    var s = Math.max(0, (Date.now() - t) / 1000);
-    if (s < 90) return "just now";
-    if (s < 3600) return Math.round(s / 60) + "m ago";
-    if (s < 86400) return Math.round(s / 3600) + "h ago";
-    if (s < 172800) return "yesterday";
-    return Math.round(s / 86400) + "d ago";
+  function day(stamp) {
+    var d = new Date(String(stamp || "").slice(0, 10) + "T12:00:00");
+    return isNaN(d) ? "" : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
   }
-  function cap(text) { text = String(text || ""); return text.charAt(0).toUpperCase() + text.slice(1); }
-  function initials(name) {
-    var words = String(name || "").replace(/[^A-Za-z0-9 ]/g, " ").split(/\s+/).filter(Boolean);
-    return ((words[0] || "?").charAt(0) + (words[1] ? words[1].charAt(0) : (words[0] || "").charAt(1) || "")).toUpperCase();
+  function when(stamp) {
+    var d = new Date(stamp);
+    return !stamp || isNaN(d) ? "" : d.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
   }
-  function today() { var d = new Date(); return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2); }
-  function tone(kind) { return { stage: "grad", created: "good", call: "good", email: "good", meeting: "good", snooze: "warn" }[kind] || ""; }
-  function Btn(props) {
-    return h("button", { className: "stoa-btn", "data-kind": props.kind || "", disabled: props.disabled, onClick: props.onClick, title: props.title }, props.children);
-  }
-  function Chip(props) { return h("span", { className: "stoa-chip", "data-tone": props.tone || "" }, props.children); }
-  function Fit(props) {
-    var out = [];
-    for (var i = 1; i <= 5; i++) out.push(h("i", { key: i, "data-on": i <= (props.fit || 3) ? "1" : "0" }));
-    return h("span", { className: "stoa-fit", title: "Fit " + (props.fit || 3) + " of 5" }, out);
-  }
-
-  function Hero(props) {
-    var s = props.state, t = s.totals, terms = s.playbook.terms, cur = s.playbook.currency;
-    var steps = [
-      { n: t.mapped, label: "Mapped", sub: s.markets.length === 1 ? "1 market" : s.markets.length + " markets" },
-      { n: t.tracked, label: "Leads", sub: "from the map" },
-      { n: t.open, label: "In play", sub: money(t.open_value, cur) || terms.deals },
-      { n: t.won, label: cap(s.playbook.won.label), sub: money(t.won_value, cur) || "" }
-    ];
-    return h("section", { className: "stoa-hero" },
-      h("div", null,
-        h("div", { className: "stoa-eyebrow" }, "Stoa", h("span", null, "//"), s.playbook.title,
-          h("span", { className: "stoa-live", "data-off": props.live ? "0" : "1" }, h("b"), props.live ? "Live" : "Paused")),
-        h("h1", { className: "stoa-title" }, h("span", null, money(t.open_value, cur) || String(t.open)), h("em", null, "in play")),
-        h("p", { className: "stoa-sub" },
-          h("span", null, h("b", null, t.open), " open"), h("span", null, h("b", null, t.due), " due"),
-          h("span", null, h("b", null, t.stale), " quiet"), h("span", null, h("b", null, t.moves_week), " moved this week"))),
-      h("div", { className: "stoa-funnel" }, steps.map(function (step, i) {
-        return h("div", { className: "stoa-step", key: i, "data-on": step.n ? "1" : "0" },
-          h("div", { className: "stoa-node" }, i + 1),
-          h("div", { className: "stoa-num" }, step.n),
-          h("small", null, step.label), h("span", null, step.sub));
-      })));
-  }
-
-  function Attention(props) {
-    var s = props.state, open = props.open;
-    var due = s.deals.filter(function (d) { return d.due; }).sort(function (a, b) { return (a.next_due || "") < (b.next_due || "") ? -1 : 1; });
-    var quiet = s.deals.filter(function (d) { return d.stale && !d.due; });
-    var recent = s.activity.filter(function (a) { return a.kind === "stage"; }).slice(0, 5);
-    function list(rows, render, empty) {
-      return rows.length ? rows.slice(0, 5).map(render) : h("div", { className: "stoa-empty" }, empty);
-    }
-    return h("section", { className: "stoa-attn" },
-      h("div", { className: "stoa-panel" }, h("div", { className: "stoa-h" }, "Due now", h("b", null, due.length)),
-        list(due, function (d) {
-          return h("button", { className: "stoa-row", key: d.id, onClick: function () { open(d.id); } },
-            h("i", { className: "stoa-dot", "data-tone": d.next_due < today() ? "bad" : "warn" }), h("strong", null, d.name),
-            h("span", null, d.next_step), h("em", null, d.next_due < today() ? "overdue" : "today"));
-        }, "Nothing due.")),
-      h("div", { className: "stoa-panel" }, h("div", { className: "stoa-h" }, "Gone quiet", h("b", null, quiet.length)),
-        list(quiet, function (d) {
-          return h("button", { className: "stoa-row", key: d.id, onClick: function () { open(d.id); } },
-            h("i", { className: "stoa-dot", "data-tone": "warn" }), h("strong", null, d.name),
-            h("span", null, d.stage_label), h("em", null, ago(d.last_touch || d.updated_at).replace(" ago", "")));
-        }, "All active.")),
-      h("div", { className: "stoa-panel" }, h("div", { className: "stoa-h" }, "Latest moves", h("b", null, s.totals.moves_week)),
-        list(recent, function (a) {
-          return h("button", { className: "stoa-row", key: a.id, onClick: function () { open(a.deal); } },
-            h("i", { className: "stoa-dot", "data-tone": "grad" }), h("strong", null, a.name), h("span", null, a.text), h("em", null, ago(a.at)));
-        }, "No moves yet.")));
-  }
-
-  // -- flow (Sankey) ---------------------------------------------------------------------------
-  function ribbon(x0, y0, x1, y1, h0, h1) {
-    var m = (x0 + x1) / 2;
-    return "M" + x0 + "," + y0 + " C" + m + "," + y0 + " " + m + "," + y1 + " " + x1 + "," + y1 +
-      " L" + x1 + "," + (y1 + h1) + " C" + m + "," + (y1 + h1) + " " + m + "," + (y0 + h0) + " " + x0 + "," + (y0 + h0) + " Z";
-  }
-  // The funnel: how many records reach each stage, and what share moves on to the next.
-  function Flow(props) {
-    var f = props.state.flow, pb = props.state.playbook, cur = pb.currency;
-    if (!f || !f.total) return null;
-    var steps = f.stages.map(function (s) { return { label: s.label, reached: s.reached, here: s.here, lost: s.lost, value: s.value }; })
-      .concat([{ label: f.won_label, reached: f.won, won: true, value: f.won_value }]);
-    var W = 1000, H = 184, mid = 96, tall = 92, col = W / steps.length, block = col * 0.5;
-    var height = function (step) { return Math.max(3, tall * step.reached / f.total); };
-    var closed = f.won + f.lost, parts = [];
-    steps.forEach(function (step, i) {
-      var x = i * col, hgt = height(step), next = steps[i + 1];
-      parts.push(h("rect", { key: "b" + i, className: step.won ? "stoa-fn-won" : "stoa-fn-block", x: x, y: mid - hgt / 2, width: block, height: hgt, rx: 2 }));
-      if (next) {
-        var after = height(next), right = (i + 1) * col;
-        parts.push(h("polygon", { key: "l" + i, className: "stoa-fn-link",
-          points: [x + block, mid - hgt / 2, right, mid - after / 2, right, mid + after / 2, x + block, mid + hgt / 2].join(" ") }));
-        parts.push(h("text", { key: "p" + i, className: "stoa-fn-pct", x: x + block + (col - block) / 2, y: mid + 4, textAnchor: "middle" },
-          step.reached ? Math.round(100 * next.reached / step.reached) + "%" : "–"));
-      }
-      parts.push(h("text", { key: "t" + i, className: "stoa-flow-label", x: x, y: 11 }, step.label.toUpperCase().slice(0, Math.max(6, Math.floor(col / 7.6)))));
-      parts.push(h("text", { key: "n" + i, className: "stoa-fn-num", x: x, y: 32 }, String(step.reached)));
-      parts.push(h("text", { key: "s" + i, className: "stoa-flow-count", x: x, y: mid + tall / 2 + 20 },
-        step.won ? (step.value ? money(step.value, cur) : "") : step.here + " here" + (step.value ? "  ·  " + money(step.value, cur) : "")));
-      if (step.lost) parts.push(h("text", { key: "x" + i, className: "stoa-flow-count", x: x, y: mid + tall / 2 + 33 }, step.lost + " lost here"));
-    });
-    return h("div", { className: "stoa-flowwrap" },
-      h("svg", { className: "stoa-flow", viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": "How many records reach each stage, and what share moves on" },
-        h("defs", null, h("linearGradient", { id: "stoa-spec", x1: "0", y1: "0", x2: "1", y2: "0" },
-          h("stop", { offset: "0", style: { stopColor: "var(--st-spec-a)" } }), h("stop", { offset: "0.46", style: { stopColor: "var(--st-spec-b)" } }),
-          h("stop", { offset: "1", style: { stopColor: "var(--st-spec-c)" } }))),
-        parts),
-      h("div", { className: "stoa-flowfoot" },
-        h("span", null, h("b", null, closed ? Math.round(100 * f.won / closed) + "%" : "–"), " win rate" + (closed ? " (" + f.won + " of " + closed + " closed)" : "")),
-        h("span", null, h("b", null, Math.round(100 * f.won / f.total) + "%"), " of everything that entered has been " + f.won_label.toLowerCase()),
-        h("span", null, "Percentages are the share that reached the next stage.")));
-  }
-
-  // -- pipeline board ---------------------------------------------------------------------------
-  function DealCard(props) {
-    var d = props.deal, cur = props.currency;
-    return h("button", { className: "stoa-card", "data-moved": props.moved ? "1" : "0", onClick: function () { props.open(d.id); } },
-      h("h5", null, h("span", null, d.name), d.value ? h("b", null, money(d.value, cur)) : null),
-      h("p", null, [d.company, d.group && d.group !== d.company ? d.group : ""].filter(Boolean).join(" · ") || " "),
-      d.next_step ? h("div", { className: "stoa-next" }, h("i", { className: "stoa-dot", style: { marginTop: 5 }, "data-tone": d.due ? (d.next_due < today() ? "bad" : "warn") : "" }),
-        h("span", null, d.next_step)) : null,
-      (props.tag || d.due || d.stale || d.pending || d.snoozed_until || d.owner) ? h("div", { className: "stoa-chips" },
-        props.tag ? h(Chip, null, props.tag) : null,
-        d.due ? h(Chip, { tone: d.next_due < today() ? "bad" : "warn" }, d.next_due < today() ? "overdue" : "due today") : null,
-        d.stale && !d.due ? h(Chip, { tone: "warn" }, "quiet " + ago(d.last_touch || d.updated_at).replace(" ago", "")) : null,
-        d.pending ? h(Chip, { tone: "grad" }, "draft waiting") : null,
-        d.snoozed_until && d.snoozed_until > today() ? h(Chip, null, "snoozed") : null,
-        d.owner ? h(Chip, null, d.owner) : null) : null);
-  }
-
-  function Board(props) {
-    var s = props.state, cur = s.playbook.currency, q = props.query.toLowerCase();
-    var match = function (d) { return !q || [d.name, d.company, d.group, d.next_step, d.owner].join(" ").toLowerCase().indexOf(q) >= 0; };
-    var open = s.deals.filter(function (d) { return d.status === "open" && match(d); });
-    var max = Math.max.apply(null, s.playbook.stages.map(function (st) { return open.filter(function (d) { return d.stage === st.id; }).length; }).concat([1]));
-    var closed = s.deals.filter(function (d) { return d.status !== "open" && match(d); }).sort(function (a, b) { return a.stage_at < b.stage_at ? 1 : -1; });
-    var known = {}; s.playbook.stages.forEach(function (st) { known[st.id] = 1; });
-    var strays = open.filter(function (d) { return !known[d.stage]; });
-    var columns = s.playbook.stages.concat(strays.length ? [{ id: "~other", label: "Other stages", other: true }] : []);
-    if (!s.deals.length) {
-      return h("div", { className: "stoa-panel stoa-blank" }, h("h3", null, "Empty desk"),
-        h("p", null, "Tell Hermes about a " + s.playbook.terms.deal + ", or try ", h("code", null, "hermes stoa demo"), "."));
-    }
-    return h("div", null,
-      h(Flow, { state: s }),
-      h("div", { className: "stoa-board" }, columns.map(function (stage) {
-        var here = stage.other ? strays : open.filter(function (d) { return d.stage === stage.id; });
-        var value = here.reduce(function (a, d) { return a + (d.value || 0); }, 0);
-        return h("div", { className: "stoa-col", key: stage.id },
-          h("div", { className: "stoa-colhead" },
-            h("div", null, h("h4", null, stage.label), h("em", null, here.length + (value ? " · " + money(value, cur) : ""))),
-            h("u", { style: { "--fill": Math.round(100 * here.length / max) + "%" } })),
-          here.length ? here.map(function (d) { return h(DealCard, { key: d.id, deal: d, currency: cur, open: props.open, moved: props.moved[d.id], tag: stage.other ? d.stage_label : "" }); })
-            : h("div", { className: "stoa-colempty" }, "—"));
-      })),
-      closed.length ? h("div", { className: "stoa-closed" }, closed.slice(0, 12).map(function (d) {
-        return h("button", { className: "stoa-btn", key: d.id, onClick: function () { props.open(d.id); } },
-          h("i", { className: "stoa-dot", "data-tone": d.status === "won" ? "good" : "bad" }), d.name,
-          h("span", { style: { color: "var(--st-mute)", fontWeight: 500 } }, d.stage_label + (d.lost_reason ? " · " + d.lost_reason : "")));
-      })) : null);
-  }
-
-  // -- market map -------------------------------------------------------------------------------
-  function Sky(props) {
-    var segments = props.market.segments, n = Math.max(1, segments.length);
-    var W = 1000, H = 330, slot = W / n;
-    var golden = Math.PI * (3 - Math.sqrt(5));
-    return h("svg", { className: "stoa-sky", viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": "Market map" },
-      segments.map(function (seg, si) {
-        var cx = slot * (si + 0.5), cy = 138;
-        var rows = seg.companies.slice().sort(function (a, b) { return b.fit - a.fit; }).slice(0, 14);
-        var spread = Math.min(34, (slot / 2 - 30) / Math.sqrt(Math.max(1, rows.length)));
-        return h("g", { key: seg.name },
-          h("circle", { className: "stoa-ring", cx: cx, cy: cy, r: Math.min(slot / 2 - 12, 112) }),
-          rows.map(function (c, i) {
-            var r = 11 + c.fit * 3.4, dist, ang;
-            if (rows.length <= 7) {  // a few companies: best fit in the middle, the rest evenly around it
-              var mid = rows.length >= 5 ? 1 : 0, ring = rows.length - mid, k = i - mid;
-              dist = rows.length === 1 || (mid && i === 0) ? 0 : Math.min(slot / 2 - 62, 74 + rows.length * 5);
-              ang = (ring === 2 ? Math.PI : -Math.PI / 2) + (2 * Math.PI * k) / Math.max(1, ring);
-            } else {
-              dist = i === 0 ? 0 : spread * Math.sqrt(i) * 1.55; ang = i * golden + si;
-            }
-            var x = cx + Math.cos(ang) * dist, y = cy + Math.sin(ang) * dist * 0.82;
-            var named = rows.length <= 7 || c.fit >= 5;
-            return h("g", { key: c.id, className: "stoa-bub", "data-tracked": c.status === "tracked" ? "1" : "0", "data-on": props.selected === c.id ? "1" : "0",
-              style: { animationDelay: (-(i * 0.7 + si)) + "s" }, onClick: function () { props.open(c); } },
-              h("title", null, c.company + " · fit " + c.fit + "/5" + (c.why ? " — " + c.why : "")),
-              h("circle", { cx: x, cy: y, r: r }),
-              h("text", { x: x, y: y + 3.5, textAnchor: "middle" }, initials(c.company)),
-              named ? h("text", { className: "stoa-bubname", x: x, y: y + r + 13, textAnchor: "middle" }, c.company.length > 20 ? c.company.slice(0, 19) + "…" : c.company) : null);
-          }),
-          h("text", { className: "stoa-seglabel", x: cx, y: H - 26, textAnchor: "middle" }, seg.name.toUpperCase().slice(0, Math.max(10, Math.floor(slot / 9)))),
-          h("text", { x: cx, y: H - 8, textAnchor: "middle" }, seg.companies.length + (seg.companies.length === 1 ? " company" : " companies")));
-      }));
-  }
-
-  function Bars(props) {
-    var rows = props.rows || [];
-    var top = props.max || Math.max.apply(null, rows.map(function (r) { return r.value; }).concat([1]));
-    return h("div", { className: "stoa-bars" }, rows.map(function (r, i) {
-      return h("div", { className: "stoa-rate", key: i }, h("b", null, r.value + (props.unit || "")),
-        h("span", null, r.label, h("i", { style: { width: Math.max(2, Math.round(100 * r.value / top)) + "%" } }), r.note ? h("em", null, r.note) : null));
-    }));
-  }
-
-  // A second Sankey: each segment on the left, what its companies use today on the right.
-  function MarketFlow(props) {
-    var market = props.market, pairs = {}, left = {}, right = {}, total = 0, SEP = "\u0001";
-    var known = (market.holds || []).map(function (x) { return x.name; });
-    market.segments.forEach(function (seg) {
-      seg.companies.forEach(function (c) {
-        if (!c.uses) return;
-        var use = known.filter(function (n) { return n.toLowerCase() === c.uses.toLowerCase(); })[0] || "Other";
-        pairs[seg.name + SEP + use] = (pairs[seg.name + SEP + use] || 0) + 1;
-        left[seg.name] = (left[seg.name] || 0) + 1; right[use] = (right[use] || 0) + 1; total++;
-      });
-    });
-    var L = market.segments.map(function (x) { return x.name; }).filter(function (n) { return left[n]; });
-    var R = known.filter(function (n) { return right[n]; });
-    if (right.Other) R.push("Other");
-    if (total < 3 || R.length < 2) return null;
-    var W = 1000, gap = 12, top = 8, bar = 5, x0 = 270, x1 = 700, most = Math.max(L.length, R.length);
-    var u = Math.min(22, (190 - gap * (most - 1)) / total), H = top + total * u + gap * (most - 1) + 10;
-    var ly = {}, ry = {}, lo = {}, ro = {}, parts = [], y = top;
-    L.forEach(function (n) { ly[n] = y; y += left[n] * u + gap; });
-    y = top;
-    R.forEach(function (n) { ry[n] = y; y += right[n] * u + gap; });
-    L.forEach(function (ln) {
-      R.forEach(function (rn) {
-        var c = pairs[ln + SEP + rn];
-        if (!c) return;
-        parts.push(h("path", { key: ln + SEP + rn, className: "stoa-flow-on", d: ribbon(x0 + bar, ly[ln] + (lo[ln] || 0), x1, ry[rn] + (ro[rn] || 0), c * u, c * u) }));
-        lo[ln] = (lo[ln] || 0) + c * u; ro[rn] = (ro[rn] || 0) + c * u;
-      });
-    });
-    L.forEach(function (n) {
-      parts.push(h("rect", { key: "l" + n, className: "stoa-flow-node", x: x0, y: ly[n], width: bar, height: left[n] * u }));
-      parts.push(h("text", { key: "lt" + n, className: "stoa-flow-label", x: x0 - 12, y: ly[n] + left[n] * u / 2 + 3, textAnchor: "end" }, n.toUpperCase().slice(0, 30)));
-    });
-    R.forEach(function (n) {
-      parts.push(h("rect", { key: "r" + n, className: "stoa-flow-node", x: x1, y: ry[n], width: bar, height: right[n] * u }));
-      parts.push(h("text", { key: "rt" + n, className: "stoa-flow-label", x: x1 + bar + 12, y: ry[n] + right[n] * u / 2 + 3 }, n.toUpperCase().slice(0, 30) + "  " + right[n]));
-    });
-    return h("div", { className: "stoa-panel stoa-pad stoa-wide2" }, h("div", { className: "stoa-h" }, "Where the market sits today", h("em", null, "segment → what they use")),
-      h("svg", { className: "stoa-flow", viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": "Segments and what their companies use today" }, parts));
-  }
-
-  function savePage(marketId, share, say) {
-    get("/market/" + encodeURIComponent(marketId) + "/page?share=" + (share ? 1 : 0)).then(function (r) {
-      var url = URL.createObjectURL(new Blob([r.html], { type: "text/html" }));
-      var link = document.createElement("a");
-      link.href = url; link.download = r.filename;
-      document.body.appendChild(link); link.click(); link.remove();
-      setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
-      say("Saved " + r.filename);
-    }).catch(function (e) { say(String(e && e.message || e)); });
-  }
-
-  function MarketView(props) {
-    var s = props.state, q = props.query.toLowerCase();
-    if (!s.markets.length) {
-      return h("div", { className: "stoa-panel stoa-blank" }, h("h3", null, "No map yet"),
-        h("p", null, "Ask Hermes: “We sell X to Y. Map the market.”"));
-    }
-    var market = s.markets.filter(function (m) { return m.id === props.marketId; })[0] || s.markets[0];
-    var n = market.numbers || {}, byId = {};
-    market.segments.forEach(function (seg) { seg.companies.forEach(function (c) { byId[c.id] = c; }); });
-    var rates = (market.rates || []).filter(function (r) { return r.of; });
-    var holds = market.holds || [], calls = market.first_calls || [], bridges = market.bridges || [];
-    var regions = market.regions || [], sizes = market.sizes || [], notes = market.implications || [];
-    var panels = [];
-    if (rates.length) panels.push(h("div", { className: "stoa-panel stoa-pad", key: "rates" },
-      h("div", { className: "stoa-h" }, "How rare each requirement is", h("em", null, n.assessed + " checked")),
-      h(Bars, { unit: "%", max: 100, rows: rates.map(function (r) { return { label: r.label, value: r.rate, note: r.shown + " of " + r.of }; }) })));
-    if (holds.length) panels.push(h("div", { className: "stoa-panel stoa-pad", key: "holds" },
-      h("div", { className: "stoa-h" }, "Who holds this market today", h("em", null, "of " + market.holds_of + " placed")),
-      h(Bars, { unit: "%", max: 100, rows: holds.map(function (x) { return { label: x.name, value: x.share, note: x.companies.slice(0, 3).join(", ") }; }) })));
-    if (calls.length) panels.push(h("div", { className: "stoa-panel stoa-pad", key: "calls" },
-      h("div", { className: "stoa-h" }, "First calls", h("em", null, calls.length)),
-      calls.map(function (c, i) {
-        return h("button", { className: "stoa-row stoa-call", key: c.id, onClick: function () { if (byId[c.id]) props.openTarget(byId[c.id]); } },
-          h("em", null, ("0" + (i + 1)).slice(-2)), h("strong", null, c.company), h("span", null, c.why), c.buyer ? h("em", null, c.buyer) : null);
-      })));
-    var spread = regions.length && regions[0].count > 1;   // bars only say something when places repeat
-    if (sizes.length || regions.length) panels.push(h("div", { className: "stoa-panel stoa-pad", key: "where" },
-      h("div", { className: "stoa-h" }, "Where they are, how big", h("em", null, regions.length + (regions.length === 1 ? " place" : " places"))),
-      sizes.length ? h(Bars, { rows: sizes.map(function (z) { return { label: z.band + " people", value: z.count }; }) }) : null,
-      !regions.length ? null : spread ? h(Bars, { rows: regions.slice(0, 5).map(function (r) { return { label: r.name, value: r.count }; }) })
-        : h("div", { className: "stoa-imp" }, h("b", null, "IN"), h("span", null, regions.map(function (r) { return r.name; }).join(", ")))));
-    if (bridges.length) panels.push(h("div", { className: "stoa-panel stoa-pad", key: "meet" },
-      h("div", { className: "stoa-h" }, "Where the segments meet", h("em", null, n.bridges)),
-      bridges.map(function (b, i) {
-        return h("div", { className: "stoa-imp", key: i }, h("b", null, "↔"), h("span", null, h("strong", null, b.between.join(" and ")), h("small", null, b.companies.join(", "))));
-      })));
-    return h("div", null,
-      h("div", { className: "stoa-panel stoa-mapwrap" },
-        h("div", { className: "stoa-maphead" },
-          h("div", null, h("h3", null, market.name), market.brief ? h("p", null, market.brief) : null),
-          h("div", { className: "stoa-mapside" },
-            h("div", { className: "stoa-chips" }, h(Chip, null, market.counts.mapped + " mapped"), h(Chip, { tone: "grad" }, market.counts.tracked + " in pipeline"),
-              n.with_signal ? h(Chip, null, n.with_signal + " with a signal") : null, n.buyers_named ? h(Chip, null, n.buyers_named + " buyers named") : null,
-              market.counts.dismissed ? h(Chip, null, market.counts.dismissed + " dismissed") : null),
-            h("div", { className: "stoa-line" },
-              h(Btn, { kind: "ghost", title: "The whole map as one web page, for the team", onClick: function () { savePage(market.id, false, props.say); } }, "Download page"),
-              h(Btn, { kind: "ghost", title: "The same page without buyers' names or pipeline status", onClick: function () { savePage(market.id, true, props.say); } }, "Share version")))),
-        h(Sky, { market: market, open: props.openTarget, selected: props.selected })),
-      (market.reading || notes.length) ? h("div", { className: "stoa-panel stoa-pad stoa-reading" },
-        h("div", null, h("div", { className: "stoa-h" }, "Reading the map"),
-          String(market.reading || "").split("\n").filter(function (x) { return x.trim(); }).map(function (x, i) { return h("p", { key: i }, x); })),
-        h("div", null, h("div", { className: "stoa-h" }, "What this means"),
-          notes.map(function (x, i) { return h("div", { className: "stoa-imp", key: i }, h("b", null, ("0" + (i + 1)).slice(-2)), h("span", null, x)); }))) : null,
-      panels.length ? h("div", { className: "stoa-grid2" }, panels, h(MarketFlow, { market: market, key: "flow" })) : null,
-      h("div", { className: "stoa-tiles" }, market.segments.map(function (seg) {
-        var rows = seg.companies.filter(function (c) { return !q || [c.company, c.why, c.location, c.signal, c.uses].join(" ").toLowerCase().indexOf(q) >= 0; });
-        if (!rows.length) return null;
-        return [h("div", { className: "stoa-segtitle", key: "h" + seg.name }, h("b", null, seg.name), rows.length, seg.description ? h("span", null, seg.description) : null)]
-          .concat(rows.map(function (c) {
-            var reqs = c.requirements || [], shown = reqs.filter(function (r) { return r.shown; }).length;
-            return h("button", { className: "stoa-tile", key: c.id, onClick: function () { props.openTarget(c); } },
-              h("h5", null, h("span", null, c.company), h(Fit, { fit: c.fit })),
-              c.why ? h("p", null, c.why) : null,
-              h("div", { className: "stoa-chips" },
-                c.status === "tracked" ? h(Chip, { tone: "grad" }, "in pipeline") : null,
-                c.signal ? h(Chip, { tone: "good" }, c.signal.slice(0, 34)) : null,
-                reqs.length ? h(Chip, null, shown + " of " + reqs.length + " shown") : null,
-                c.uses ? h(Chip, null, "uses " + c.uses.slice(0, 22)) : null,
-                c.size ? h(Chip, null, c.size) : null, c.location ? h(Chip, null, c.location) : null));
-          }));
-      })));
-  }
-
-  // -- activity ---------------------------------------------------------------------------------
-  function Feed(props) {
-    var rows = props.state.activity;
-    if (!rows.length) return h("div", { className: "stoa-panel stoa-blank" }, h("h3", null, "Quiet so far"), h("p", null, "Moves, calls and clicks land here."));
-    return h("div", { className: "stoa-panel stoa-feed" }, rows.map(function (a) {
-      return h("div", { className: "stoa-event", key: a.id },
-        h("time", null, ago(a.at)), h("i", { className: "stoa-dot", "data-tone": tone(a.kind) }),
-        h("div", null, h("button", { onClick: function () { props.open(a.deal); } }, a.name),
-          h("p", null, a.text), h("small", null, a.kind + (a.by ? " · " + a.by : ""))));
-    }));
-  }
-
-  // -- setup: what is connected, the rules in force, and sample data ---------------------------
   function saveFile(name, text, type) {
     var url = URL.createObjectURL(new Blob([text], { type: type || "text/plain" }));
     var a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
   }
 
-  function SetupView(props) {
-    var _d = useState(null), data = _d[0], setData = _d[1];
-    var _b = useState(false), busy = _b[0], setBusy = _b[1];
-    var fail = function (e) { props.say(String(e && e.message || e)); };
-    var load = function () { return get("/setup").then(setData).catch(fail); };
-    useEffect(function () { load(); }, [props.stamp, props.touring]);
-    if (!data) return h("div", { className: "stoa-panel stoa-blank" }, h("h3", null, "Opening…"));
-    function run(promise) { setBusy(true); return promise.catch(fail).then(function () { setBusy(false); }); }
-    function tour(action, example) {
-      return run(post("/tour", { action: action, example: example || "" }).then(function (r) {
-        props.say(action === "start" ? "Sample data: " + r.title + ". Your own desk is untouched." : action === "leave" ? "Back on your own desk." : (r.removed || 0) + " sample records removed from your desk.");
-        return props.refresh().then(load);
-      }));
+  // Another page of this dashboard, opened the way its own menu opens it (no reload). The tab sits at <base>/stoa,
+  // so the dashboard's base path is whatever comes before that.
+  function base() { return window.location.pathname.replace(/\/stoa\/?$/, ""); }
+  function Go(props) {
+    var href = base() + props.to;
+    return h("a", { className: "stoa-btn", "data-kind": props.kind || "", href: href, title: props.title,
+      onClick: function (e) {
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;      // a new tab or window is the browser's to open
+        e.preventDefault();
+        window.history.pushState({}, "", href);
+        window.dispatchEvent(new PopStateEvent("popstate"));
+      } }, props.children);
+  }
+  function Btn(props) {
+    return h("button", { type: "button", className: "stoa-btn", "data-kind": props.kind || "", disabled: props.disabled, onClick: props.onClick, title: props.title }, props.children);
+  }
+  function Section(props) {
+    return h("section", { className: "stoa-sec" },
+      h("div", { className: "stoa-h" }, h("span", null, props.title), props.note ? h("em", null, props.note) : null),
+      props.children);
+  }
+  function Fig(props) {
+    return h("div", { className: "stoa-fig" }, h("b", null, props.n), h("span", null, props.label), props.sub ? h("small", null, props.sub) : null);
+  }
+
+  // -- the set-up steps -------------------------------------------------------------------------
+  // The same six steps the Stoa page shows. Each says where it stands, and opens onto how to do it from here.
+  function Step(props) {
+    var _o = useState(false), open = _o[0], setOpen = _o[1];
+    var c = props.step;
+    return h("div", { className: "stoa-step", "data-done": c.done ? "1" : "0", "data-open": open ? "1" : "0" },
+      h("button", { type: "button", className: "stoa-stephead", "aria-expanded": open, onClick: function () { setOpen(!open); } },
+        h("i", { "aria-hidden": "true" }, c.done ? "✓" : props.n),
+        h("span", null, h("b", null, c.title), h("small", null, String(c.detail || "").replace("on its Messaging page", "on the dashboard's Channels page"))),
+        h("u", { "aria-hidden": "true" }, open ? "–" : "+")),
+      open ? h("div", { className: "stoa-stepbody" }, props.children) : null);
+  }
+
+  function Keys(props) {
+    var _r = useState({}), results = _r[0], setResults = _r[1];
+    var _b = useState(""), busy = _b[0], setBusy = _b[1];
+    function test(row) {
+      setBusy(row.id);
+      post("/key/test", { service: row.id }).then(function (r) {
+        var next = {}; for (var k in results) next[k] = results[k];
+        next[row.id] = { ok: Boolean(r.ok), text: r.message || r.error || (r.ok ? "The key works." : "The service refused the key.") };
+        setResults(next);
+      }).catch(function (e) { props.say("Stoa could not test that key: " + why(e)); }).then(function () { setBusy(""); });
     }
-    function use(item) {
-      return run(post("/playbook", { name: item.name }).then(function (r) {
-        props.say(r.ask ? "This page cannot save that. Ask Hermes: “" + r.ask + "”" : r.warning || "The desk now runs on " + item.title + ".");
-        return props.refresh().then(load);
-      }));
-    }
-    function panel(title, note, children) {
-      return h("div", { className: "stoa-panel stoa-setup" }, h("div", { className: "stoa-h" }, title, note ? h("em", null, note) : null), children);
-    }
-    function line(key, on, mark, title, detail, extra) {
-      return h("div", { className: "stoa-check", "data-on": on ? "1" : "0", key: key }, h("i", null, mark), h("div", null, h("span", null, title), h("small", null, detail), extra || null));
-    }
-    var left = data.checklist.filter(function (c) { return !c.done; }).length, d = data.data;
     return h("div", null,
-      h("div", { className: "stoa-grid2" },
-        panel("Get started", left ? left + " left" : "all done", data.checklist.map(function (c) { return line(c.id, c.done, c.done ? "✓" : "○", c.title, c.detail); })),
-        panel("Connected", "", data.connections.map(function (c) { return line(c.id, c.on === true, c.on === true ? "●" : "○", c.label, c.detail); }))),
-      h("div", { className: "stoa-grid2" },
-        panel("Rules in force", "plugin settings", data.rules.map(function (r) { return line(r.label, true, "·", r.label, r.value); })),
-        h("div", null,
-          panel("Your data", d.records ? d.records + " records" : "empty", [
-            line("where", true, "·", d.open + " open · " + d.won + " won · " + d.lost + " lost · " + d.activities + " log entries", "One SQLite file on the machine Hermes runs on: " + d.path),
-            line("tour", true, "·", data.tour ? "Sample data is on show" : "Sample data",
-              data.tour ? cap(data.tour.title) + ", kept in a file of its own. Your desk is untouched and comes back when you leave."
-                : "See a full pipeline without touching yours: made-up people and companies in a file of their own.",
-              h("div", { className: "stoa-setup-btns" },
-                data.tour ? h(Btn, { kind: "primary", disabled: busy, onClick: function () { tour("leave"); } }, "Leave the tour")
-                  : data.examples.map(function (x) { return h(Btn, { key: x.id, disabled: busy, onClick: function () { tour("start", x.id); } }, cap(x.title)); }),
-                h(Btn, { kind: "ghost", disabled: busy, onClick: function () { run(get("/export").then(function (f) { saveFile(f.filename, f.csv, "text/csv"); props.say(f.rows + " records exported."); })); } }, "Export CSV"))),
-            d.samples && !data.tour ? line("stray", true, "!", d.samples + " sample records are mixed into your own desk", "An earlier version of Stoa put them there.",
-              h("div", { className: "stoa-setup-btns" }, h(Btn, { disabled: busy, onClick: function () { tour("tidy"); } }, "Remove them from my desk"))) : null]),
-          panel("Playbook", data.playbook.title, data.playbooks.filter(function (x) { return !x.error; }).map(function (x) {
-            return line(x.name, x.active, x.active ? "●" : "○", x.door || x.title, x.stages.concat([x.won]).join(" → "),
-              x.active ? null : h("div", { className: "stoa-setup-btns" }, h(Btn, { kind: "ghost", disabled: busy, onClick: function () { use(x); } }, "Use this")));
-          })))),
-      panel("Automations", "type /blueprint in a Hermes chat to switch one on", h("div", { className: "stoa-grid2", style: { marginBottom: 0, gap: "0 28px" } }, data.automations.map(function (a) {
-        return line(a.name, true, "·", a.title, a.description);
-      }))),
-      h("p", { className: "stoa-setup-foot" }, "Stoa " + data.version + ". The Today list, snoozing to a date and the cheat sheet are on the Stoa page in the Hermes app."));
-  }
-
-  // -- drawers ----------------------------------------------------------------------------------
-  function Shell(props) {
-    useEffect(function () {
-      function key(e) { if (e.key === "Escape") props.close(); }
-      window.addEventListener("keydown", key);
-      return function () { window.removeEventListener("keydown", key); };
-    }, []);
-    return h(React.Fragment, null,
-      h("div", { className: "stoa-scrim", onClick: props.close }),
-      h("aside", { className: "stoa-drawer", role: "dialog", "aria-label": props.label },
-        h("button", { className: "stoa-x", onClick: props.close, "aria-label": "Close" }, "×"), props.children));
-  }
-
-  function DealDrawer(props) {
-    var s = props.state, pb = s.playbook;
-    var _d = useState(null), deal = _d[0], setDeal = _d[1];
-    var _n = useState(""), note = _n[0], setNote = _n[1];
-    var _k = useState("note"), kind = _k[0], setKind = _k[1];
-    // null means "not edited": the field shows the saved value and follows it. Once someone types,
-    // their text stays put however often the page refreshes underneath, until they save.
-    var _s = useState(null), stepEdit = _s[0], setStep = _s[1];
-    var _u = useState(null), dueEdit = _u[0], setDue = _u[1];
-    var _b = useState(false), busy = _b[0], setBusy = _b[1];
-    var load = useCallback(function () {
-      return get("/deal/" + encodeURIComponent(props.id)).then(function (d) { setDeal(d); })
-        .catch(function () { props.say("That record is no longer on the desk."); props.close(); });
-    }, [props.id]);
-    useEffect(function () { load(); }, [props.id, props.stamp]);
-    function act(body, done) {
-      setBusy(true);
-      post("/deal/" + encodeURIComponent(props.id) + "/act", body).then(function (r) {
-        if (r && r.notice) props.say(r.notice);
-        else if (r && r.parked) props.say("Saved. Draft waiting for Hermes.");
-        return props.refresh().then(load).catch(function () {}).then(function () { if (done) done(); });
-      }).catch(function (e) { props.say(String(e && e.message || e)); }).then(function () { setBusy(false); });
-    }
-    if (!deal) return h(Shell, { close: props.close, label: "Record" }, h("header", null, h("p", null, "Loading…")));
-    var open = deal.status === "open";
-    var step = stepEdit === null ? (deal.next_step || "") : stepEdit, due = dueEdit === null ? (deal.next_due || "") : dueEdit;
-    var stray = open && deal.position < 0;
-    var facts = [[cap(pb.terms.group), deal.group], [pb.terms.value, money(deal.value, pb.currency)], [cap(pb.terms.owner), deal.owner]]
-      .concat(pb.fields.map(function (f) { return [f.label, (deal.fields || {})[f.key]]; }))
-      .concat([["Email", deal.email], ["LinkedIn", deal.linkedin], ["Source", deal.source]]).filter(function (p) { return p[1]; });
-    return h(Shell, { close: props.close, label: deal.name },
-      h("header", null,
-        h("div", { className: "stoa-eyebrow" }, pb.terms.deal, deal.status !== "open" ? h(Chip, { tone: deal.status === "won" ? "good" : "bad" }, deal.stage_label) : null,
-          deal.due ? h(Chip, { tone: "warn" }, "due") : null, deal.stale ? h(Chip, { tone: "warn" }, "quiet") : null),
-        h("h3", null, deal.name), h("p", null, (deal.company && deal.company !== deal.name ? deal.company : deal.group && deal.group !== deal.name ? deal.group : " ")),
-        h("div", { className: "stoa-meter" }, pb.stages.map(function (st, i) { return h("i", { key: st.id, "data-on": deal.status === "won" || (open && i <= deal.position) ? "1" : "0" }); })),
-        h("div", { className: "stoa-meterlabel" }, h("span", null, deal.stage_label + (deal.lost_reason ? " · " + deal.lost_reason : "")),
-          h("span", null, open && deal.position >= 0 ? (deal.position + 1) + " of " + pb.stages.length : "in stage " + ago(deal.stage_at).replace(" ago", "")))),
-      h("div", { className: "stoa-body" },
-        deal.pending_task ? h("div", { className: "stoa-note" }, h("b", null, "Draft waiting. "), "Ask Hermes: “show me " + deal.name.split(" ")[0] + "”.") : null,
-        stray ? h("div", { className: "stoa-note" }, h("b", null, "Stage from another playbook. "), "Ask Hermes to move it to one of this playbook’s stages.") : null,
-        facts.length ? h("div", { className: "stoa-facts" }, facts.map(function (p) {
-          var v = String(p[1]);
-          return h("div", { key: p[0] }, h("small", null, p[0]),
-            h("span", null, p[0] === "LinkedIn" ? h("a", { href: /^https?:/.test(v) ? v : "https://" + v, target: "_blank", rel: "noreferrer" }, v.replace(/^https?:\/\/(www\.)?/, "")) : v));
-        })) : null,
-        open ? h("div", { className: "stoa-sec" }, h("label", null, "Next step"),
-          h("div", { className: "stoa-line" },
-            h("input", { className: "stoa-input", value: step, placeholder: "Next action", onChange: function (e) { setStep(e.target.value); } }),
-            h("input", { className: "stoa-input", type: "date", style: { flex: "none", width: 150 }, value: due, onChange: function (e) { setDue(e.target.value); } }),
-            h(Btn, { disabled: busy || (step === (deal.next_step || "") && due === (deal.next_due || "")), onClick: function () { act({ verb: "update", next_step: step, next_due: due }, function () { setStep(null); setDue(null); }); } }, "Save"))) : null,
-        h("div", { className: "stoa-sec" }, h("label", null, "Log"),
-          h("textarea", { className: "stoa-area", value: note, placeholder: "What happened?", onChange: function (e) { setNote(e.target.value); } }),
-          h("div", { className: "stoa-line", style: { marginTop: 8 } },
-            h("select", { className: "stoa-select", value: kind, onChange: function (e) { setKind(e.target.value); } },
-              ["note", "call", "email", "meeting", "task"].map(function (k) { return h("option", { key: k, value: k }, cap(k)); })),
+      h("p", { className: "stoa-p" }, "Stoa works without any key. Each one adds something. A key is kept by Hermes, on its Keys page; Stoa reads it when it needs it and never shows it."),
+      props.keys.map(function (row) {
+        var result = results[row.id];
+        return h("div", { className: "stoa-key", key: row.id },
+          h("div", { className: "stoa-keyhead" },
+            h("b", null, row.name), h("span", { className: "stoa-tag", "data-on": row.set ? "1" : "0" }, row.set ? "Set" : "Not set"),
             h("span", { className: "stoa-grow" }),
-            h(Btn, { disabled: busy || !note.trim(), onClick: function () { act({ verb: "log", kind: kind, text: note.trim() }, function () { setNote(""); }); } }, "Add to log"))),
-        h("div", { className: "stoa-sec" }, h("label", null, "Activity"),
-          (deal.activity || []).map(function (a, i) {
-            return h("div", { className: "stoa-time", key: i }, h("i", { className: "stoa-dot", "data-tone": tone(a.kind) }),
-              h("div", null, h("p", null, a.text), h("small", null, ago(a.at) + " · " + a.kind + (a.by ? " · " + a.by : ""))));
+            row.set ? h(Btn, { kind: "ghost", disabled: busy === row.id, title: row.check, onClick: function () { test(row); } }, busy === row.id ? "Testing…" : "Test") : null),
+          h("p", { className: "stoa-p" }, row.unlocks + " " + row.cost),
+          row.note ? h("p", { className: "stoa-p" }, row.note) : null,
+          result ? h("p", { className: "stoa-p", "data-tone": result.ok ? "good" : "bad" }, result.text) : null,
+          row.set ? null : h("ol", { className: "stoa-how" },
+            h("li", null, row.steps, " ", h("a", { href: row.get, target: "_blank", rel: "noreferrer" }, "Open " + row.where)),
+            h("li", null, "Press ", h("b", null, "Open Keys"), " below and go to ", h("b", null, "Custom Keys"), " at the foot of that page."),
+            h("li", null, "Type ", h("code", null, row.env), " as the name, paste the key as its value, and add it."),
+            h("li", null, "Come back here. The row shows ", h("b", null, "Set"), ", and ", h("b", null, "Test"), " has the service confirm it.")));
+      }),
+      h("div", { className: "stoa-btns" }, h(Go, { to: "/env", kind: "primary", title: "The dashboard's own page for keys. Stoa's are added under Custom Keys." }, "Open Keys")));
+  }
+
+  function Notes(props) {
+    var notes = props.notes || {};
+    var _f = useState(notes.folder || ""), folder = _f[0], setFolder = _f[1];
+    var _m = useState(null), found = _m[0], setFound = _m[1];
+    var _b = useState(false), busy = _b[0], setBusy = _b[1];
+    function run(promise) { setBusy(true); return promise.catch(function (e) { props.say("Stoa could not do that: " + why(e)); }).then(function () { setBusy(false); }); }
+    function check() { return run(post("/notes/check", { folder: folder }).then(setFound)); }
+    function save(value) {
+      return run(post("/notes/folder", { folder: value }).then(function (r) {
+        props.say(r.ok ? (value ? "Stoa now reads call notes from that folder." : "Stoa no longer reads a notes folder.") : r.error || r.message || "Stoa could not save that.");
+        if (r.ok) { setFound(null); return props.refresh(); }
+      }));
+    }
+    function look() {
+      return run(get("/notes/look").then(function (r) {
+        var first = (r.found || [])[0];
+        if (first) { setFolder(first.folder); setFound({ ok: true, count: first.count, message: "Found " + plural(first.count, "note", "notes") + " in " + first.folder + ". Press Save to use it." }); }
+        else setFound({ ok: false, message: r.message || "No folder of notes turned up in the usual places. Paste the folder's path above." });
+      }));
+    }
+    return h("div", null,
+      h("p", { className: "stoa-p" }, "Each note is filed on the record it is about, with the next step it implies. Notes can come from a folder on the computer Hermes runs on (files ending in .md or .txt, such as an Obsidian folder), from Granola, or both."),
+      h("label", { className: "stoa-label", htmlFor: "stoa-notes" }, "The folder your notes are saved in"),
+      h("div", { className: "stoa-line" },
+        h("input", { id: "stoa-notes", className: "stoa-input", value: folder, placeholder: "/Users/you/Documents/Meeting notes", spellCheck: false,
+          onChange: function (e) { setFolder(e.target.value); setFound(null); } }),
+        h(Btn, { disabled: busy || !folder.trim(), onClick: check }, "Check"),
+        h(Btn, { kind: "primary", disabled: busy || !folder.trim() || notes.can_save === false, onClick: function () { save(folder.trim()); } }, "Save")),
+      h("p", { className: "stoa-p" }, "On a Mac, to copy a folder's path: in Finder, right-click the folder, hold the Option key and choose Copy as Pathname."),
+      found ? h("p", { className: "stoa-p", "data-tone": found.ok ? "good" : "bad" }, found.message || (found.ok ? plural(found.count || 0, "note", "notes") + " found there." : "Stoa cannot read that folder.")) : null,
+      notes.folder && !found ? h("p", { className: "stoa-p", "data-tone": notes.ok ? "good" : "bad" }, notes.ok ? "Reading " + plural(notes.count || 0, "note", "notes") + " from " + notes.folder + "." : notes.message || "Stoa cannot read " + notes.folder + ".") : null,
+      notes.can_save === false ? h("p", { className: "stoa-p" }, "This page cannot save the setting here. Ask Hermes: “Set Stoa's notes folder to " + (folder.trim() || "…") + "”.") : null,
+      h("div", { className: "stoa-btns" },
+        h(Btn, { kind: "ghost", disabled: busy, title: "Tries Documents, Obsidian and Notes, and offers any that hold notes. It counts the notes and opens none.", onClick: look }, "Look for a folder"),
+        notes.folder ? h(Btn, { kind: "ghost", disabled: busy, onClick: function () { setFolder(""); save(""); } }, "Stop reading this folder") : null),
+      h("p", { className: "stoa-p" }, notes.granola ? "Granola: a key is set, so your Granola notes are read too." : "Granola: add a Granola key under step 3 and its notes are read too."));
+  }
+
+  function Jobs(props) {
+    var jobs = props.jobs || [], auto = props.autonomy;
+    var words = { on: "On", paused: "Paused", off: "Off", unknown: "Not known from here" };
+    return h("div", null,
+      h("p", { className: "stoa-p" }, "Jobs Hermes can run on a schedule. To switch one on, type ", h("code", null, "/blueprint"), " in a Hermes chat and pick it; Hermes asks when it should run and where to report. Pausing, changing or removing one is done on the dashboard's Cron page."),
+      h("div", { className: "stoa-rows" }, jobs.map(function (job) {
+        return h("div", { className: "stoa-row", key: job.name },
+          h("span", null, h("b", null, job.title), h("small", null, job.description)),
+          h("span", { className: "stoa-tag", "data-on": job.state === "on" ? "1" : "0" }, words[job.state] || job.state),
+          h("small", { className: "stoa-next" }, job.state === "on" && when(job.next) ? "next " + when(job.next) : ""));
+      })),
+      auto ? h("div", { className: "stoa-auto" },
+        h("label", { className: "stoa-label", htmlFor: "stoa-auto" }, "What a scheduled job may change without asking"),
+        h("select", { id: "stoa-auto", className: "stoa-input", value: auto.level, onChange: function (e) {
+          post("/autonomy", { level: e.target.value }).then(function () { props.say("Saved."); return props.refresh(); }).catch(function (err) { props.say("Stoa could not save that: " + why(err)); });
+        } }, auto.levels.map(function (level) { return h("option", { key: level.id, value: level.id }, level.label); })),
+        h("p", { className: "stoa-p" }, (auto.levels.filter(function (level) { return level.id === auto.level; })[0] || {}).summary || "")) : null,
+      h("div", { className: "stoa-btns" }, h(Go, { to: "/cron", title: "The dashboard's own page for scheduled jobs" }, "Open Cron")));
+  }
+
+  function Steps(props) {
+    var data = props.data, sets = data.playbook_sets || {};
+    var by = {}; data.checklist.forEach(function (c) { by[c.id] = c; });
+    var left = data.checklist.filter(function (c) { return !c.done; }).length;
+    return h(Section, { title: "Set up", note: left ? left + " of " + data.checklist.length + " left" : "all done" },
+      h(Step, { n: 1, step: by.playbook },
+        h("p", { className: "stoa-p" }, "The pipeline is on ", h("b", null, data.playbook.title), (data.playbook.shape_title ? " (" + data.playbook.shape_title.toLowerCase() + ")" : "") + ". Its stages:"),
+        h("p", { className: "stoa-stages" }, (sets.stages || []).map(function (label, i) { return h("span", { key: i }, label); })),
+        h("p", { className: "stoa-p" }, "To change what the pipeline is for or rename its stages, open Stoa in the Hermes Desktop app or Webapp and go to Setup → Edit stages. Or tell Hermes what your business does and it sets the stages for you.")),
+      h(Step, { n: 2, step: by.records },
+        h("p", { className: "stoa-p" }, "Records are added where the desk is worked, in any of these ways:"),
+        h("ul", { className: "stoa-how" },
+          h("li", null, h("b", null, "Tell Hermes."), " “We are starting a Staff Backend search for Northwind. Add Dana Whitfield, call her Friday.”"),
+          h("li", null, h("b", null, "Drop a list on the Stoa page."), " A CSV of leads or candidates. Nothing is written until you press Apply."),
+          h("li", null, h("b", null, "Add one by hand."), " + New at the top of the Stoa page."),
+          h("li", null, h("b", null, "Map a market."), " “We sell a fraud prevention tool to fintechs. Who should we go after?” One press puts a company from the map in your pipeline."))),
+      h(Step, { n: 3, step: by.keys }, h(Keys, { keys: data.keys || [], say: props.say })),
+      h(Step, { n: 4, step: by.notes }, h(Notes, { notes: data.notes, say: props.say, refresh: props.refresh })),
+      h(Step, { n: 5, step: by.slack },
+        h("p", { className: "stoa-p" }, data.slack ? "Hermes is in your Slack. Records post as cards whose buttons move the pipeline, and !gtm shows the board. Try !gtm map."
+          : "Slack is connected in Hermes, not in Stoa. Open Channels, choose Slack and follow its steps. Once Hermes is in your Slack there is nothing more to do: records post as cards whose buttons move the pipeline, and !gtm shows the board."),
+        h("div", { className: "stoa-btns" }, h(Go, { to: "/channels", kind: data.slack ? "" : "primary", title: "The dashboard's own page for messaging platforms" }, "Open Channels"))),
+      h(Step, { n: 6, step: by.sweep }, h(Jobs, { jobs: data.automations, autonomy: data.autonomy, say: props.say, refresh: props.refresh })));
+  }
+
+  // -- what the desk holds ------------------------------------------------------------------------
+  function Holds(props) {
+    var o = props.overview, t = o.totals, s = o.spend;
+    return h(React.Fragment, null,
+      h(Section, { title: "On the desk", note: o.pipelines.length > 1 ? plural(o.pipelines.length, "pipeline", "pipelines") : "" },
+        h("div", { className: "stoa-figs" },
+          h(Fig, { n: t.records, label: t.records === 1 ? "record" : "records", sub: t.open + " open · " + t.won + " won · " + t.lost + " lost" }),
+          h(Fig, { n: t.people, label: t.people === 1 ? "person" : "people", sub: "named on those records" }),
+          h(Fig, { n: t.maps, label: t.maps === 1 ? "market map" : "market maps", sub: o.tour ? "not counted while sample data is on show" : plural(t.mapped, "company", "companies") + " mapped · " + t.from_maps + " in the pipeline" }),
+          h(Fig, { n: t.activities, label: "log entries", sub: t.lists_waiting ? plural(t.lists_waiting, "list", "lists") + " waiting for review" : "calls, emails, notes and moves" }))),
+      h(Section, { title: "This month", note: "paid work, for " + new Date(o.month + "-15T12:00:00").toLocaleDateString(undefined, { month: "long", year: "numeric" }) },
+        h("div", { className: "stoa-figs" },
+          h(Fig, { n: s.usd_month === null ? "–" : usd(s.usd_month), label: "Hermes's work on maps",
+            sub: s.usd_month === null ? (s.runs ? "the model in use has no price Hermes knows" : "nothing counted yet") : "Hermes's own estimate, not an invoice · " + usd(s.usd) + " in all" }),
+          h(Fig, { n: s.lookups_month, label: "People Data Labs lookups", sub: s.lookup_cap ? "of the " + s.lookup_cap + " a month allowed" : "no monthly cap set" }),
+          h(Fig, { n: s.searches_month, label: "Exa searches", sub: "made through Stoa for a map" }))));
+  }
+
+  function Pipelines(props) {
+    var rows = props.overview.pipelines;
+    return h(Section, { title: rows.length > 1 ? "Pipelines" : "Pipeline" },
+      h("div", { className: "stoa-scroll" }, h("table", { className: "stoa-table" },
+        h("thead", null, h("tr", null, ["Name", "Stages", "Open", "Won", "Lost", "People", "File", "Daily copies"].map(function (label, i) {
+          return h("th", { key: label, "data-num": i >= 2 && i <= 5 ? "1" : "0" }, label);
+        }))),
+        h("tbody", null, rows.map(function (row) {
+          return h("tr", { key: row.id },
+            h("td", null, h("b", null, row.name), row.name !== row.playbook ? h("small", null, row.playbook) : null),
+            h("td", null, h("small", null, row.stages.join(" → "))),
+            h("td", { "data-num": "1" }, row.open), h("td", { "data-num": "1" }, row.won), h("td", { "data-num": "1" }, row.lost), h("td", { "data-num": "1" }, row.people),
+            h("td", null, h("code", null, row.file), h("small", null, size(row.size))),
+            h("td", null, row.backups.count ? h("small", null, row.backups.count + ", newest " + day(row.backups.newest)) : h("small", null, "none yet")));
+        })))));
+  }
+
+  function Maps(props) {
+    var o = props.overview, rows = o.maps;
+    var limitWords = function (limits) {
+      var out = [];
+      if (limits.companies) out.push(limits.companies + " companies");
+      if (limits.budget) out.push(usd(limits.budget) + " a month");
+      if (limits.lookups) out.push(plural(limits.lookups, "lookup", "lookups") + " a month");
+      if (limits.searches) out.push(plural(limits.searches, "search", "searches") + " a month");
+      return out.join(" · ") || "none";
+    };
+    return h(Section, { title: "Market maps", note: rows.length ? "limits are set on the Stoa page, under Map facts" : "" },
+      o.tour ? h("p", { className: "stoa-p" }, "Sample data is on show, so your own maps are not listed. Leave the tour to see them.")
+        : !rows.length ? h("p", { className: "stoa-p" }, "No map yet. In a Hermes chat, or on the Stoa page's Market map tab, say what you sell and who you are after; Hermes researches it and saves the map.")
+        : h("div", { className: "stoa-scroll" }, h("table", { className: "stoa-table" },
+          h("thead", null, h("tr", null, ["Map", "Companies", "In pipeline", "Buyers named", "Hermes's work", "This month", "Lookups", "Searches", "Limits"].map(function (label, i) {
+            return h("th", { key: label, "data-num": i >= 1 && i <= 7 ? "1" : "0" }, label);
           }))),
-      h("div", { className: "stoa-foot" },
-        open && deal.advance ? h(Btn, { kind: "primary", disabled: busy, onClick: function () { act({ verb: "advance", extra: deal.stage }); } }, deal.advance + "  →") : null,
-        open ? h("select", { className: "stoa-select", value: "", disabled: busy, onChange: function (e) { if (e.target.value !== "") act({ verb: "lost", extra: e.target.value }); } },
-          [h("option", { key: "x", value: "" }, pb.lost.label + "…")].concat(pb.lost.reasons.map(function (r, i) { return h("option", { key: i, value: String(i) }, r); }))) : null,
-        open ? h(Btn, { kind: "ghost", disabled: busy, title: "Hide from the quiet list for a week", onClick: function () { act({ verb: "snooze7" }); } }, "Snooze") : null,
-        open && s.integrations.enrich && !(deal.fields || {}).enriched ? h(Btn, { kind: "ghost", disabled: busy, title: "People Data Labs lookup (uses one credit)", onClick: function () { act({ verb: "enrich" }); } }, "Enrich") : null,
-        !open ? h(Btn, { kind: "primary", disabled: busy, onClick: function () { act({ verb: "reopen" }); } }, "Reopen") : null));
+          h("tbody", null, rows.map(function (row) {
+            return h("tr", { key: row.pipeline + ":" + row.id },
+              h("td", null, h("b", null, row.name), h("small", null, (o.pipelines.length > 1 ? row.pipeline + " · " : "") + plural(row.segments, "segment", "segments") + (row.updated ? " · changed " + day(row.updated) : ""))),
+              h("td", { "data-num": "1" }, row.companies), h("td", { "data-num": "1" }, row.in_pipeline), h("td", { "data-num": "1" }, row.buyers),
+              h("td", { "data-num": "1", title: plural(row.runs, "turn", "turns") + " counted" }, row.runs ? (row.usd === null ? "no price" : usd(row.usd)) : "–"),
+              h("td", { "data-num": "1" }, row.runs && row.usd_month !== null ? usd(row.usd_month) : "–"),
+              h("td", { "data-num": "1" }, row.lookups), h("td", { "data-num": "1" }, row.searches),
+              h("td", null, h("small", null, limitWords(row.limits))));
+          })))));
   }
 
-  function TargetDrawer(props) {
-    var c = props.target, pb = props.state.playbook;
+  function Rules(props) {
+    return h(Section, { title: "Rules in force", note: "from the plugin's settings" },
+      h("dl", { className: "stoa-dl" }, props.data.rules.map(function (rule) {
+        return h(React.Fragment, { key: rule.label }, h("dt", null, rule.label), h("dd", null, rule.value));
+      })));
+  }
+
+  function Data(props) {
+    var data = props.data, d = data.data, o = props.overview;
     var _b = useState(false), busy = _b[0], setBusy = _b[1];
-    var people = c.people || [], reqs = c.requirements || [];
-    function go(verb) {
-      setBusy(true);
-      post("/target/" + encodeURIComponent(c.id) + "/" + verb, {}).then(function (r) {
-        if (verb === "track") props.say(!r.ok ? (r.notice || "Could not add it.") : people.length ? c.company + " added, with " + people[0].name + " as the contact." : c.company + " added. Hermes will find the buyer.");
-        else props.say(c.company + " dismissed.");
-        props.close(); return props.refresh().then(function () { if (verb === "track" && r.deal) props.openDeal(r.deal); });
-      }).catch(function (e) { props.say(String(e && e.message || e)); setBusy(false); });
+    function run(promise) { setBusy(true); return promise.catch(function (e) { props.say("Stoa could not do that: " + why(e)); }).then(function () { setBusy(false); }); }
+    function tour(action) {
+      return run(post("/tour", { action: action }).then(function (r) {
+        props.say(action === "leave" ? "Back on your own desk." : (r.removed || 0) + " sample records removed from your desk.");
+        return props.refresh();
+      }));
     }
-    function web(url) { return /^https?:\/\//.test(url) ? url : "https://" + url; }
-    var facts = [["Segment", c.segment], ["Also fits", c.also], ["Uses today", c.uses], ["Size", c.size], ["Location", c.location], ["Website", c.domain],
-      ["Signal", c.signal]].filter(function (p) { return p[1]; });
-    return h(Shell, { close: props.close, label: c.company },
-      h("header", null, h("div", { className: "stoa-eyebrow" }, "Fit", h(Fit, { fit: c.fit }), c.status === "tracked" ? h(Chip, { tone: "grad" }, "in pipeline") : null),
-        h("h3", null, c.company), h("p", null, [c.size, c.location].filter(Boolean).join(" · ") || " ")),
-      h("div", { className: "stoa-body" },
-        c.why ? h("div", { className: "stoa-sec" }, h("label", null, "Why it fits"), h("p", { className: "stoa-quote" }, "“" + c.why + "”")) : null,
-        h("div", { className: "stoa-facts" }, facts.map(function (p) {
-          return h("div", { key: p[0] }, h("small", null, p[0]), h("span", null, p[0] === "Website" ? h("a", { href: web(p[1]), target: "_blank", rel: "noreferrer" }, p[1]) : p[1]));
-        })),
-        reqs.length ? h("div", { className: "stoa-sec" }, h("label", null, "Requirements"), reqs.map(function (r, i) {
-          return h("div", { className: "stoa-check", "data-on": r.shown ? "1" : "0", key: i }, h("i", null, r.shown ? "■" : "□"),
-            h("div", null, h("span", null, r.label), r.evidence ? h("small", null, r.evidence) : null));
-        })) : null,
-        people.length ? h("div", { className: "stoa-sec" }, h("label", null, "Buyers"), people.map(function (p, i) {
-          return h("div", { className: "stoa-check", "data-on": "1", key: i }, h("i", null, i + 1),
-            h("div", null, h("span", null, p.name + (p.title ? " · " + p.title : "")), p.why ? h("small", null, p.why) : null,
-              p.linkedin ? h("small", null, h("a", { href: web(p.linkedin), target: "_blank", rel: "noreferrer" }, "LinkedIn")) : null));
-        })) : null,
-        c.source ? h("div", { className: "stoa-sec" }, h("label", null, "Evidence"),
-          /^https?:\/\//.test(c.source) ? h("a", { href: c.source, target: "_blank", rel: "noreferrer", style: { wordBreak: "break-all" } }, c.source) : h("span", null, c.source)) : null,
-        c.status === "tracked" ? null : h("div", { className: "stoa-note" }, "Enters at ", h("b", null, pb.stages[0].label),
-          people.length ? ", with " + people[0].name + " as the contact." : ". Hermes finds the buyer.")),
-      h("div", { className: "stoa-foot" },
-        c.status === "tracked"
-          ? h(Btn, { kind: "primary", onClick: function () { props.close(); if (c.deal) props.openDeal(c.deal); } }, "Open in pipeline  →")
-          : [h(Btn, { key: "t", kind: "primary", disabled: busy, onClick: function () { go("track"); } }, "Add to pipeline  →"),
-            h(Btn, { key: "d", kind: "ghost", disabled: busy, onClick: function () { go("dismiss"); } }, "Not a fit")]));
+    return h(Section, { title: "Your data" },
+      h("dl", { className: "stoa-dl" },
+        h("dt", null, "Where it is kept"), h("dd", null, "SQLite files on the machine Hermes runs on, in ", h("code", null, o.folder), " (" + size(o.totals.size) + " in all). Nothing is kept anywhere else."),
+        h("dt", null, "Daily copies"), h("dd", null, d.backups && d.backups.count ? d.backups.count + " kept in " : "None yet. They are kept in ", h("code", null, (d.backups && d.backups.folder) || ""), d.backups && d.backups.newest ? ", the newest from " + day(d.backups.newest) + "." : "."),
+        h("dt", null, "Exports and saved maps"), h("dd", null, h("code", null, d.exports)),
+        h("dt", null, "History"), h("dd", null, plural(d.ledger, "change", "changes") + " on the ledger, which Undo works from" + (d.archived ? "; " + plural(d.archived, "record", "records") + " taken off the desk and archived, not erased" : "") + "."),
+        data.tour ? h(React.Fragment, null, h("dt", null, "Sample data"), h("dd", null, "On show: " + data.tour.title + ". It lives in a file of its own, and your desk comes back when you leave.")) : null,
+        d.samples && !data.tour ? h(React.Fragment, null, h("dt", null, "Sample records"), h("dd", null, d.samples + " sample records are mixed into your own desk. An earlier version of Stoa put them there.")) : null),
+      h("div", { className: "stoa-btns" },
+        h(Btn, { disabled: busy, title: "Every record on the pipeline, as a CSV file saved by your browser", onClick: function () { run(get("/export").then(function (f) { saveFile(f.filename, f.csv, "text/csv"); props.say(plural(f.rows, "record", "records") + " exported."); })); } }, "Export the pipeline as CSV"),
+        data.tour ? h(Btn, { kind: "primary", disabled: busy, onClick: function () { tour("leave"); } }, "Leave the tour") : null,
+        d.samples && !data.tour ? h(Btn, { disabled: busy, onClick: function () { tour("tidy"); } }, "Remove the sample records") : null));
   }
 
-  function NewDrawer(props) {
-    var pb = props.state.playbook;
-    var _f = useState({ name: "", company: "", group: "", value: "", stage: pb.stages[0].id, next_step: "" }), f = _f[0], setF = _f[1];
-    var _b = useState(false), busy = _b[0], setBusy = _b[1];
-    function field(key, label, extra) {
-      return h("div", { className: extra && extra.wide ? "stoa-wide" : "" , key: key}, h("div", { className: "stoa-sec" }, h("label", null, label),
-        h("input", Object.assign({ className: "stoa-input", style: { width: "100%" }, value: f[key], onChange: function (e) { var n = Object.assign({}, f); n[key] = e.target.value; setF(n); } }, (extra && extra.input) || {}))));
-    }
-    function save() {
-      setBusy(true);
-      post("/deal", { name: f.name.trim(), company: f.company, group: f.group, value: f.value ? Number(f.value) : undefined, stage: f.stage, next_step: f.next_step })
-        .then(function (r) { props.say(r.exists ? "Already on the desk." : f.name.trim() + " added."); props.close(); return props.refresh().then(function () { props.openDeal(r.deal.id); }); })
-        .catch(function (e) { props.say(String(e && e.message || e)); setBusy(false); });
-    }
-    return h(Shell, { close: props.close, label: "New record" },
-      h("header", null, h("div", { className: "stoa-eyebrow" }, "New " + pb.terms.deal), h("h3", null, f.name || "New"), h("p", null, f.company || " ")),
-      h("div", { className: "stoa-body" }, h("div", { className: "stoa-form" },
-        field("name", "Name", { wide: true, input: { autoFocus: true, placeholder: "Dana Whitfield" } }),
-        field("company", pb.terms.company), field("group", cap(pb.terms.group)),
-        field("value", pb.terms.value, { input: { type: "number", min: 0, placeholder: "0" } }),
-        h("div", { key: "stage" }, h("div", { className: "stoa-sec" }, h("label", null, "Stage"),
-          h("select", { className: "stoa-select", style: { width: "100%" }, value: f.stage, onChange: function (e) { setF(Object.assign({}, f, { stage: e.target.value })); } },
-            pb.stages.map(function (st) { return h("option", { key: st.id, value: st.id }, st.label); })))),
-        field("next_step", "Next step", { wide: true, input: { placeholder: "Next action" } }))),
-      h("div", { className: "stoa-foot" }, h(Btn, { kind: "primary", disabled: busy || !f.name.trim(), onClick: save }, "Add  →")));
-  }
-
-  // -- page -------------------------------------------------------------------------------------
+  // -- the page -----------------------------------------------------------------------------------
   function StoaPage() {
-    var _s = useState(null), state = _s[0], setState = _s[1];
+    var _d = useState(null), data = _d[0], setData = _d[1];
+    var _o = useState(null), overview = _o[0], setOverview = _o[1];
     var _e = useState(""), error = _e[0], setError = _e[1];
-    var _v = useState("pipeline"), view = _v[0], setView = _v[1];
-    var _q = useState(""), query = _q[0], setQuery = _q[1];
-    var _m = useState(""), marketId = _m[0], setMarketId = _m[1];
-    var _p = useState(null), panel = _p[0], setPanel = _p[1];
     var _t = useState(""), toast = _t[0], setToast = _t[1];
-    var _mv = useState({}), moved = _mv[0], setMoved = _mv[1];
-    var _l = useState(true), live = _l[0], setLive = _l[1];
-    var stages = useRef(null);
     var timer = useRef(null);
-
     var refresh = useCallback(function () {
-      return get("/state").then(function (next) {
-        var now = {}, changed = {};
-        next.deals.forEach(function (d) { now[d.id] = d.stage; if (stages.current && stages.current[d.id] !== d.stage) changed[d.id] = true; });
-        stages.current = now;
-        if (Object.keys(changed).length) { setMoved(changed); setTimeout(function () { setMoved({}); }, 1800); }
-        setState(next); setError(""); setLive(true);
-      }).catch(function (e) { setError(String(e && e.message || e)); setLive(false); });
+      return Promise.all([get("/setup"), get("/overview")]).then(function (both) { setData(both[0]); setOverview(both[1]); setError(""); })
+        .catch(function (e) { setError(why(e)); });
     }, []);
     useEffect(function () {
       refresh();
       var id = setInterval(function () { if (!document.hidden) refresh(); }, POLL_MS);
-      return function () { clearInterval(id); };
+      return function () { clearInterval(id); clearTimeout(timer.current); };
     }, []);
     var say = useCallback(function (text) {
-      setToast(text); clearTimeout(timer.current); timer.current = setTimeout(function () { setToast(""); }, 4200);
+      setToast(text); clearTimeout(timer.current); timer.current = setTimeout(function () { setToast(""); }, 5200);
     }, []);
-    var openDeal = useCallback(function (id) { setPanel({ kind: "deal", id: id }); }, []);
-    var close = useCallback(function () { setPanel(null); }, []);
 
     var body;
-    if (!state) {
-      body = h("div", { className: "stoa-panel stoa-blank" }, h("h3", null, error ? "No answer" : "Opening…"),
-        error ? h("p", null, error) : null);
+    if (!data || !overview) {
+      body = h("div", { className: "stoa-blank" }, h("h3", null, error ? "The desk is not answering" : "Opening…"),
+        error ? h("p", { className: "stoa-p" }, error + ". If Stoa was just installed or updated, restart the gateway (hermes gateway restart) and reload this page.") : null);
     } else {
-      var tabs = [["pipeline", "Pipeline", state.totals.open], ["market", "Market map", state.totals.mapped], ["activity", "Activity", null], ["setup", "Setup", null]];
       body = h(React.Fragment, null,
-        state.tour ? h("div", { className: "stoa-note stoa-tour", role: "status" },
-          h("span", null, h("b", null, "Sample data"), " · " + state.tour.title + ". Everyone on it is made up, and your own desk is untouched."),
-          h(Btn, { onClick: function () { post("/tour", { action: "leave" }).then(function () { setPanel(null); say("Back on your own desk."); return refresh(); }).catch(function (e) { say(String(e && e.message || e)); }); } }, "Leave the tour")) : null,
-        h(Hero, { state: state, live: live }),
-        h(Attention, { state: state, open: openDeal }),
-        h("div", { className: "stoa-bar" },
-          h("div", { className: "stoa-seg", role: "tablist" }, tabs.map(function (t) {
-            return h("button", { key: t[0], role: "tab", "data-on": view === t[0] ? "1" : "0", onClick: function () { setView(t[0]); } }, t[1], t[2] !== null ? h("i", null, t[2]) : null);
-          })),
-          view === "market" && state.markets.length > 1 ? h("select", { className: "stoa-select", value: marketId || state.markets[0].id, onChange: function (e) { setMarketId(e.target.value); } },
-            state.markets.map(function (m) { return h("option", { key: m.id, value: m.id }, m.name); })) : null,
-          h("span", { className: "stoa-grow" }),
-          view !== "activity" && view !== "setup" ? h("input", { className: "stoa-input", style: { width: 220 }, placeholder: "Filter…", value: query, onChange: function (e) { setQuery(e.target.value); } }) : null,
-          h(Btn, { kind: "primary", onClick: function () { setPanel({ kind: "new" }); } }, "New")),
-        view === "pipeline" ? h(Board, { state: state, query: query, open: openDeal, moved: moved }) : null,
-        view === "market" ? h(MarketView, { state: state, query: query, marketId: marketId, say: say, selected: panel && panel.kind === "target" ? panel.target.id : "",
-          openTarget: function (c) { setPanel({ kind: "target", target: c }); } }) : null,
-        view === "activity" ? h(Feed, { state: state, open: openDeal }) : null,
-        view === "setup" ? h(SetupView, { stamp: state.stamp, touring: state.tour ? state.tour.example : "", refresh: refresh, say: say }) : null,
-        panel && panel.kind === "deal" ? h(DealDrawer, { key: panel.id, id: panel.id, state: state, stamp: state.stamp, close: close, refresh: refresh, say: say }) : null,
-        panel && panel.kind === "target" ? h(TargetDrawer, { key: panel.target.id, target: panel.target, state: state, close: close, refresh: refresh, say: say, openDeal: openDeal }) : null,
-        panel && panel.kind === "new" ? h(NewDrawer, { state: state, close: close, refresh: refresh, say: say, openDeal: openDeal }) : null);
+        error ? h("div", { className: "stoa-note", role: "status" }, "The last check did not get through (" + error + "). What is below may be a little old.") : null,
+        data.tour ? h("div", { className: "stoa-note", role: "status" }, h("span", null, h("b", null, "Sample data is on show"), " · " + data.tour.title + ". Everyone on it is made up, and your own desk is untouched."),
+          h(Btn, { onClick: function () { post("/tour", { action: "leave" }).then(function () { say("Back on your own desk."); return refresh(); }).catch(function (e) { say(why(e)); }); } }, "Leave the tour")) : null,
+        (data.problems || []).length ? h("div", { className: "stoa-note", "data-tone": "bad", role: "alert" },
+          h("span", null, h("b", null, "Some of this could not be read."), " " + data.problems.join(" · "))) : null,
+        h(Holds, { overview: overview }),
+        h(Steps, { data: data, say: say, refresh: refresh }),
+        h(Pipelines, { overview: overview }),
+        h(Maps, { overview: overview }),
+        h(Rules, { data: data }),
+        h(Data, { data: data, overview: overview, say: say, refresh: refresh }));
     }
     return h("div", { className: "stoa" },      // colours and type come from the dashboard's own theme
-      h("div", { className: "stoa-aurora", "aria-hidden": "true" }, h("i"), h("i"), h("i"), h("i")),
+      h("header", { className: "stoa-head" },
+        h("div", null,
+          h("div", { className: "stoa-eyebrow" }, "Stoa" + (data ? " · " + data.version : "")),
+          h("h2", { className: "stoa-title" }, "Setup and status"),
+          h("p", { className: "stoa-sub" }, "The desk is worked in the Hermes Desktop app or Webapp (Stoa in the sidebar), in Slack, and in any chat with /gtm. This tab is where you set it up and see what it holds."))),
       body,
       toast ? h("div", { className: "stoa-toast", role: "status" }, toast) : null);
   }

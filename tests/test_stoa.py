@@ -3291,6 +3291,69 @@ class DashboardApiTests(unittest.TestCase):
         shown = self.api.deal(dana["id"])
         self.assertEqual((shown["phone"], shown["fields"]["location"], shown["source"]), ("+1 415 555 0142", "Austin, TX", "Referral"))
 
+    def test_the_dashboard_tab_is_given_the_desk_in_totals_and_no_record(self):
+        fixture.load_market(self.desk)
+        market = self.desk.markets.list_markets()[0]
+        self.desk.markets.set_limits(market["id"], {"companies": 40})
+        self.desk.store.bump("map:%s:runs" % market["id"], 2)
+        self.desk.store.bump("map:%s:calls" % market["id"], 9)
+        self.desk.store.bump("map:%s:cost" % market["id"], 2_400_000)
+        self.desk.store.bump("map:%s:cost:%s" % (market["id"], dt.date.today().isoformat()[:7]), 1_100_000)
+        seen = self.api.overview()
+        tally = self.desk.own_store.tally()
+        self.assertEqual((seen["totals"]["open"], seen["totals"]["won"], seen["totals"]["records"]),
+                         (tally["open"], tally["won"], tally["open"] + tally["won"] + tally["lost"]))
+        self.assertEqual((len(seen["pipelines"]), seen["pipelines"][0]["file"], seen["pipelines"][0]["open"]), (1, "desk.db", tally["open"]))
+        only = seen["maps"][0]
+        self.assertEqual((only["name"], only["companies"], only["usd"], only["usd_month"], only["limits"]),
+                         (market["name"], len(fixture.COMPANIES), 2.4, 1.1, {"companies": 40}))
+        self.assertEqual((seen["totals"]["mapped"], seen["spend"]["usd_month"], seen["spend"]["usd"], seen["spend"]["lookup_cap"]),
+                         (len(fixture.COMPANIES), 1.1, 2.4, 50))
+        told = json.dumps(seen)      # totals and the names of pipelines and maps: nobody on the desk and no company on a map is in it
+        for private in ("Dana Whitfield", "Meridian Freight"):
+            self.assertNotIn(private, told)
+        self.api.tour({"action": "start", "example": "recruiting"})      # on a tour it still reports the person's own desk
+        on_tour = self.api.overview()
+        self.assertEqual((on_tour["tour"], on_tour["maps"], on_tour["totals"]["open"]), (True, [], tally["open"]))
+
+    def test_two_requests_at_once_on_a_fresh_dashboard_both_get_the_whole_plugin(self):
+        import threading, time
+        spec = importlib.util.spec_from_file_location("stoa_dash_api_race", ROOT / "dashboard" / "plugin_api.py")
+        api = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(api)
+        api.PACKAGE = "stoa_dash_race_pkg"
+        sys.modules.pop(api.PACKAGE, None)
+        self.addCleanup(lambda: [sys.modules.pop(name, None) for name in list(sys.modules) if name.startswith("stoa_dash_race_pkg")])
+        real = importlib.util.spec_from_file_location
+
+        def slow(*args, **kwargs):      # the first request is still running the package when the second arrives
+            found = real(*args, **kwargs)
+            run = found.loader.exec_module
+            found.loader.exec_module = lambda module: (time.sleep(0.15), run(module))[1]
+            return found
+
+        api.importlib.util.spec_from_file_location = slow
+        self.addCleanup(lambda: setattr(api.importlib.util, "spec_from_file_location", real))
+        seen = []
+        threads = [threading.Thread(target=lambda: seen.append(hasattr(api._package(), "_home"))) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+            time.sleep(0.03)
+        for thread in threads:
+            thread.join()
+        self.assertEqual(seen, [True, True])
+
+    def test_the_dashboard_tab_is_setup_and_status_and_does_not_mirror_the_desk(self):
+        page = (ROOT / "dashboard" / "dist" / "index.js").read_text()
+        for used in ('"/setup"', '"/overview"', '"/key/test"', '"/notes/check"', '"/notes/folder"', '"/notes/look"', '"/autonomy"', '"/tour"', '"/export"'):
+            self.assertIn(used, page)
+        for gone in ('"/state"', '"/deal', '"/targets"', '"/target/', '"/company"', '"/approvals"'):      # no pipeline, no map, no record
+            self.assertNotIn(gone, page)
+        self.assertNotIn("/api/env", page)      # a key is typed on the dashboard's own Keys page, never here
+        self.assertNotIn("type: \"password\"", page)
+        manifest = json.loads((ROOT / "dashboard" / "manifest.json").read_text())
+        self.assertIn("set-up", manifest["description"].lower().replace("setup", "set-up"))
+
     def test_the_page_is_handed_the_artwork_as_grids_of_dots(self):
         art = self.api.art()
         self.assertEqual(sorted(art), ["head", "v", "welcome"])      # not the names 0.20 used: a page not yet reloaded draws nothing, not noise

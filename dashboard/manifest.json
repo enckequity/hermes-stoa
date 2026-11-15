@@ -1,10 +1,13 @@
 {
   "name": "stoa",
   "label": "Stoa",
-  "description": "The go-to-market desk: market maps, the pipeline board and live activity.",
-  "icon": "Globe",
-  "version": "0.15.0",
-  "tab": { "path": "/stoa", "position": "after:sessions" },
+  "description": "Setup and status for the Stoa desk: what is set up, how to set up the rest, and what the desk holds.",
+  "icon": "Settings",
+  "version": "0.22.0",
+  "tab": {
+    "path": "/stoa",
+    "position": "after:sessions"
+  },
   "entry": "dist/index.js",
   "css": "dist/style.css",
   "api": "plugin_api.py"

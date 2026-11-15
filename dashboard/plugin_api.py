@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -33,15 +34,31 @@ PACKAGE = "stoa_dashboard_pkg"
 _own_desks: dict = {}
 
 
+_package_lock = threading.Lock()
+_package_ready = False
+
+
 def _package():
-    """The plugin's own modules, imported as a private package (this file is loaded standalone)."""
-    if PACKAGE not in sys.modules:
-        spec = importlib.util.spec_from_file_location(PACKAGE, PLUGIN_DIR / "__init__.py",
-                                                      submodule_search_locations=[str(PLUGIN_DIR)])
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[PACKAGE] = module
-        spec.loader.exec_module(module)
-    return sys.modules[PACKAGE]
+    """The plugin's own modules, imported as a private package (this file is loaded standalone).
+
+    One request at a time: the package has to be in ``sys.modules`` while it is being run (its own relative imports
+    need it there), so a second request arriving in that moment would be handed a module with nothing in it yet (seen
+    on a real run: the tab's first two requests arrive together). If running it fails, it is taken out again, so the
+    next request tries afresh instead of finding the half-made one."""
+    global _package_ready
+    with _package_lock:
+        if not _package_ready or PACKAGE not in sys.modules:
+            spec = importlib.util.spec_from_file_location(PACKAGE, PLUGIN_DIR / "__init__.py",
+                                                          submodule_search_locations=[str(PLUGIN_DIR)])
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[PACKAGE] = module
+            try:
+                spec.loader.exec_module(module)
+            except BaseException:
+                sys.modules.pop(PACKAGE, None)
+                raise
+            _package_ready = True
+        return sys.modules[PACKAGE]
 
 
 def _settings(key: str, default: Any = None) -> Any:
@@ -586,6 +603,12 @@ def setup() -> dict:
         import logging
         logging.getLogger("hermes.plugins.stoa").error("stoa: the Setup tab could not be put together: %s", exc, exc_info=True)
         raise HTTPException(500, "Setup could not be put together: %s: %s" % (type(exc).__name__, str(exc)[:300]))
+
+
+@router.get("/overview")
+def overview() -> dict:
+    """The desk in totals, for the dashboard tab: every pipeline and every market map, counts and names only."""
+    return desk().overview()
 
 
 @router.post("/notes/check")

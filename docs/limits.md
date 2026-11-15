@@ -8,9 +8,10 @@
   adds them together except "what needs me today". `/gtm` and `!gtm`, and a scheduled job that does
   not name a pipeline, are about the first one. A market map drawn inside a chat shows only while
   the page is on that map's pipeline.
-- **The web dashboard tab is frozen.** It shows the pipeline, the market map, activity and setup as
-  it did in 0.13. Approvals, cash, and searches or accounts are on the Stoa page in the Desktop app
-  and the Webapp, and that is where new work goes.
+- **The web dashboard tab is set-up and status only.** It shows what is set up, how to set up the
+  rest, and the desk in totals. It has no pipeline board, no map and no record: those are on the
+  Stoa page in the Desktop app and the Webapp. Its totals name pipelines and maps, never a person or
+  a company.
 - A search or account that is on hold is marked so and sorted last, but its records still show up
   as due or quiet. Snooze them if you want them out of the way.
 - A person is kept once as a contact, but a record's own person is not: the same candidate in two
@@ -51,7 +52,7 @@
 - Setup knows an automation is switched on by its name among Hermes's scheduled jobs. Rename the job
   in Hermes and Setup shows that automation as off. Switching one on still happens in a chat.
   Today, approvals, undo, people and companies are in the Desktop app and Webapp page; the web
-  dashboard tab has the pipeline, the map, the log and Setup.
+  dashboard tab has set-up and totals.
 - The autonomy setting governs scheduled jobs. In a chat the agent can still change something you
   did not ask for; the skill tells it to propose instead, and whatever it does can be taken back.
 - Undo covers changes made since 0.12, when the ledger began. Changes to a market map, notes on
@@ -71,8 +72,8 @@
 - The forecast is arithmetic, not a prediction: stage odds times amounts, by the dates you set.
 - On a tour, what you do is thrown away when you leave, Slack cards posted from it stop working,
   lookups are off, and scheduled jobs do nothing until it ends.
-- The model picked under the dock is kept per computer and applies to the page's own conversation
-  only: Slack, scheduled jobs and other chats stay on Hermes's default. The list shows a price where
+- The models picked under the dock and for map research are kept per computer and apply to the
+  page's own two conversations only: Slack, scheduled jobs and other chats stay on Hermes's default. The list shows a price where
   Hermes has one for that provider, which it does not for every provider.
 - The dock on the page runs a turn of your agent's model, the same as typing in a chat. It takes
   CSV and small text files; a PDF, an image or a spreadsheet goes through the full chat, which is

@@ -156,9 +156,13 @@ In the Hermes Desktop app and the Webapp, Stoa sits beside the conversation.
   `/gtm today`) is run by the app's own chat box, so the page opens a new chat with it typed
   and leaves it for you to send.
 - **Pick the model, and start again when it gets long.** Under the dock is the model the desk's
-  conversation runs on. Press it for the models Hermes can use and pick one: a cheaper model is
-  enough for most desk work, and the strongest is worth keeping for research such as a new market
-  map. The pick is kept on that computer and goes to every conversation the page starts. Changing
+  conversation runs on. Press it for every model Hermes can use and pick one. The pick is kept on
+  that computer and goes to every conversation the talk box starts. Map research has a model of its
+  own: on the Market map tab, **Research:** beside **Map facts** sets the model Hermes uses to start
+  a map, grow it and fill in what is missing, in a conversation of its own called **Stoa map
+  research**. The two are independent, so the desk can run on a small model while maps are
+  researched on a large one, or the other way round. Both lists are Hermes's own and nothing is
+  left out. Changing
   the model of a long conversation makes Hermes re-read all of it at full price once, so Hermes asks
   first, and the page offers **Start a new conversation on it** instead. **New conversation** does
   the same at any time: Hermes re-reads the whole conversation at every step, so a long one costs

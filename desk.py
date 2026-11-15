@@ -1026,6 +1026,64 @@ class Desk:
                 "lookup": own.enrich},
         }
 
+    def overview(self) -> dict:
+        """Everything the desk holds, in totals, for the dashboard tab: each pipeline, each market map with what it has
+        cost, and the month's paid lookups and searches. Counts and names only; no record, person or company is in it.
+        It reports the person's own desk: while sample data is on show the maps are left out, since those on show are
+        the tour's."""
+        month, tour = st.today()[:7], self.tour()
+        pipes, maps = [], []
+        total = dict.fromkeys(("records", "open", "won", "lost", "people", "activities", "maps", "mapped", "from_maps", "lists_waiting",
+                               "archived", "size"), 0)
+        spend = {"usd_month": 0.0, "usd": 0.0, "priced": False, "runs": 0, "lookups_month": 0, "searches_month": 0}
+        for entry in self.pipelines():
+            with self.on(entry["id"]):
+                tally = self.own_store.tally(demo.SOURCE)
+                try:
+                    size = (self.data_dir / self.own_file()).stat().st_size
+                except OSError:
+                    size = 0
+                own = self.own_playbook()
+                records = tally["open"] + tally["won"] + tally["lost"]
+                pipes.append({"id": entry["id"], "name": entry["name"], "playbook": own.title, "first": entry["first"],
+                              "stages": [stage["label"] for stage in own.stages] + [own.won["label"]],
+                              "records": records, "open": tally["open"], "won": tally["won"], "lost": tally["lost"],
+                              "people": tally["people"], "activities": tally["activities"], "maps": tally["maps"],
+                              "lists_waiting": tally["lists_waiting"], "file": self.own_file(), "size": size,
+                              "backups": self.backups()})
+                for name in ("open", "won", "lost", "people", "activities", "maps", "lists_waiting", "archived"):
+                    total[name] += tally[name]
+                total["records"] += records
+                total["size"] += size
+                spend["lookups_month"] = _int(self.own_store.meta_get("pdl_calls:" + month, "0"), 0, 0, 10 ** 9) + spend["lookups_month"]
+                if tour:
+                    continue
+                for market in self.markets.list_markets():
+                    facts = self.markets.facts(market["id"])
+                    if not facts.get("ok"):
+                        continue
+                    cost, on_it, limits = facts["cost"], facts["on_it"], facts["limits"]
+                    maps.append({"id": facts["id"], "name": facts["name"], "pipeline": entry["name"], "updated": facts["updated"],
+                                 "companies": on_it["companies"], "segments": on_it["segments"], "in_pipeline": on_it["in_pipeline"],
+                                 "buyers": on_it["buyers"], "sourced": on_it["sourced"],
+                                 "runs": cost["runs"], "usd": cost["usd"], "usd_month": cost["usd_month"] if cost["usd"] is not None else None,
+                                 "lookups": cost["lookups"], "searches": cost["searches"],
+                                 "limits": {name: value for name, value in limits.items() if value}})
+                    total["mapped"] += on_it["companies"]
+                    total["from_maps"] += on_it["in_pipeline"]
+                    spend["runs"] += cost["runs"]
+                    spend["searches_month"] += cost["searches_month"]
+                    if cost["usd"] is not None and cost["runs"]:
+                        spend["priced"] = True
+                        spend["usd"] += cost["usd"]
+                        spend["usd_month"] += cost["usd_month"]
+        cap = _int(self.setting("pdl_monthly_cap", 50), 50, 0, 10 ** 6)
+        return {"ok": True, "version": _version(), "month": month, "tour": bool(tour), "folder": str(self.data_dir),
+                "totals": total, "pipelines": pipes, "maps": maps,
+                "spend": {"usd": round(spend["usd"], 2) if spend["priced"] else None,
+                          "usd_month": round(spend["usd_month"], 2) if spend["priced"] else None, "runs": spend["runs"],
+                          "lookups_month": spend["lookups_month"], "lookup_cap": cap, "searches_month": spend["searches_month"]}}
+
     def flow(self, deals: Optional[list] = None, playbook: Optional[Playbook] = None) -> dict:
         """How records have moved through the playbook, for a Sankey diagram.
 
