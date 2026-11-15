@@ -150,9 +150,15 @@ def _sql_text(value: str) -> str:
     return re.sub(r"[^a-z0-9 .&+/-]", "", (value or "").lower()).strip()[:80]
 
 
+# The ranks People Data Labs gives a title (`job_title_levels`) that can say yes to a purchase. Its other ranks are
+# senior (a senior analyst, a senior engineer), entry, training and unpaid.
+PDL_DECIDERS = ("cxo", "owner", "partner", "vp", "director", "manager")
+
+
 def pdl_people(key: str, *, company: str = "", domain: str = "", titles: Optional[list] = None, limit: int = 3,
-               http: Callable = http_json) -> dict:
-    """People at one company whose title matches. Each person returned costs one PDL credit."""
+               deciders: bool = False, http: Callable = http_json) -> dict:
+    """People at one company whose title matches. Each person returned costs one PDL credit. With `deciders`, only
+    people People Data Labs ranks manager or above, so a buyer lookup is not answered with an analyst."""
     company, domain = _sql_text(company), _sql_text(domain)
     if not (company or domain):
         return {"ok": False, "error": "need the company name or its website domain"}
@@ -160,6 +166,8 @@ def pdl_people(key: str, *, company: str = "", domain: str = "", titles: Optiona
     wanted = [t for t in (_sql_text(t) for t in titles or []) if t][:6]
     if wanted:
         where.append("(" + " OR ".join("job_title LIKE '%%%s%%'" % t for t in wanted) + ")")
+    if deciders:
+        where.append("(" + " OR ".join("job_title_levels='%s'" % level for level in PDL_DECIDERS) + ")")
     sql = "SELECT * FROM person WHERE " + " AND ".join(where)
     status, body = http(PDL + "/person/search", headers={"X-Api-Key": key},
                         data={"sql": sql, "size": max(1, min(int(limit), 5)), "titlecase": True})

@@ -66,6 +66,7 @@ def _session() -> dict:
             "chat_id": get_session_env("HERMES_SESSION_CHAT_ID") or "",
             "thread_id": get_session_env("HERMES_SESSION_THREAD_ID") or "",
             "session_key": get_session_env("HERMES_SESSION_KEY") or "",
+            "session_id": get_session_env("HERMES_SESSION_ID") or "",
             "user_id": get_session_env("HERMES_SESSION_ACTOR_ID") or get_session_env("HERMES_SESSION_USER_ID") or "",
             "actor": get_session_env("HERMES_SESSION_ACTOR_NAME") or get_session_env("HERMES_SESSION_USER_NAME") or ""}
 
@@ -183,6 +184,15 @@ def register(ctx) -> None:
     desk.announce = _announce
     LIVE_DESKS.append(desk)
     del LIVE_DESKS[:-4]
+
+    # What a map costs Hermes to work on: Hermes reports each model call's token counts and the end of each turn,
+    # and the desk's meter counts them against the map the turn worked on. Counts only; no prompt or reply is read.
+    try:
+        ctx.register_hook("post_api_request", desk.usage.on_api)
+        ctx.register_hook("post_llm_call", desk.usage.on_turn_end)
+    except Exception as exc:      # an older Hermes without these hooks: the map still works, its cost just is not counted
+        import logging
+        logging.getLogger("hermes.plugins.stoa").info("stoa: model-call hooks are not available here (%s); map costs are not counted", exc)
 
     # -- tools ----------------------------------------------------------------------------------
     for schema, fn, emoji in (

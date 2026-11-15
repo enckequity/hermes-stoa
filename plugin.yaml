@@ -27,6 +27,12 @@ provides_tools:
   - gtm_invoice
   - gtm_group
 
+# Counts only: how many model calls and tokens a turn that worked on a market map used, so the map can show what it cost.
+# No prompt, reply or tool result is read or kept.
+provides_hooks:
+  - post_api_request
+  - post_llm_call
+
 config_schema:
   playbook:
     type: str

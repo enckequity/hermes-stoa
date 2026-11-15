@@ -24,6 +24,7 @@ from . import cards, demo, sources
 from . import store as st
 from .intake import Intake
 from .market import Markets
+from .usage import Meter
 from .playbook import DEFAULT, MOST_STAGES, SHAPES, Library, Playbook, PlaybookError
 
 log = logging.getLogger("hermes.plugins.stoa")
@@ -143,6 +144,7 @@ class Desk:
         self.home: Optional[Path] = None   # the Hermes profile this desk belongs to, when Hermes built it
         self.slack = None  # set by __init__ when the Slack half is wired
         self.jobs: Optional[Callable[[], list]] = None     # Hermes's scheduled jobs for this profile, read only; set by __init__
+        self.usage = Meter()                # what each map has cost Hermes to work on, counted from Hermes's own events
         self.announce: Callable[[], None] = lambda: None   # tells an open Desktop app or Webapp that the desk changed
         self.desktop_seen = 0.0     # when the Desktop/Webapp half last checked in (it does so while it is open)
         self.markets = Markets(self)

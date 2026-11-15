@@ -232,7 +232,102 @@ class Markets:
         if handler is None:
             return {"ok": False, "error": "unknown action '%s'" % action,
                     "actions": ["define", "list", "add", "show", "reading", "search", "people", "track", "dismiss", "post", "export"]}
-        return handler(args)
+        result = handler(args)
+        self._touch(args, session)
+        return result
+
+    def _touch(self, args: dict, session: Optional[dict]) -> None:
+        """Tell the meter which map this turn is working on, so the turn's cost is counted against it."""
+        meter, session_id = getattr(self.desk, "usage", None), (session or {}).get("session_id")
+        if meter is None or not session_id:
+            return
+        try:
+            market = self._market(args.get("market") or args.get("name"))
+            if market is None and args.get("target"):
+                target = self.target(str(args.get("target")))
+                market = self._market(target["market_id"]) if target else None
+            if market is not None:
+                meter.touch(session_id, self.store, market["id"])
+        except Exception:
+            pass
+
+    # -- what a map has on it, what it has cost, and the limits set on it -------------------------
+    @staticmethod
+    def _limits(market: dict) -> dict:
+        raw = market["detail"].get("limits") if isinstance(market["detail"].get("limits"), dict) else {}
+        out = {name: _whole(raw.get(name) or 0, 0, 0, 100000) for name in ("companies", "lookups", "searches")}
+        try:
+            out["budget"] = max(0.0, min(float(raw.get("budget") or 0), 100000.0))
+        except (TypeError, ValueError):
+            out["budget"] = 0.0
+        return out
+
+    def _count(self, market_id: str, name: str) -> int:
+        value = self.store.meta_get("map:%s:%s" % (market_id, name), "0")
+        return int(value) if str(value).lstrip("-").isdigit() else 0
+
+    def _over_budget(self, market: dict) -> str:
+        """Why Hermes should stop working on this map for now, or "" while it is inside the budget set for it."""
+        budget = self._limits(market)["budget"]
+        if not budget:
+            return ""          # no budget set: nothing to read
+        spent = self._count(market["id"], "cost:" + st.today()[:7]) / 1_000_000
+        if spent >= budget:
+            return ("This map has used the $%.2f set for Hermes's work on it this month ($%.2f so far). Stop working on it here and "
+                    "tell the person; they can raise the limit under Map facts." % (budget, spent))
+        return ""
+
+    def set_limits(self, ref: Any, body: dict) -> dict:
+        """The limits a person sets on one map: how many companies it may hold, how many paid lookups and searches a
+        month, and how much of Hermes's work a month. 0 means no limit."""
+        market = self._market(ref)
+        if market is None:
+            return {"ok": False, "error": "That map is no longer on the desk."}
+        detail = dict(market["detail"])
+        detail["limits"] = self._limits({"detail": {"limits": body if isinstance(body, dict) else {}}})
+        with self.store._conn() as conn:
+            conn.execute("UPDATE markets SET detail = ? WHERE id = ?", (json.dumps(detail), market["id"]))
+        return {"ok": True, "limits": detail["limits"]}
+
+    def facts(self, ref: Any) -> dict:
+        """A map by the numbers: what is on it and how complete it is, where it came from, what it has cost, and its limits."""
+        market = self._market(ref)
+        if market is None:
+            return {"ok": False, "error": "That map is no longer on the desk."}
+        everything = self.targets(market["id"])
+        rows = [r for r in everything if r["status"] != "dismissed"]
+        total = len(rows)
+        has = lambda test: len([r for r in rows if test(r)])
+        linked = [r for r in rows if str(r["source"]).startswith(("http://", "https://"))]
+        sites = Counter(sources.domain_of(r["source"]) for r in linked)
+        on_it = {"companies": total, "segments": len({r["segment"] for r in rows if r["segment"]}),
+                 "in_pipeline": has(lambda r: r["status"] == "tracked"), "dismissed": len(everything) - total,
+                 "requirements": len(market["detail"].get("criteria") or []),
+                 "checked": has(lambda r: r["detail"].get("criteria")), "sourced": len(linked),
+                 "signals": has(lambda r: r["signal"]), "dated": has(lambda r: r["signal"] and r["detail"].get("signal_date")),
+                 "buyers": has(lambda r: r["detail"].get("people")), "sized": has(lambda r: headcount(r["size"])),
+                 "uses": has(lambda r: r["detail"].get("uses"))}
+        gaps = [(total - on_it["checked"], "checked against the requirements", "check it against the map's requirements, with the evidence"),
+                (total - on_it["sourced"], "a source link", "give the page the evidence came from"),
+                (total - on_it["uses"], "what it uses today", "say what it uses today for the job we do"),
+                (total - on_it["sized"], "its headcount", "give its headcount"),
+                (on_it["signals"] - on_it["dated"], "the date of its signal", "give the date its signal happened"),
+                (total - on_it["buyers"], "a buyer named", "")]
+        month = st.today()[:7]
+        n = lambda name: self._count(market["id"], name)
+        calls, unpriced = n("calls"), n("unpriced")
+        return {"ok": True, "id": market["id"], "name": market["name"], "created": (market.get("created_at") or "")[:10],
+                "updated": (market.get("updated_at") or "")[:10], "on_it": on_it,
+                "sources": {"links": len(linked), "sites": len(sites), "top": [{"site": site, "links": count} for site, count in sites.most_common(6)]},
+                "gaps": [{"missing": missing, "what": what, "ask": ask} for missing, what, ask in gaps if missing > 0],
+                "cost": {"since": self.store.meta_get("map:%s:since" % market["id"], "")[:10], "last": self.store.meta_get("map:%s:last" % market["id"], ""),
+                         "runs": n("runs"), "calls": calls, "minutes": round(n("secs") / 60, 1),
+                         "tokens": {"in": n("input_tokens"), "out": n("output_tokens"), "cache_read": n("cache_read_tokens"), "cache_write": n("cache_write_tokens")},
+                         # None where Hermes had no price for any call: a figure is never made up
+                         "usd": None if calls and unpriced >= calls else round(n("cost") / 1_000_000, 2),
+                         "usd_month": round(n("cost:" + month) / 1_000_000, 2), "unpriced": unpriced,
+                         "lookups": n("pdl"), "lookups_month": n("pdl:" + month), "searches": n("exa"), "searches_month": n("exa:" + month)},
+                "limits": self._limits(market)}
 
     def define(self, args: dict) -> dict:
         name = str(args.get("name") or args.get("market") or "").strip()
@@ -291,6 +386,10 @@ class Markets:
         known.update({_key(c["label"]): c["key"] for c in current})
         added, updated, problems = [], [], []
         stamp = st.now()
+        stop = self._over_budget(market)
+        cap = self._limits(market)["companies"]
+        room = cap - len([r for r in self.targets(market["id"]) if r["status"] != "dismissed"]) if cap else None
+        held = []      # companies not added because the map is at the limit a person set
         with self.store._conn() as conn:
             for raw in companies[:60]:
                 if isinstance(raw, str):
@@ -304,6 +403,11 @@ class Markets:
                 fit = raw.get("fit")
                 tid = target_id(market["id"], company)
                 row = conn.execute("SELECT * FROM targets WHERE id = ?", (tid,)).fetchone()
+                if row is None and (stop or (room is not None and room <= 0)):
+                    held.append(company)
+                    continue
+                if row is None and room is not None:
+                    room -= 1
                 detail = _unpack_target(dict(row))["detail"] if row else {}
                 for key in ("uses", "also"):
                     if _clean(raw.get(key), 80):
@@ -353,6 +457,20 @@ class Markets:
                "total": len(self.targets(market["id"]))}
         if problems:
             out["problems"] = problems[:20]
+        # What the map still does not know about the companies just recorded. Said once, so it can be filled in while the
+        # sources are to hand; never a reason to guess.
+        touched = set(added) | set(updated)
+        mine = [r for r in self.targets(market["id"]) if r["company"] in touched]
+        short = [(len([r for r in mine if not r["detail"].get("uses")]), "what it uses today for this job (`uses`)"),
+                 (len([r for r in mine if not headcount(r["size"])]), "its headcount (`size`)"),
+                 (len([r for r in mine if r["signal"] and not r["detail"].get("signal_date")]), "the date of its signal (`signal_date`)")]
+        if any(count for count, _ in short):
+            out["still_missing"] = ("Of the companies just recorded: " + "; ".join("%d without %s" % item for item in short if item[0])
+                                    + ". Add these where a source says so; leave them out where none does. Never guess.")
+        if held:
+            out["not_added"] = held[:60]
+            out["limit"] = stop or ("This map is at the %d companies a person set as its limit, so these were not added. Do not work "
+                                    "round it: tell the person; they can raise the limit under Map facts, or dismiss some." % cap)
         self._refresh(market["id"])
         return out
 
@@ -395,7 +513,38 @@ class Markets:
             if len(seg["companies"]) > 25:
                 seg["more"] = len(seg["companies"]) - 25
                 seg["companies"] = seg["companies"][:25]
+        note = self._room(market)
+        if note:
+            summary["limits"] = note          # said before the research, not after it
         return dict(summary, ok=True)
+
+    def room(self, ref: Any) -> Optional[dict]:
+        """For the page: how many more companies this map may take and why Hermes should not be asked for more, or None with no limit in the way."""
+        market = self._market(ref)
+        if market is None:
+            return None
+        cap, stop = self._limits(market)["companies"], self._over_budget(market)
+        if not cap and not stop:
+            return None
+        held = len([r for r in self.targets(market["id"]) if r["status"] != "dismissed"])
+        return {"companies": max(0, cap - held) if cap else None, "limit": cap, "stop": "budget" if stop else ""}
+
+    def _room(self, market: dict) -> str:
+        """What the limits a person set on this map leave room for, in a line Hermes reads before it starts. "" with none set."""
+        limits, month, said = self._limits(market), st.today()[:7], []
+        stop = self._over_budget(market)
+        if stop:
+            return stop
+        if limits["companies"]:
+            held = len([r for r in self.targets(market["id"]) if r["status"] != "dismissed"])
+            said.append("room for %d more companies (limit %d)" % (max(0, limits["companies"] - held), limits["companies"]))
+        if limits["budget"]:
+            said.append("$%.2f of the $%.2f set for Hermes's work this month used" % (self._count(market["id"], "cost:" + month) / 1_000_000, limits["budget"]))
+        if limits["lookups"]:
+            said.append("%d of %d paid lookups this month used" % (self._count(market["id"], "pdl:" + month), limits["lookups"]))
+        if limits["searches"]:
+            said.append("%d of %d searches this month used" % (self._count(market["id"], "exa:" + month), limits["searches"]))
+        return ("Limits a person set on this map: " + "; ".join(said) + ". Plan inside them, and say so if they stop you.") if said else ""
 
     def summary(self, market_id: str, segment: str = "", status: str = "", text: bool = True, with_rows: bool = False) -> dict:
         """Everything the map says, computed from what has been recorded. Used by the tool, the web tab and the page."""
@@ -495,7 +644,19 @@ class Markets:
         query = str(args.get("query") or "").strip()
         if not query:
             return {"ok": False, "error": "search needs a query describing the kind of company"}
+        market, month = self._market(args.get("market")), st.today()[:7]
+        if market is not None:
+            stop = self._over_budget(market)
+            cap = self._limits(market)["searches"]
+            if not stop and cap and self._count(market["id"], "exa:" + month) >= cap:
+                stop = ("This map has used the %d Exa searches a person set as its limit for the month. Stop searching for it and tell "
+                        "the person; they can raise the limit under Map facts." % cap)
+            if stop:
+                return {"ok": False, "error": stop}
         result = sources.exa_companies(key, query, _whole(args.get("limit") or 8, 8, 1, 15), http=self.desk.http)
+        if result.get("ok") and market is not None:
+            self.store.bump("map:%s:exa" % market["id"])
+            self.store.bump("map:%s:exa:%s" % (market["id"], month))
         if result.get("ok"):
             result["note"] = ("These are candidates, not yet on the map. Judge each against the market brief and add the ones "
                               "that fit with gtm_market(action='add'), giving the reason and the source URL.")
@@ -516,12 +677,22 @@ class Markets:
         if cap and used + limit > cap:
             return {"ok": False, "error": "This would pass the monthly People Data Labs cap (%d used of %d). Raise "
                                           "pdl_monthly_cap in the plugin's settings to continue." % (used, cap)}
+        own = self._market(target["market_id"]) if target else None
+        if own is not None:
+            map_cap, map_used = self._limits(own)["lookups"], self._count(own["id"], "pdl:" + st.today()[:7])
+            if map_cap and map_used + limit > map_cap:
+                return {"ok": False, "error": "This would pass the %d lookups a month a person set as this map's limit (%d used). "
+                                              "They can raise it under Map facts." % (map_cap, map_used)}
         titles = args.get("titles") or []
         if isinstance(titles, str):
             titles = [t.strip() for t in titles.split(",")]
-        result = sources.pdl_people(key, company=company, domain=domain, titles=titles, limit=limit, http=self.desk.http)
+        result = sources.pdl_people(key, company=company, domain=domain, titles=titles, limit=limit,
+                                    deciders=bool(args.get("deciders")), http=self.desk.http)
         if result.get("ok") and result.get("credits_used"):
             self.store.bump(month, result["credits_used"])
+            if own is not None:
+                self.store.bump("map:%s:pdl" % own["id"], result["credits_used"])
+                self.store.bump("map:%s:pdl:%s" % (own["id"], st.today()[:7]), result["credits_used"])
         if result.get("ok"):
             result["company"] = company
             if target and result.get("people"):      # keep who was found on the map, so nobody pays to find them twice
@@ -640,6 +811,8 @@ class Markets:
             kept = conn.execute("SELECT count(*) FROM targets WHERE market_id = ? AND status = 'tracked'", (market["id"],)).fetchone()[0]
             conn.execute("DELETE FROM targets WHERE market_id = ?", (market["id"],))
             conn.execute("DELETE FROM markets WHERE id = ?", (market["id"],))
+            prefix = "map:%s:" % market["id"]
+            conn.execute("DELETE FROM meta WHERE substr(k, 1, ?) = ?", (len(prefix), prefix))
         return {"ok": True, "id": market["id"], "name": market["name"], "companies": companies, "in_pipeline": kept}
 
     def restore(self, refs: list) -> dict:
@@ -700,7 +873,9 @@ class Markets:
 
     def buyers(self, refs: list) -> dict:
         """Name one buyer at each company that has none: one People Data Labs lookup each, for one person whose title
-        is like those of the buyers already named on the map, inside the monthly cap. One person is one credit, so the
+        is like those of the buyers already named on the map and whom People Data Labs ranks manager or above (a fraud
+        analyst matches the word "fraud" as well as a head of fraud does, and is not the buyer), inside the monthly cap.
+        Where nobody of that rank matches, nobody is saved and nothing is spent. One person is one credit, so the
         most this can spend is the number of companies. With no buyer named anywhere on the map there is no title to
         look for, and it says so rather than pay for whoever comes back. Stops at the first refusal and says why."""
         found, none, problem, titles = [], [], "", None
@@ -713,7 +888,7 @@ class Markets:
                 if not titles:
                     return {"ok": False, "found": [], "none": [], "no_titles": True,
                             "problem": "No buyer is named on this map yet, so there is no job title to look for."}
-            result = self.people({"target": target["id"], "limit": 1, "titles": titles})
+            result = self.people({"target": target["id"], "limit": 1, "titles": titles, "deciders": True})
             if not result.get("ok"):
                 problem = result.get("error") or "the lookup failed"
                 break

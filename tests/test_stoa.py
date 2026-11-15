@@ -3802,6 +3802,109 @@ class MapOnThePageTests(unittest.TestCase):
         self.assertFalse(self.desk.markets.remove(self.market["id"])["ok"])
         self.assertNotIn("remove", schemas.GTM_MARKET["parameters"]["properties"]["action"]["enum"])      # only a person at the page deletes a map
 
+    def test_a_map_by_the_numbers(self):
+        facts = self.desk.markets.facts(self.market["id"])
+        on = facts["on_it"]
+        self.assertEqual((on["companies"], on["segments"], on["requirements"], on["in_pipeline"]), (len(fixture.COMPANIES), 3, 4, 0))
+        self.assertEqual(on["checked"], len([c for c in fixture.COMPANIES if c.get("requirements")]))
+        self.assertEqual(facts["sources"], {"links": 0, "sites": 0, "top": []})      # the fixture gives no links, and none is made up
+        self.assertIn("a source link", [gap["what"] for gap in facts["gaps"]])
+        self.assertEqual((facts["cost"]["runs"], facts["cost"]["usd"], facts["cost"]["lookups"], facts["cost"]["searches"]), (0, 0.0, 0, 0))
+        self.assertEqual(facts["limits"], {"companies": 0, "lookups": 0, "searches": 0, "budget": 0.0})
+        self.desk.markets.add({"market": self.market["id"], "companies": [{"company": "Meridian Freight", "source": "https://www.freightnews.example/meridian"}]})
+        self.assertEqual(self.desk.markets.facts(self.market["id"])["sources"], {"links": 1, "sites": 1, "top": [{"site": "freightnews.example", "links": 1}]})
+
+    def test_a_turns_model_calls_are_counted_against_the_map_it_worked_on(self):
+        from stoa.usage import Meter
+        priced = lambda model, provider, base_url, usage: 250000 if model == "priced" else None      # a quarter of a dollar a call
+        meter = self.desk.usage = Meter(price=priced)
+        call = lambda turn, model="priced": meter.on_api(session_id="s1", turn_id=turn, model=model, provider="p", api_duration=30,
+                                                         usage={"input_tokens": 100, "output_tokens": 20, "cache_read_tokens": 900, "cache_write_tokens": 50})
+        call("t1")                                                   # Hermes thinks, then uses the map tool
+        self.desk.market({"action": "show", "market": self.market["id"]}, {"session_id": "s1"})
+        call("t1"); call("t1")
+        meter.on_api(session_id="other", turn_id="x", model="priced", usage={"input_tokens": 5})      # another conversation, no map touched
+        meter.on_turn_end(session_id="other")
+        self.assertEqual(self.desk.markets.facts(self.market["id"])["cost"]["runs"], 0)      # nothing is written until the turn ends
+        meter.on_turn_end(session_id="s1")
+        cost = self.desk.markets.facts(self.market["id"])["cost"]
+        self.assertEqual((cost["runs"], cost["calls"], cost["usd"], cost["usd_month"], cost["minutes"]), (1, 3, 0.75, 0.75, 1.5))
+        self.assertEqual(cost["tokens"], {"in": 300, "out": 60, "cache_read": 2700, "cache_write": 150})
+        self.assertRegex(cost["since"], r"^\d{4}-\d{2}-\d{2}$")
+        call("t2", model="no price known")                           # a turn that never ended cleanly...
+        self.desk.market({"action": "show", "market": self.market["id"]}, {"session_id": "s1"})
+        call("t3")                                                   # ...is settled when the next one starts
+        cost = self.desk.markets.facts(self.market["id"])["cost"]
+        self.assertEqual((cost["runs"], cost["calls"], cost["usd"], cost["unpriced"]), (2, 4, 0.75, 1))
+
+    def test_a_model_with_no_price_shows_no_dollar_figure(self):
+        from stoa.usage import Meter
+        meter = self.desk.usage = Meter(price=lambda *a: None)
+        meter.on_api(session_id="s1", turn_id="t1", model="local", usage={"input_tokens": 10})
+        self.desk.market({"action": "show", "market": self.market["id"]}, {"session_id": "s1"})
+        meter.on_turn_end(session_id="s1")
+        cost = self.desk.markets.facts(self.market["id"])["cost"]
+        self.assertEqual((cost["runs"], cost["usd"]), (1, None))
+
+    def test_the_limits_a_person_sets_on_a_map_hold(self):
+        mid = self.market["id"]
+        have = len(fixture.COMPANIES)
+        limits = self.desk.markets.set_limits(mid, {"companies": have + 1, "lookups": "2", "searches": 1, "budget": "1.50", "nonsense": 9})["limits"]
+        self.assertEqual(limits, {"companies": have + 1, "lookups": 2, "searches": 1, "budget": 1.5})
+        out = self.desk.markets.add({"market": mid, "companies": [{"company": "One More Freight", "segment": "Digital-first"}, {"company": "Two Too Many", "segment": "Digital-first"},
+                                                                 {"company": "Meridian Freight", "why": "Still updated: it is already on the map."}]})
+        self.assertEqual((out["added"], out["not_added"], out["updated"]), (["One More Freight"], ["Two Too Many"], ["Meridian Freight"]))
+        self.assertIn("limit", out["limit"])
+        shown = self.desk.market({"action": "show", "market": mid})["limits"]       # Hermes hears the limits before it researches
+        self.assertIn("room for 0 more companies (limit %d)" % (have + 1), shown)
+        self.assertIn("$0.00 of the $1.50", shown)
+        self.assertEqual(self.desk.markets.room(mid), {"companies": 0, "limit": have + 1, "stop": ""})      # and the page asks for no more
+        self.desk.store.bump("map:%s:cost:%s" % (mid, dt.date.today().isoformat()[:7]), 1_500_000)      # the month's budget is spent
+        self.desk.markets.set_limits(mid, {"companies": 0, "budget": 1.5})
+        stopped = self.desk.markets.add({"market": mid, "companies": [{"company": "After The Budget", "segment": "Digital-first"}]})
+        self.assertEqual((stopped["added"], stopped["not_added"]), ([], ["After The Budget"]))
+        self.assertIn("$1.50", stopped["limit"])
+        self.assertIn("Stop working on it", self.desk.market({"action": "show", "market": mid})["limits"])
+        self.assertEqual(self.desk.markets.room(mid)["stop"], "budget")
+        self.desk.markets.set_limits(mid, {})
+        self.assertIsNone(self.desk.markets.room(mid))
+        self.assertNotIn("limits", self.desk.market({"action": "show", "market": mid}))
+
+    def test_adding_companies_says_what_the_map_still_does_not_know_about_them(self):
+        mid = self.market["id"]
+        out = self.desk.markets.add({"market": mid, "companies": [
+            {"company": "Bare Freight", "segment": "Digital-first", "signal": "Opened a Dallas office"},
+            {"company": "Full Freight", "segment": "Digital-first", "size": "120 people", "uses": "Highway", "signal": "Raised a round", "signal_date": "2026-09-01"}]})
+        self.assertEqual(sorted(out["added"]), ["Bare Freight", "Full Freight"])
+        for said in ("1 without what it uses today", "1 without its headcount", "1 without the date of its signal", "Never guess"):
+            self.assertIn(said, out["still_missing"])
+        whole = self.desk.markets.add({"market": mid, "companies": [{"company": "Full Freight", "why": "Checked again."}]})
+        self.assertNotIn("still_missing", whole)
+
+    def test_paid_lookups_and_searches_are_counted_per_map_and_stop_at_its_limit(self):
+        calls = []
+
+        def http(url, **kw):
+            calls.append(url)
+            if "exa.ai" in url:
+                return 200, {"results": [{"title": "A broker", "url": "https://broker.example"}]}
+            return 200, {"data": [{"full_name": "sam ito", "job_title": "director of carrier compliance"}], "total": 3}
+
+        desk = make_desk(self.tmp.name, playbook="b2b-sales", http=http, secrets={"PDL_API_KEY": "pdl-secret-value", "EXA_API_KEY": "exa-secret-value"})
+        mid = self.market["id"]
+        desk.markets.set_limits(mid, {"searches": 1, "lookups": 1})
+        self.assertTrue(desk.market({"action": "search", "market": mid, "query": "freight brokers"})["ok"])
+        refused = desk.market({"action": "search", "market": mid, "query": "more freight brokers"})
+        self.assertIn("1 Exa searches", refused["error"])
+        nobody = [c["id"] for seg in desk.markets.summary(mid, text=False)["segments"] for c in seg["companies"] if not c.get("people")]
+        out = desk.markets.buyers(nobody[:2])
+        self.assertEqual((len(out["found"]), "this map's limit" in out["problem"]), (1, True))
+        cost = desk.markets.facts(mid)["cost"]
+        self.assertEqual((cost["searches"], cost["searches_month"], cost["lookups"], cost["lookups_month"]), (1, 1, 1, 1))
+        self.assertEqual(len(calls), 2)      # the refused search and the refused lookup never left the machine
+        desk.markets.remove(mid)
+        self.assertEqual(desk.store.meta_prefix("map:%s:" % mid), {})      # a deleted map takes its counts with it
+
     def test_several_are_added_to_the_pipeline_at_once(self):
         rows = self.companies()
         result = self.desk.markets.track_many([rows["Meridian Freight"]["id"], rows["Tidewater Logistics"]["id"]], "tester")
@@ -3844,7 +3947,13 @@ class MapOnThePageTests(unittest.TestCase):
         self.assertEqual((out["ok"], len(out["found"]), len(calls)), (True, len(nobody), len(nobody)))
         self.assertTrue(all(call["data"]["size"] == 1 for call in calls))      # one person asked for, so one credit at most
         self.assertTrue(all("job_title LIKE" in call["data"]["sql"] for call in calls))      # and only someone with a buyer's title
+        for call in calls:      # who can say yes: a manager or above, never the analyst who shares the word
+            self.assertIn("job_title_levels='director'", call["data"]["sql"])
+            self.assertFalse({"job_title_levels='senior'", "job_title_levels='entry'"} & set(call["data"]["sql"].replace("(", " ").replace(")", " ").split()))
         self.assertEqual(desk.setup()["keys"][1]["note"], "%d of 50 lookups used this month." % len(nobody))
+        calls.clear()      # a lookup Hermes asks for by title is not narrowed: it may be after anyone
+        desk.market({"action": "people", "company": "Somewhere Else Freight", "titles": ["dispatcher"], "limit": 1})
+        self.assertNotIn("job_title_levels", calls[0]["data"]["sql"])
 
     def test_with_no_buyer_named_on_the_map_no_lookup_is_paid_for(self):
         calls = []

@@ -27,6 +27,10 @@
   open, the task waits on the record.
 - If your agent already keeps people somewhere else, it may look there first. Naming the desk ("on the Stoa
   desk") or using `!gtm <name>` settles it.
+- A map's cost under **Map facts** is Hermes's estimate for the turns that used the map tool, from
+  the day that version was installed. It is not an invoice, it leaves out anything a turn did after
+  being interrupted, and a turn that worked on two maps is split evenly between them. A budget stops
+  the next company or search, not a turn already running, so a map can end a little over its budget.
 - A deleted map is gone: it is not on the ledger and Undo does not bring it back. The daily copies
   of the desk made before it was deleted still hold it.
 - On the page's map, the weights under **What matters** and the **Size by** choice are kept with the
@@ -67,6 +71,9 @@
 - The forecast is arithmetic, not a prediction: stage odds times amounts, by the dates you set.
 - On a tour, what you do is thrown away when you leave, Slack cards posted from it stop working,
   lookups are off, and scheduled jobs do nothing until it ends.
+- The model picked under the dock is kept per computer and applies to the page's own conversation
+  only: Slack, scheduled jobs and other chats stay on Hermes's default. The list shows a price where
+  Hermes has one for that provider, which it does not for every provider.
 - The dock on the page runs a turn of your agent's model, the same as typing in a chat. It takes
   CSV and small text files; a PDF, an image or a spreadsheet goes through the full chat, which is
   one click away. Dictation is not available in the Desktop app; the full chat's microphone is.

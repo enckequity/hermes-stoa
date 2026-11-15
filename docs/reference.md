@@ -85,8 +85,10 @@ The *Market watch* automation re-checks a map every week and adds at most five n
 - **Act.** Click a company to open it; shift-click, drag across the map or tick rows in the table to
   pick several. Then add them to the pipeline, name a buyer at each, have Hermes draft outreach, or
   dismiss them. **Dismissed** puts one back. **Find buyers** is one People Data Labs lookup a
-  company, for one person whose title is like the buyers already named on the map; the button says
-  the most it can spend. With no buyer named yet, or no key, Hermes works out who the buyer is.
+  company, for one person whose title is like the buyers already named on the map and whom People
+  Data Labs ranks manager or above, so an analyst who shares a word with the buyer is not saved as
+  one. Where nobody of that rank matches, nothing is saved or spent. The button says the most it can
+  spend. Read the title before you use a name. With no buyer named yet, or no key, Hermes works out who the buyer is.
 - **Grow.** **+ Grow** under a segment, **More like this** on a company and the faint ring for a
   neighbouring segment each send Hermes a line in the box at the foot of the page. What it finds
   lands on the map, marked as new until the next time you open it.
@@ -105,6 +107,27 @@ The *Market watch* automation re-checks a map every week and adds at most five n
   under the map and the page goes to it.
 
 ![The map by priority, with one company open](desktop-market-priority.jpg)
+
+**Map facts.** The **Map facts** button opens a window with the map by the numbers:
+
+- **What is on it.** Companies, segments, how many are in your pipeline or dismissed, and how
+  complete the map is: how many companies are checked against the requirements, have a source link,
+  a headcount, what they use today, a buyer named, and a date on their signal. **Ask Hermes to fill
+  in what is missing** sends Hermes a line naming exactly those gaps.
+- **Where it came from.** How many source links the map holds and the sites they come from.
+- **What it has cost.** Hermes's own estimate, in dollars, of the model calls made by the turns that
+  worked on this map, with the turns, calls, minutes and tokens behind it, and this month's share.
+  Beside it are the People Data Labs lookups and the Exa searches made through Stoa for this map.
+  Counting starts with the first turn after this is installed; work done before that is not in the figure. It is an
+  estimate from the provider's price list, not an invoice, and a model Hermes has no price for (a
+  local one, say) shows "No price known" with the token counts.
+- **Limits for this map.** Four boxes, each empty for no limit: how many companies the map may hold,
+  how many dollars of Hermes's work a month, how many People Data Labs lookups a month, and how many
+  Exa searches a month. Hermes is told the limits when it opens the map, **Grow** and **More like
+  these** ask only for as many companies as there is room for, and at a limit Stoa refuses the next
+  company, search or lookup and tells Hermes to stop and tell you. A limit cannot stop a turn that
+  is already running: the budget is checked each time Hermes goes to add or search, and a turn's
+  cost is written when the turn ends.
 
 **A page to send.** **Download page** on the Market map tab saves the whole map as one
 self-contained web page, with the same working map at its head: the three views, a company opened by

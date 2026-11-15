@@ -198,6 +198,7 @@ def state() -> dict:
             "dismissed": [{"id": row["id"], "company": row["company"], "segment": row["segment"]} for row in d.markets.targets(market["id"], "dismissed")][:60],
             "lookups": bool(d.secret("PDL_API_KEY")),
             "buyer_titles": d.markets.buyer_titles(market["id"]),
+            "room": d.markets.room(market["id"]),
             "counts": {"mapped": summary["numbers"]["companies"], "tracked": summary["numbers"]["in_pipeline"],
                        "dismissed": summary["numbers"]["dismissed"]}})
     last = d.store.undoables()      # per record, the last action that still stands
@@ -784,6 +785,21 @@ def market_page(market_id: str, share: int = 0) -> dict:
         raise HTTPException(404, "no such market map")
     html = _mod("page").render(d.markets.summary(market["id"]), d.playbook().terms, share=bool(share))
     return {"filename": "%s%s.html" % (market["id"], "-share" if share else ""), "html": html}     # the id is the map's name as a slug
+
+
+@router.get("/market/{market_id}/facts")
+def market_facts(market_id: str) -> dict:
+    """A map by the numbers: what is on it, where it came from, what it has cost so far, and the limits set on it."""
+    result = desk().markets.facts(market_id)
+    if not result.get("ok"):
+        raise HTTPException(404, result.get("error") or "no such market map")
+    return result
+
+
+@router.post("/market/{market_id}/limits")
+def market_limits(market_id: str, body: dict = Body(...)) -> dict:
+    """Set the limits on one map. 0 lifts a limit."""
+    return desk().markets.set_limits(market_id, body)
 
 
 @router.post("/market/{market_id}/rename")

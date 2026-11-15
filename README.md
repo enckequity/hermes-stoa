@@ -99,8 +99,17 @@ What the plugin does that you would want to know before installing it:
   shown where the browser has no speech recognition.
 - **Paid lookups.** People Data Labs charges per person returned. **Find buyers** on the map asks
   for one person at each company picked that has nobody named, with a job title like the buyers
-  already named on that map, so it spends at most one credit a company. Every lookup counts against
+  already named on that map and a rank of manager or above as People Data Labs records it, so it
+  spends at most one credit a company and saves nobody where no one of that rank matches. Every lookup counts against
   `pdl_monthly_cap`, and a buyer lookup returns at most five people.
+  A map can carry a lower cap of its own, set under **Map facts**.
+- **What a map has cost.** The plugin listens to two of Hermes's hooks, `post_api_request` and
+  `post_llm_call`, and takes only counts from them: for a turn that worked on a market map, how many
+  model calls it made, their token counts and seconds, and what Hermes itself estimates they cost
+  (`agent.usage_pricing.estimate_usage_cost`, Hermes's own price list). No prompt, reply or tool
+  result is read or kept. The totals are stored per map in the plugin's own database and shown under
+  **Map facts**; they go nowhere else. The dollar figure is an estimate, not an invoice, and a model
+  Hermes has no price for shows no figure. Turns on other work are not counted at all.
 - **Slack.** Cards are posted and updated through the Slack app Hermes is already connected
   with. The plugin never reads, stores or sees the Slack token. A button moves a stage, applies a
   list and can spend a paid lookup, so a press is taken only from the person the card was posted
@@ -116,10 +125,14 @@ What the plugin does that you would want to know before installing it:
   click that calls for writing it sends one line into the open chat through `host.composer.submit`,
   the same as typing it. The dock on the page keeps one conversation of its own, named **Stoa
   desk**: it is created and resumed through the gateway (`host.request`: `session.create`,
-  `session.resume`, `prompt.submit`), it is sent only what you type or dictate there (with a short
+  `session.resume`, `prompt.submit`; **New conversation** makes another, with the day and time
+  in its name), it is sent only what you type or dictate there (with a short
   note of context on its first message and, on a desk with more than one pipeline, a line saying
   which pipeline the page is showing; both can be read in that conversation), and the page listens
-  to the gateway's events for that conversation alone to show you the reply. A file is read only
+  to the gateway's events for that conversation alone to show you the reply. The model picker under the dock asks Hermes for the models this profile can
+  use (`model.options`) and sets the one you pick on that conversation alone (`config.set` with
+  `--session`, the call the app's own picker makes); the pick is kept in the plugin's page storage
+  on that computer, and the profile's default model is never changed. A file is read only
   when you pick it or drop it on the page: a CSV's text goes to the plugin's backend to be held as a
   review, and a small text file goes to the agent with your message. The picture at the head of the page is drawn in the browser from a grid of
   dots that ships with the plugin (`desktop/art.json`), and a name you type under Setup is kept in the

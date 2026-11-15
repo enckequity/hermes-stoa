@@ -155,6 +155,16 @@ In the Hermes Desktop app and the Webapp, Stoa sits beside the conversation.
   The dock takes sentences, not commands: a line that starts with `/` (such as `/blueprint` or
   `/gtm today`) is run by the app's own chat box, so the page opens a new chat with it typed
   and leaves it for you to send.
+- **Pick the model, and start again when it gets long.** Under the dock is the model the desk's
+  conversation runs on. Press it for the models Hermes can use and pick one: a cheaper model is
+  enough for most desk work, and the strongest is worth keeping for research such as a new market
+  map. The pick is kept on that computer and goes to every conversation the page starts. Changing
+  the model of a long conversation makes Hermes re-read all of it at full price once, so Hermes asks
+  first, and the page offers **Start a new conversation on it** instead. **New conversation** does
+  the same at any time: Hermes re-reads the whole conversation at every step, so a long one costs
+  more each time, and the desk itself keeps everything, so nothing is lost by starting again. The
+  old conversation stays in the sidebar. **Hide** (or Esc) folds the conversation away; it carries
+  on, and **Show the conversation** brings it back.
 - **Say it or hand it over.** The microphone dictates into the dock where the browser has speech
   recognition. Drop a CSV anywhere on the page, or attach one, and the desk reads it itself and
   shows the review, with no model in between, whatever the headers are called. If it cannot tell

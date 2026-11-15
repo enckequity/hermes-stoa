@@ -153,6 +153,8 @@ it finds nothing, connect them under **Capabilities**.
   under **Your desk** the name on the page, your pipelines, the rules in force and your data with a
   CSV export.
 - **Settings → Plugins → Stoa** is where every setting and key is changed.
+- **Market map → Map facts** shows what a map holds, where it came from and what it has cost, and
+  is where you set limits on it: companies, dollars of Hermes's work a month, lookups and searches.
 - **Market map → Download page** saves a map as one web page. **Download a copy to share** saves
   the same page without buyers' names or your pipeline, for hosting or sending to a client.
 

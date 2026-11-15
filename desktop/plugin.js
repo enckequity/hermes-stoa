@@ -211,8 +211,58 @@ async function typeInChat(line) {
 // shown above the dock.
 const $talk = atom({ busy: false, open: false, turns: [] })
 const $attached = atom(null) // a small text file waiting to go with the next message: { name, text }
-const talkSession = { runtime: '', stored: '', primed: false, turn: 0 }
+const talkSession = { runtime: '', stored: '', primed: false, turn: 0, left: '' } // left: the conversation New conversation walked away from, until the next one exists
 const setTalk = patch => $talk.set({ ...$talk.get(), ...patch })
+const keepTalk = patch => { if (storage) storage.set('talk', { ...((storage.get('talk', {})) || {}), ...patch }) }
+// The model the desk's conversation runs on. A conversation in Hermes keeps the model it began with, so the page keeps
+// the person's pick on this computer and gives it to the conversation: the one it has, and any it starts afterwards.
+// `picked` is { model, provider }, or null for whatever Hermes's own default is. `asking` holds a pick Hermes wants a
+// second yes for (a costly model), with Hermes's own words for why.
+const $model = atom({ picked: null, asking: null })
+const setModel = patch => $model.set({ ...$model.get(), ...patch })
+
+const newId = () => (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID()
+  : 'xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx'.replace(/x/g, () => Math.floor(Math.random() * 16).toString(16)))
+
+/** Whether the desk has a conversation in hand: open now, or kept from an earlier visit. */
+const hasTalk = () => Boolean(talkSession.runtime || talkSession.stored || ((storage && storage.get('talk', {})) || {}).stored)
+
+/** Put a conversation on a model, the way the app's own picker does (`config.set model "<model> --provider <id> --session"`,
+    the one form the app turns into a change to that conversation alone; a bare "reset" is refused, seen on a real run). */
+async function modelTo(sessionId, pick, sure) {
+  const result = await host.request('config.set', { key: 'model', session_id: sessionId, value: pick.model + ' --provider ' + pick.provider + ' --session', ...(sure ? { confirm_expensive_model: true } : {}) })
+  return result || {}
+}
+
+/** The person picked a model in the talk box. Kept for later conversations; the one in hand is switched now. `pick`
+    null is "Hermes's default": nothing is kept, and the conversation in hand goes to `usual`, the profile's own model. */
+async function pickModel(pick, sure, usual) {
+  if ($talk.get().busy) return host.notify({ kind: 'info', message: 'Hermes is still on the last thing. Change the model when it has answered.' })
+  const target = pick || usual
+  try {
+    if (hasTalk() && target && target.model && target.provider) {
+      const result = await modelTo(await talkOpen(true), target, sure)
+      if (result.confirm_required) return setModel({ asking: { pick, usual, message: String(result.confirm_message || 'Hermes asks you to confirm this model.') } })
+      if (result.warning) host.notify({ kind: 'warning', message: String(result.warning) })
+    }
+    keepTalk({ model: pick })
+    setModel({ picked: pick, asking: null })
+    queryClient.invalidateQueries({ queryKey: ['stoa', 'models'] })
+    host.notify({ kind: 'success', message: pick ? 'The desk\'s conversation now runs on ' + pick.model + '.' : 'The desk\'s conversation is back on Hermes\'s default model.' })
+  } catch (error) {
+    host.notifyError(error, 'Hermes could not change the model')
+  }
+}
+
+/** Leave the conversation in hand and begin another with the next thing said. The old one stays in the sidebar. */
+function freshTalk() {
+  if ($talk.get().busy) return host.notify({ kind: 'info', message: 'Hermes is still on the last thing. Start a new conversation when it has answered.' })
+  const left = talkSession.stored || ((storage && storage.get('talk', {})) || {}).stored || talkSession.left || ''
+  Object.assign(talkSession, { runtime: '', stored: '', primed: false, left })
+  keepTalk({ stored: '', left })
+  $talk.set({ busy: false, open: false, turns: [] })
+  host.notify({ kind: 'success', message: 'The next thing you say starts a new conversation. The old one is still in the sidebar.' })
+}
 const PRIME = 'This conversation is the talk box on the Stoa desk page. Act on the Stoa desk with the gtm tools, and answer in a few '
   + 'short lines: the page already shows the pipeline. What is said here is for the desk: do not also write it to another system '
   + '(a spreadsheet, another CRM, email) unless asked to.\n\n'
@@ -236,23 +286,55 @@ function setTurn(patch) {
   $talk.set({ ...talk, turns })
 }
 
-async function talkOpen() {
+async function talkOpen(bare) {
   if (talkSession.runtime) return talkSession.runtime
   const stored = talkSession.stored || ((storage && storage.get('talk', {})) || {}).stored || ''
+  if (!talkSession.left) talkSession.left = ((storage && storage.get('talk', {})) || {}).left || ''      // a reload between leaving one and starting the next
+  // The pick goes to a conversation as it opens. Its yes was given when it was picked, so Hermes is not made to ask
+  // again; and if Hermes will not take it (the model is gone, the key was removed) the conversation still opens, on
+  // Hermes's default, and says so. `bare` is the picker itself opening the conversation, about to set the model.
+  const dress = async runtime => {
+    const pick = $model.get().picked
+    if (!pick || bare) return
+    try { await modelTo(runtime, pick, true) } catch (error) {
+      host.notify({ kind: 'warning', message: 'Hermes could not use ' + pick.model + ' (' + why(error) + '), so this is on its default model. Pick another under the talk box.' })
+    }
+  }
   if (stored) {
     try {
       const resumed = await host.request('session.resume', { session_id: stored, omit_messages: true })
       if (resumed && resumed.session_id) {
         Object.assign(talkSession, { runtime: resumed.session_id, stored, primed: true })
+        await dress(talkSession.runtime)
         return talkSession.runtime
       }
     } catch { /* that conversation is gone: start another */ }
   }
-  const made = await host.request('session.create', { title: 'Stoa desk' })
+  // A title is a conversation's identity in Hermes: asking for a new one called "Stoa desk" while one of that name
+  // exists hands back the one that exists (seen on a real run). So the first is "Stoa desk" and one begun with New
+  // conversation carries the day and time, to the second if the minute is taken. The pick rides on the request, so
+  // the conversation begins on that model; if Hermes will not have it, it begins on the default.
+  const pick = bare ? null : $model.get().picked
+  const left = talkSession.left
+  const stamp = seconds => new Date().toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', ...(seconds ? { second: '2-digit' } : {}) })
+  const create = async seconds => {
+    const ask = { title: left ? 'Stoa desk · ' + stamp(seconds) : 'Stoa desk', request_id: newId() }
+    try {
+      return await host.request('session.create', pick ? { ...ask, model: pick.model, provider: pick.provider } : ask)
+    } catch (error) {
+      if (!pick) throw error
+      host.notify({ kind: 'warning', message: 'Hermes could not use ' + pick.model + ' (' + why(error) + '), so this is on its default model. Pick another under the talk box.' })
+      return host.request('session.create', ask)
+    }
+  }
+  const same = made => Boolean(left) && Boolean(made) && [made.stored_session_id, made.session_id].includes(left)
+  let made = await create(false)
+  if (same(made)) made = await create(true)
+  if (same(made)) throw new Error('Hermes handed back the conversation you just left instead of a new one')
   const runtime = (made && made.session_id) || ''
   if (!runtime) throw new Error('Hermes did not open a conversation')
-  Object.assign(talkSession, { runtime, stored: made.stored_session_id || runtime, primed: false })
-  if (storage) storage.set('talk', { stored: talkSession.stored })
+  Object.assign(talkSession, { runtime, stored: made.stored_session_id || runtime, primed: false, left: '' })
+  keepTalk({ stored: talkSession.stored, left: '' })
   return runtime
 }
 
@@ -505,7 +587,17 @@ const CSS = `
 .stoa-dock { width: min(780px, 100%); margin: 0 auto; pointer-events: auto; }
 .stoa-glass { border: 1px solid var(--ui-stroke-primary); border-radius: var(--stoa-r); background: color-mix(in srgb, var(--ui-bg-elevated, var(--background, #14161b)) 88%, transparent); -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2); box-shadow: 0 18px 50px -14px rgba(0, 0, 0, .6), 0 2px 8px rgba(0, 0, 0, .22); }
 .stoa-sheet { margin-bottom: 8px; padding: 10px 14px 14px; max-height: min(46vh, 430px); overflow-y: auto; animation: stoa-lift .2s ease both; }
-.stoa-sheethead { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+.stoa-sheethead { position: sticky; top: -10px; z-index: 2; display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: -10px -14px 8px; padding: 6px 8px 6px 14px; background: var(--ui-bg-elevated, var(--stoa-page)); border-bottom: 1px dotted var(--ui-stroke-primary); }
+.stoa-sheethead .stoa-btn { display: inline-flex; align-items: center; gap: 5px; }
+.stoa-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; padding: 10px 12px; }
+.stoa-askwords { flex: 1 1 100%; overflow-wrap: anywhere; }
+.stoa-composerfoot { display: flex; align-items: center; gap: 6px; margin-top: 2px; padding: 3px 2px 0; border-top: 1px dotted var(--ui-stroke-secondary, var(--ui-stroke-primary)); }
+.stoa-footbtn { max-width: 100%; height: 24px; padding: 0 7px; border: 0; border-radius: var(--stoa-r); background: transparent; color: var(--ui-text-secondary); font-family: var(--stoa-mono); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.stoa-footbtn:hover, .stoa-footbtn[aria-expanded="true"] { background: var(--ui-control-hover-background); color: var(--ui-text-primary); }
+.stoa-footbtn:focus-visible { outline: 2px solid var(--stoa-accent); outline-offset: -2px; }
+.stoa-footbtn:disabled { opacity: .45; cursor: default; }
+.stoa-menu[data-up="1"] .stoa-menulist { top: auto; bottom: calc(100% + 6px); left: 0; max-height: min(420px, 56vh); }
+.stoa-footbtn .stoa-menucaret { font-size: 11px; }
 .stoa-turn + .stoa-turn { margin-top: 14px; padding-top: 14px; border-top: 1px dotted var(--ui-stroke-primary); }
 .stoa-youline { display: flex; justify-content: flex-end; }
 .stoa-you { max-width: 86%; padding: 6px 12px; border-radius: var(--stoa-r); background: var(--stoa-accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--stoa-accent) 24%, transparent); overflow-wrap: anywhere; white-space: pre-wrap; }
@@ -797,6 +889,26 @@ const CSS = `
 .stoa-menuitem small { display: block; margin-top: 1px; font-size: 12px; color: var(--ui-text-secondary); }
 .stoa-menurule { height: 0; margin: 5px 4px; border-top: 1px dotted var(--ui-stroke-primary); }
 .stoa-mapform { max-width: 720px; margin-bottom: 14px; }
+/* A window over the page. It is a real dialog, so it sits above everything, takes the keyboard, and Escape closes it. */
+.stoa-dialog { position: fixed; inset: 0; margin: auto; width: min(900px, 94vw); height: fit-content; max-height: 90vh; padding: 0; border: 1px solid var(--ui-stroke-primary); border-radius: var(--stoa-r); background: var(--stoa-page); color: var(--ui-text-primary); font: inherit; overflow: hidden; }
+.stoa-dialog::backdrop { background: rgba(0, 0, 0, .5); }
+.stoa-dialogin { max-height: 90vh; overflow-y: auto; padding: 20px 24px 22px; }
+.stoa-dialoghead { position: sticky; top: -20px; z-index: 1; display: flex; gap: 12px; align-items: flex-start; margin: -20px -24px 16px; padding: 20px 24px 14px; background: var(--stoa-page); border-bottom: 1px dotted var(--ui-stroke-primary); }
+.stoa-dialog .stoa-sub, .stoa-dialog .stoa-eyebrow { color: var(--ui-text-secondary); }
+.stoa-factgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px 32px; }
+.stoa-factgrid > section { min-width: 0; }
+.stoa-factfigs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+.stoa-factfigs b, .stoa-factcost b { display: block; font-family: var(--stoa-mono); font-size: 24px; font-weight: 600; letter-spacing: -.02em; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.stoa-factfigs small, .stoa-factcost small { display: block; font-size: 11.5px; color: var(--ui-text-secondary); }
+.stoa-factrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: baseline; padding: 7px 0; border-bottom: 1px dotted var(--ui-stroke-primary); }
+.stoa-factrow .stoa-mapmeter { grid-column: 1 / -1; margin-top: 3px; }
+.stoa-factcost { margin-bottom: 8px; } .stoa-factcost p { margin: 6px 0 0; }
+.stoa-factlimits { margin-top: 22px; padding-top: 16px; border-top: 1px dotted var(--ui-stroke-primary); }
+.stoa-factlimit { display: grid; grid-template-columns: minmax(0, 1fr) 120px 130px; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px dotted var(--ui-stroke-primary); }
+.stoa-factlimit b { display: block; font-weight: 550; } .stoa-factlimit small { display: block; font-size: 12px; color: var(--ui-text-secondary); }
+.stoa-factlimit .stoa-field { margin-top: 0; font-family: var(--stoa-mono); text-align: right; }
+.stoa-factnow { font-family: var(--stoa-mono); text-align: right; white-space: nowrap; }
+@media (max-width: 620px) { .stoa-factlimit { grid-template-columns: minmax(0, 1fr) 100px; } .stoa-factnow { grid-column: 1 / -1; text-align: left; } }
 .stoa-mapform .stoa-btns { margin-top: 10px; }
 .stoa-maptext { height: auto; min-height: 76px; padding: 8px 10px; font-size: 13px; line-height: 1.45; resize: vertical; }
 .stoa-btn[data-kind="danger"] { border-color: var(--ui-red); color: var(--ui-red); font-weight: 600; }
@@ -1838,9 +1950,44 @@ function Words({ text }) {
 // the Desktop app does not, and there the microphone in the full chat is the one to use).
 const Recognition = typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null
 
+/** Which model the desk's conversation runs on, under the talk box: Hermes's own list of the models this profile can
+    use, with Hermes's price for each where it has one. */
+function ModelPick() {
+  const { picked } = useValue($model)
+  const talk = useValue($talk)
+  const query = useQuery({ queryKey: ['stoa', 'models'], queryFn: () => host.request('model.options', {}), staleTime: 60000, retry: false })      // no conversation named: the profile's own default, which is what "Hermes's default" means here
+  const data = query.data || {}
+  const usual = data.model ? String(data.model) : ''
+  const short = name => String(name || '').replace(/^.*\//, '')
+  const price = (row, model) => {
+    const cost = row.pricing && row.pricing[model]
+    if (!cost) return ''
+    if (cost.free) return 'free'
+    return cost.input && cost.output ? cost.input + ' in · ' + cost.output + ' out, per million tokens' : ''
+  }
+  const rows = (data.providers || []).filter(row => row.authenticated !== false && (row.models || []).length)
+  const label = picked ? short(picked.model) : usual ? short(usual) : 'Model'
+  return h(Menu, { kind: 'foot', up: true, label, title: 'The model the desk\'s conversation runs on. A cheaper one is enough for most desk work; keep the strongest for research such as a new market map.' },
+    h(MenuItem, { title: 'Hermes\'s default', sub: picked ? 'Whatever this profile is set to use' : (usual ? short(usual) + ' · in use' : 'In use'), on: !picked, onClick: () => { if (picked) pickModel(null, false, data.model && data.provider ? { model: String(data.model), provider: String(data.provider) } : null) } }),
+    query.isLoading ? h('div', { className: 'stoa-sub', style: { padding: '8px 10px' } }, 'Asking Hermes for its models…') : null,
+    query.error ? h('div', { className: 'stoa-sub', style: { padding: '8px 10px' } }, 'Hermes did not give its list of models: ' + why(query.error)) : null,
+    rows.map(row => {
+      const all = row.models || []
+      const first = (row.featured_models && row.featured_models.length ? row.featured_models.filter(model => all.includes(model)) : all).slice(0, 24)
+      const shown = picked && picked.provider === row.slug && all.includes(picked.model) && !first.includes(picked.model) ? [picked.model].concat(first) : first
+      return [h('div', { key: row.slug + ':rule', className: 'stoa-menurule' }),
+        h('div', { key: row.slug + ':name', className: 'stoa-eyebrow', style: { padding: '4px 10px 2px' } }, row.name || row.slug),
+        shown.map(model => h(MenuItem, { key: row.slug + ':' + model, title: short(model), sub: price(row, model), on: Boolean(picked) && picked.model === model && picked.provider === row.slug,
+          onClick: () => pickModel({ model, provider: row.slug }) })),
+        all.length > shown.length ? h('div', { key: row.slug + ':more', className: 'stoa-sub', style: { padding: '4px 10px 6px' } }, plural(all.length - shown.length, 'more model', 'more models') + ' under Settings → Models') : null]
+    }),
+    talk.busy ? h('div', { className: 'stoa-sub', style: { padding: '6px 10px' } }, 'Hermes is answering; a change waits until it is done.') : null)
+}
+
 function Dock({ state }) {
   const talk = useValue($talk)
   const file = useValue($attached)
+  const { asking } = useValue($model)
   const [text, setText] = useState('')
   const [listening, setListening] = useState(false)
   const area = useRef(null), picker = useRef(null), sheet = useRef(null), ear = useRef(null), before = useRef('')
@@ -1912,7 +2059,7 @@ function Dock({ state }) {
         h('span', { className: 'stoa-eyebrow' }, 'Stoa desk'),
         h('span', { style: { display: 'flex', gap: 2 } },
           h(Btn, { kind: 'quiet', onClick: openTalk }, 'Open the conversation'),
-          h('button', { type: 'button', className: 'stoa-icon', 'aria-label': 'Hide the conversation', title: 'Hide', onClick: () => setTalk({ open: false }) }, h(Icon, { name: 'down' })))),
+          h(Btn, { kind: 'quiet', 'aria-label': 'Hide the conversation', title: 'Hide the conversation (Esc). It carries on, and the desk updates when Hermes is done.', onClick: () => setTalk({ open: false }) }, 'Hide', h(Icon, { name: 'down', size: 13 })))),
       talk.turns.map((turn, index) => h('div', { key: index, className: 'stoa-turn' },
         h('div', { className: 'stoa-youline' }, h('span', { className: 'stoa-you' }, turn.you, turn.file ? h('small', null, turn.file) : null)),
         turn.reply ? h(Words, { text: turn.reply }) : null,
@@ -1922,6 +2069,12 @@ function Dock({ state }) {
         h('button', { type: 'button', className: 'stoa-hint', onClick: () => setTalk({ open: true }) }, 'Show the conversation'))
         : !text && !file ? h('div', { className: 'stoa-hints' }, hints.map(hint =>
           h('button', { type: 'button', key: hint, className: 'stoa-hint', disabled: talk.busy, onClick: () => send(hint) }, hint))) : null,
+    asking ? h('div', { className: 'stoa-glass stoa-ask', role: 'alertdialog', 'aria-label': 'Confirm the model' },
+      h('span', { className: 'stoa-askwords' }, asking.message.replace(/^[!\s]+[A-Z ]+[!\s]+/, '')),
+      h(Btn, { kind: 'primary', title: 'Leaves this conversation as it is and begins a new one on the model you picked, so nothing long is re-read. The desk keeps everything.',
+        onClick: () => { keepTalk({ model: asking.pick }); setModel({ picked: asking.pick, asking: null }); freshTalk() } }, 'Start a new conversation on it'),
+      h(Btn, { onClick: () => pickModel(asking.pick, true, asking.usual) }, 'Switch this conversation'),
+      h(Btn, { kind: 'quiet', onClick: () => setModel({ asking: null }) }, 'Cancel')) : null,
     h('div', { className: 'stoa-glass stoa-composer' },
       file ? h('div', { className: 'stoa-filechip' }, h(Icon, { name: 'clip', size: 13 }), file.name,
         h('button', { type: 'button', className: 'stoa-icon', style: { width: 22, height: 22 }, 'aria-label': 'Remove the file', onClick: () => $attached.set(null) }, h(Icon, { name: 'x', size: 13 }))) : null,
@@ -1934,12 +2087,21 @@ function Dock({ state }) {
         h('textarea', { ref: area, rows: 1, value: text, disabled: talk.busy, 'aria-label': 'Talk to the desk',
           placeholder: listening ? 'Listening…' : 'Tell Stoa what happened, ask it anything, or drop a list on the page…',
           onChange: event => setText(event.target.value),
-          onKeyDown: event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send() } } }),
+          onKeyDown: event => {
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send() }
+            else if (event.key === 'Escape' && talk.open) { event.preventDefault(); setTalk({ open: false }) }
+          } }),
         Recognition ? h('button', { type: 'button', className: 'stoa-icon', 'data-on': listening ? '1' : '0', disabled: talk.busy,
           title: listening ? 'Stop dictating' : 'Dictate (your browser\'s speech recognition)', 'aria-label': listening ? 'Stop dictating' : 'Dictate', onClick: dictate },
           h(Icon, { name: 'mic' })) : null,
         h('button', { type: 'button', className: 'stoa-icon', 'data-kind': 'send', disabled: talk.busy || (!text.trim() && !file), title: 'Send', 'aria-label': 'Send',
-          onClick: () => send() }, h(Icon, { name: 'up' }))))))
+          onClick: () => send() }, h(Icon, { name: 'up' }))),
+      h('div', { className: 'stoa-composerfoot' },
+        h(ModelPick),
+        h('span', { className: 'stoa-grow' }),
+        talk.turns.length || hasTalk() ? h('button', { type: 'button', className: 'stoa-footbtn', disabled: talk.busy,
+          title: 'Begin a new conversation with the next thing you say. Hermes re-reads the whole conversation on every step, so a long one costs more each time; the desk itself keeps everything, so nothing is lost by starting again.',
+          onClick: freshTalk }, 'New conversation') : null))))
 }
 
 // -- Today: what wants you, most pressing first, one move per row ---------------------------------
@@ -3938,6 +4100,8 @@ const hashOf = text => { let n = 2166136261; for (let i = 0; i < text.length; i+
 const agoWords = days => (days === null || days === undefined ? '' : days === 0 ? 'today' : days === 1 ? 'yesterday' : days < 60 ? days + ' days ago' : Math.round(days / 30) + ' months ago')
 /** A company's name as it is written on the map: whole when short, cut with an ellipsis when long. The panel and the table give it in full. */
 const shortName = name => (String(name).length > 22 ? String(name).slice(0, 21).trimEnd() + '…' : String(name))
+/** What every company Hermes adds to a map should carry, said the same way wherever the page asks for more. */
+const RECORD = 'For each one record its source, its headcount, what it uses today for the job we do, and any signal with the date it happened.'
 const namesOf = list => (list.length <= 2 ? list.map(c => c.company).join(' and ') : list[0].company + ', ' + list[1].company + ' and ' + (list.length - 2) + ' more')
 
 /** Every company on a map, with what the picture needs worked out: a fit out of 100 (Hermes's judgement, or the
@@ -4172,7 +4336,7 @@ function MapPicture({ market, list, lens, sizeBy, sel, shown, onPick, onLasso, o
 }
 
 /** A button that opens a short list beneath it. It closes on a choice, a click anywhere else, or Escape. */
-function Menu({ label, title, kind, children }) {
+function Menu({ label, title, kind, up, children }) {
   const [open, setOpen] = useState(false)
   const box = useRef(null)
   useEffect(() => {
@@ -4183,8 +4347,8 @@ function Menu({ label, title, kind, children }) {
     document.addEventListener('keydown', key)
     return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', key) }
   }, [open])
-  return h('div', { ref: box, className: 'stoa-menu' },
-    h('button', { type: 'button', className: kind === 'title' ? 'stoa-menutitle' : 'stoa-btn', title, 'aria-haspopup': 'menu', 'aria-expanded': open, onClick: () => setOpen(!open) },
+  return h('div', { ref: box, className: 'stoa-menu', 'data-up': up ? '1' : '0' },
+    h('button', { type: 'button', className: kind === 'title' ? 'stoa-menutitle' : kind === 'foot' ? 'stoa-footbtn' : 'stoa-btn', title, 'aria-haspopup': 'menu', 'aria-expanded': open, onClick: () => setOpen(!open) },
       label, '\u00a0', h('span', { className: 'stoa-menucaret', 'aria-hidden': true }, '▾')),
     open ? h('div', { className: 'stoa-menulist', role: 'menu', onClick: event => { if (event.target.closest('[role="menuitem"]')) setOpen(false) } }, children) : null)
 }
@@ -4198,7 +4362,7 @@ function NewMap({ first, onClose }) {
     const said = text.trim()
     if (!said) return
     const sent = toChat('Map a new market for me and keep it on the desk as a map of its own: ' + said + ' Name the market, split it into segments that would each get a different pitch, set the requirements, '
-      + 'then research companies with the evidence for each and the date of any signal. Tell me when it is on the desk.', null)
+      + 'then research companies. For each one record the evidence and its source, its headcount, what it uses today for the job we do, any signal with the date it happened, and the likely buyer if you come across one. Tell me when it is on the desk.', null)
     if (!sent) return
     host.notify({ kind: 'info', message: 'Hermes is mapping it. The map appears here when it is saved, which takes a few minutes.' })
     setText('')
@@ -4209,6 +4373,78 @@ function NewMap({ first, onClose }) {
     h('p', { className: 'stoa-sub', style: { margin: '4px 0 8px' } }, 'Say what you sell and who you are after. Hermes names the market, splits it into segments, researches companies and saves it as a map of its own. It takes a few minutes, and you can keep working while it does.'),
     h('textarea', { id: 'stoa-newmap', className: 'stoa-field stoa-maptext', rows: 3, autoFocus: !first, value: text, placeholder: 'We sell a fraud prevention tool to fintechs and marketplaces in the US with a small risk team.', onChange: event => setText(event.target.value) }),
     h('div', { className: 'stoa-btns' }, h(Btn, { kind: 'primary', disabled: !text.trim(), onClick: go }, 'Have Hermes map it'), onClose ? h(Btn, { kind: 'quiet', onClick: onClose }, 'Cancel') : null))
+}
+
+/** A map by the numbers, in a window over the page: what is on it and how complete it is, where it came from, what it
+    has cost so far, and the limits set on it. Hermes's cost is Hermes's own estimate, counted for the turns that worked on this map. */
+function MapFacts({ market, onClose, onFill }) {
+  const box = useRef(null)
+  const query = useQuery({ queryKey: ['stoa', 'facts', market.id], queryFn: () => rest('/market/' + encodeURIComponent(market.id) + '/facts'), staleTime: 2000 })
+  const [typed, setTyped] = useState(null)
+  const [saving, setSaving] = useState(false)
+  useEffect(() => { const el = box.current; if (el && !el.open && el.showModal) el.showModal() }, [])
+  const facts = query.data
+  useEffect(() => { if (facts && typed === null) setTyped(Object.fromEntries(Object.entries(facts.limits).map(([name, value]) => [name, value ? String(value) : '']))) }, [facts])
+  const close = () => { const el = box.current; if (el && el.open) el.close(); else onClose() }
+  const save = event => {
+    event.preventDefault()
+    setSaving(true)
+    rest('/market/' + encodeURIComponent(market.id) + '/limits', { method: 'POST', body: Object.fromEntries(Object.entries(typed || {}).map(([name, value]) => [name, Number(String(value).replace(/[^0-9.]/g, '')) || 0])) })
+      .then(result => { refresh(); host.notify({ kind: result.ok ? 'success' : 'info', message: result.ok ? 'Limits saved for this map.' : result.error || 'Stoa could not save that.' }) })
+      .catch(error => host.notifyError(error, 'Stoa could not save the limits')).then(() => setSaving(false))
+  }
+  const big = n => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'K' : String(n))
+  const usd = n => '$' + Number(n || 0).toFixed(2)
+  const day = stamp => { const d = new Date(String(stamp || '').slice(0, 10) + 'T12:00:00'); return isNaN(d) ? '' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) }
+  let body
+  if (!facts) body = h('p', { className: 'stoa-sub' }, query.error ? 'The numbers could not be read: ' + why(query.error) : 'Counting…')
+  else {
+    const on = facts.on_it, cost = facts.cost, total = on.companies || 1
+    const cover = [['Checked against the requirements', on.checked, on.companies], ['With a source link', on.sourced, on.companies], ['Headcount known', on.sized, on.companies],
+      ['What it uses today known', on.uses, on.companies], ['A buyer named', on.buyers, on.companies], ['Signals with a date', on.dated, on.signals]]
+    const askable = facts.gaps.filter(gap => gap.ask)
+    const limitRow = (name, label, hint, now) => h('label', { key: name, className: 'stoa-factlimit' },
+      h('span', null, h('b', null, label), h('small', null, hint)),
+      h('input', { className: 'stoa-field', inputMode: 'decimal', value: (typed || {})[name] || '', placeholder: 'No limit', 'aria-label': label, onChange: event => setTyped({ ...(typed || {}), [name]: event.target.value }) }),
+      h('small', { className: 'stoa-factnow' }, now))
+    body = [
+      h('div', { key: 'grid', className: 'stoa-factgrid' },
+        h('section', null, h('div', { className: 'stoa-sechead', style: { padding: '0 0 8px' } }, h('span', { className: 'stoa-eyebrow' }, 'What is on it')),
+          h('div', { className: 'stoa-factfigs' }, [['Companies', on.companies], ['Segments', on.segments], ['In the pipeline', on.in_pipeline], ['Dismissed', on.dismissed]].map(pair =>
+            h('div', { key: pair[0] }, h('b', null, pair[1]), h('small', null, pair[0])))),
+          cover.map(row => h('div', { key: row[0], className: 'stoa-factrow' }, h('span', null, row[0]), h('span', { className: 'stoa-num' }, row[1] + ' of ' + row[2]),
+            h('u', { className: 'stoa-mapmeter' }, h('i', { style: { width: (row[2] ? Math.round(100 * row[1] / row[2]) : 0) + '%' } })))),
+          askable.length ? h('div', { className: 'stoa-btns', style: { marginTop: 12 } }, h(Btn, { title: 'Sends Hermes a line asking it to fill in ' + askable.map(gap => gap.what).join(', ') + ' where a source says so', onClick: () => { if (onFill(askable)) close() } }, 'Ask Hermes to fill in what is missing')) : null),
+        h('section', null, h('div', { className: 'stoa-sechead', style: { padding: '0 0 8px' } }, h('span', { className: 'stoa-eyebrow' }, 'Where it came from')),
+          facts.sources.links ? [h('p', { key: 'p', style: { margin: '0 0 8px' } }, plural(facts.sources.links, 'source link', 'source links') + ' from ' + plural(facts.sources.sites, 'site', 'sites') + '.'),
+            facts.sources.top.map(row => h('div', { key: row.site, className: 'stoa-factrow', 'data-plain': '1' }, h('span', { style: { overflowWrap: 'anywhere' } }, row.site), h('span', { className: 'stoa-num' }, plural(row.links, 'link', 'links'))))]
+            : h('p', { className: 'stoa-sub' }, 'No company on this map has a source link yet.'),
+          h('div', { className: 'stoa-sechead', style: { padding: '0 0 8px', marginTop: 18 } }, h('span', { className: 'stoa-eyebrow' }, 'What it has cost')),
+          h('div', { className: 'stoa-factcost' },
+            h('div', null, h('b', null, cost.runs ? (cost.usd === null ? 'No price known' : usd(cost.usd)) : usd(0)), h('small', null, 'Hermes\'s work, as Hermes estimates it')),
+            h('p', { className: 'stoa-sub' }, cost.runs
+              ? plural(cost.runs, 'turn', 'turns') + ' · ' + plural(cost.calls, 'model call', 'model calls') + ' · ' + cost.minutes + ' min of model time · ' + big(cost.tokens.in + cost.tokens.cache_read + cost.tokens.cache_write) + ' tokens in, ' + big(cost.tokens.out) + ' out'
+                + (cost.usd !== null ? ' · ' + usd(cost.usd_month) + ' this month' : '') + (cost.unpriced && cost.usd !== null ? ' · ' + plural(cost.unpriced, 'call', 'calls') + ' had no price and is not in the figure' : '')
+              : 'Nothing counted yet. Counting starts the next time Hermes works on this map.')),
+          h('div', { className: 'stoa-factrow', 'data-plain': '1' }, h('span', null, 'People Data Labs lookups'), h('span', { className: 'stoa-num' }, cost.lookups_month + ' this month · ' + cost.lookups + ' in all')),
+          h('div', { className: 'stoa-factrow', 'data-plain': '1' }, h('span', null, 'Exa searches through Stoa'), h('span', { className: 'stoa-num' }, cost.searches_month + ' this month · ' + cost.searches + ' in all')),
+          h('p', { className: 'stoa-sub', style: { marginTop: 8 } }, 'The dollar figure is Hermes\'s own estimate from the provider\'s price list, for the turns that worked on this map' + (cost.since ? ' since ' + day(cost.since) : '') + '. It is not an invoice. Web research Hermes does with its own tools is inside that figure; only searches made through Stoa are counted on the Exa line.'))),
+      h('form', { key: 'limits', className: 'stoa-factlimits', onSubmit: save },
+        h('div', { className: 'stoa-sechead', style: { padding: '0 0 8px' } }, h('span', { className: 'stoa-eyebrow' }, 'Limits for this map'), h('span', { className: 'stoa-sub' }, 'leave a box empty for no limit')),
+        limitRow('companies', 'Companies on the map', 'Hermes stops adding when the map holds this many', on.companies + ' now'),
+        limitRow('budget', 'Hermes\'s work a month, in dollars', 'By Hermes\'s estimate; past it, Stoa refuses new companies and searches for this map', usd(cost.usd_month) + ' this month'),
+        limitRow('lookups', 'People Data Labs lookups a month', 'For this map alone, inside the cap for the whole desk', cost.lookups_month + ' this month'),
+        limitRow('searches', 'Exa searches a month', 'Searches made through Stoa for this map', cost.searches_month + ' this month'),
+        h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'At a limit, Stoa refuses the next step and tells Hermes to stop and tell you. It cannot stop a turn that is already running.'),
+        h('div', { className: 'stoa-btns' }, h(Btn, { type: 'submit', kind: 'primary', disabled: saving || typed === null }, saving ? 'Saving…' : 'Save limits')))]
+  }
+  return h('dialog', { ref: box, className: 'stoa-dialog', 'aria-label': 'Map facts: ' + market.name, onClose, onClick: event => { if (event.target === box.current) close() } },
+    h('div', { className: 'stoa-dialogin' },
+      h('div', { className: 'stoa-dialoghead' },
+        h('div', { className: 'stoa-grow', style: { minWidth: 0 } }, h('div', { className: 'stoa-eyebrow' }, 'Map facts'), h('div', { className: 'stoa-maph' }, market.name),
+          facts ? h('div', { className: 'stoa-sub' }, ['made ' + day(facts.created), 'last changed ' + day(facts.updated)].join(' · ')) : null),
+        h(Btn, { kind: 'quiet', 'aria-label': 'Close', onClick: close }, 'Close')),
+      body))
 }
 
 /** The market map on the page: the picture, what is picked beside it, the brief you can weigh, and every company in a table. */
@@ -4268,6 +4504,16 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
   }
   const ask = line => toChat(line, null)
   const here = ' my market map “' + market.name + '”'
+  // How many more companies to ask Hermes for: five, or what the limits a person set on this map leave room for. At a
+  // limit it says so and asks for nothing, so no research is paid for that the map would then refuse.
+  const roomFor = () => {
+    const room = market.room
+    if (room && (room.stop || room.companies === 0)) {
+      host.notify({ kind: 'info', message: room.stop ? 'This map has used the budget set for Hermes\'s work this month. Raise it under Map facts to carry on.' : 'This map is at its limit of ' + plural(room.limit, 'company', 'companies') + '. Raise it under Map facts, or dismiss a company to make room.' })
+      return ''
+    }
+    return ['one', 'two', 'three', 'four', 'five'][Math.min(5, room && room.companies !== null ? room.companies : 5) - 1]
+  }
   const act = {
     add: companies => send('track', companies.filter(c => c.status !== 'tracked'), null, result => (result.added || []).length
       ? plural(result.added.length, 'record', 'records') + ' opened in the pipeline, each with its evidence.' : 'Nothing was added: ' + ((result.skipped || [])[0] || 'they are already in the pipeline.')),
@@ -4288,8 +4534,9 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
     draft: companies => ask(companies.length === 1
       ? 'Draft a first outreach note to ' + (companies[0].buyer ? companies[0].buyer.name + ' at ' : who.likely + ' at ') + companies[0].company + ', leading with the evidence on' + here + '. Show me the draft. Do not send anything.'
       : 'Draft a first outreach note for each of these companies from' + here + ', each leading with its own evidence: ' + companies.map(c => c.company).join(', ') + '. Show me the drafts. Do not send anything.'),
-    more: companies => ask('Find up to five more companies like ' + namesOf(companies) + ' for' + here + '. Keep to the map\'s requirements, check each one against them with the evidence, and add them to the map. Then tell me who you added and why.'),
-    grow: segment => ask('Find up to five more companies for the “' + segment + '” segment of' + here + '. Keep to the map\'s requirements, check each one against them with the evidence, and add them to the map. Then tell me who you added and why.'),
+    more: companies => roomFor() && ask('Find up to ' + roomFor() + ' more ' + (roomFor() === 'one' ? 'company' : 'companies') + ' like ' + namesOf(companies) + ' for' + here + '. Keep to the map\'s requirements and check each one against them with the evidence. ' + RECORD + ' Add them to the map, then tell me who you added and why.'),
+    grow: segment => roomFor() && ask('Find up to ' + roomFor() + ' more ' + (roomFor() === 'one' ? 'company' : 'companies') + ' for the “' + segment + '” segment of' + here + '. Keep to the map\'s requirements and check each one against them with the evidence. ' + RECORD + ' Add them to the map, then tell me who you added and why.'),
+    fill: gaps => ask('On' + here + ', fill in what is missing. For each company that lacks it: ' + gaps.map(gap => gap.ask).join('; ') + '. Keep what is already there, give a source for anything you add, leave out what no source says, and tell me what you could not find.'),
     suggest: () => ask('Suggest two neighbouring segments for' + here + ': who they are, and why they would be worth mapping. Do not add anything yet; I will say which.'),
     require: text => ask('Add this requirement to' + here + ' and check every company on it against it, with the evidence: ' + text)
   }
@@ -4309,7 +4556,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
     return [
       open.length ? h(Btn, { key: 'add', kind: 'primary', disabled: Boolean(busy), onClick: () => act.add(companies) }, busy === 'track' ? 'Adding…' : companies.length === 1 ? 'Add to pipeline' : 'Add ' + open.length + ' to pipeline') : null,
       nobody.length ? (market.lookups && (market.buyer_titles || []).length
-        ? h(Btn, { key: 'buy', disabled: Boolean(busy), title: 'One People Data Labs lookup per company, for one person with a title like the buyers already on this map (' + market.buyer_titles.slice(0, 3).join(', ') + '). One person is one credit, so this spends at most ' + plural(nobody.length, 'credit', 'credits') + ', inside your monthly cap.',
+        ? h(Btn, { key: 'buy', disabled: Boolean(busy), title: 'One People Data Labs lookup per company, for one person ranked manager or above with a title like the buyers already on this map (' + market.buyer_titles.slice(0, 3).join(', ') + '). Read the title before you use the name. One person is one credit, so this spends at most ' + plural(nobody.length, 'credit', 'credits') + ', inside your monthly cap.',
           onClick: () => act.buyers(companies) }, busy === 'buyers' ? 'Looking…' : (companies.length === 1 ? who.find[0] : who.find[1]) + ' · ' + plural(nobody.length, 'lookup', 'lookups'))
         : h(Btn, { key: 'buy', title: market.lookups ? 'No buyer is named on this map yet, so there is no job title to look for. Hermes works out who the buyer is at each company.' : 'Hermes works out who the buyer is with its web search. A People Data Labs key (Setup) lets it look people up.',
           onClick: () => act.buyers(companies) }, who.ask)) : null,
@@ -4400,8 +4647,10 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
         h('div', { className: 'stoa-sub' }, [plural(list.length, 'company', 'companies'), market.numbers.in_pipeline + ' in the pipeline', list.filter(c => c.reason).length + ' with a reason to call',
           plural(list.filter(c => c.buyer).length, who.one + ' named', who.many + ' named'), shortDay(market.updated) ? 'updated ' + shortDay(market.updated) : ''].filter(Boolean).join(' · '))),
       h('div', { className: 'stoa-btns', style: { margin: 0 } },
+        h(Btn, { title: 'This map by the numbers: what is on it, where it came from, what it has cost, and its limits', onClick: () => setMode('facts') }, 'Map facts'),
         h(Btn, { disabled: Boolean(saving), title: 'The whole map as one web page, with buyers\' names and what is in your pipeline', onClick: () => save(false) }, saving === 'own' ? 'Saving…' : 'Download page'),
         h(Btn, { disabled: Boolean(saving), title: 'The same page without buyers\' names or your pipeline: the one to host or send to a client', onClick: () => save(true) }, saving === 'share' ? 'Saving…' : 'Download a copy to share'))),
+    mode === 'facts' ? h(MapFacts, { market, onClose: () => setMode(''), onFill: act.fill }) : null,
     mode === 'new' ? h(NewMap, { onClose: () => setMode('') }) : null,
     mode === 'rename' ? h('form', { className: 'stoa-box stoa-mapform', onSubmit: event => { event.preventDefault(); if (draft.trim() && draft.trim() !== market.name) manage('rename', { name: draft.trim() }, result => 'The map is now called ' + result.name + '.') } },
       h('label', { className: 'stoa-name', htmlFor: 'stoa-mapname' }, 'What this map is called'),
@@ -4750,6 +4999,8 @@ export default {
       return ctx.rest(pipe && pipe !== 'main' ? path + (path.includes('?') ? '&' : '?') + 'pipeline=' + encodeURIComponent(pipe) : path, options)
     }
     try { $folds.set({ ...(storage.get('folds', {}) || {}) }) } catch { /* no storage: every group starts closed */ }
+    const keptModel = (ctx.storage.get('talk', {}) || {}).model
+    if (keptModel && typeof keptModel.model === 'string' && typeof keptModel.provider === 'string') setModel({ picked: { model: keptModel.model, provider: keptModel.provider } })
     const kept = ctx.storage.get('filter', {}) || {}      // an older version kept every filter, a picked-out stage included: take only these two
     $filter.set({ ...NO_FILTER, owner: typeof kept.owner === 'string' ? kept.owner : '', group: typeof kept.group === 'string' ? kept.group : '' })
     // While the app is open the desk knows it can draw cards and maps in the conversation here.
