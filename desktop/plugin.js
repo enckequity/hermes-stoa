@@ -4938,8 +4938,12 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
     return ['one', 'two', 'three', 'four', 'five'][Math.min(5, room && room.companies !== null ? room.companies : 5) - 1]
   }
   const act = {
-    add: companies => send('track', companies.filter(c => c.status !== 'tracked'), null, result => (result.added || []).length
-      ? plural(result.added.length, 'record', 'records') + ' opened in the pipeline, each with its evidence.' : 'Nothing was added: ' + ((result.skipped || [])[0] || 'they are already in the pipeline.')),
+    add: companies => send('track', companies.filter(c => c.status !== 'tracked'), null, result => {
+      const added = result.added || [], filled = added.filter(a => a.existing).length, opened = added.length - filled
+      if (!added.length) return 'Nothing was added: ' + ((result.skipped || [])[0] || 'they are already in the pipeline.')
+      return [opened ? plural(opened, 'record', 'records') + ' opened in the pipeline, each with its evidence.' : '',
+        filled ? plural(filled, 'company', 'companies') + ' already had a record, so the map filled ' + (filled === 1 ? 'it' : 'them') + ' in instead.' : ''].filter(Boolean).join(' ')
+    }),
     dismiss: companies => send('dismiss', companies.filter(c => c.status !== 'tracked'), null, result => { setPicked([]); return (result.dismissed || []).length ? plural(result.dismissed.length, 'company', 'companies') + ' taken off the map. “Dismissed” above the map puts one back.' : 'Records already in the pipeline stay on the map.' }),
     // One person at each company, with a title like the buyers already named on this map: one lookup apiece, never more.
     // With a key but no buyer named yet there is no title to look for, so Hermes works out who the buyer is instead.

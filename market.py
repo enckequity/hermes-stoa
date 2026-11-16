@@ -54,6 +54,18 @@ def _clean(value: Any, limit: int = 400) -> str:
     return " ".join(str(value).split())[:limit]
 
 
+COMPANY_ENDINGS = re.compile(r"[\s,]+(inc|incorporated|llc|ltd|limited|corp|corporation|co|company|gmbh|plc|sa|ag|bv)\.?$")
+
+
+def _company_key(name: Any) -> str:
+    """One spelling for a company, to tell whether two records are the same one: "Acme, Inc." and "acme" match, and
+    so do "Snov.io" and "snov.io". Letters and digits only, in any script."""
+    text = " ".join(str(name or "").lower().split())
+    for _ in range(2):
+        text = COMPANY_ENDINGS.sub("", text)
+    return re.sub(r"[\W_]+", "", text, flags=re.UNICODE)
+
+
 def _key(label: str) -> str:
     """A stable key for a requirement's wording, in any script."""
     return re.sub(r"[^\w]+", "_", str(label or "").lower(), flags=re.UNICODE).strip("_")[:80]
@@ -734,18 +746,28 @@ class Markets:
             rule = playbook.map_group or ("company" if playbook.terms["group"].lower() in ACCOUNT_WORDS else "map")
             group = self.desk._group_spelling(_clean(args.get("group"), 200) or (target["company"] if rule == "company" else owner_market["name"]))
             keys = {f["key"] for f in playbook.fields}
+            found = {k: v for k, v in (("title", person.get("title", "") if contact else ""),
+                                       ("location", target["location"]), ("company_size", target["size"]),
+                                       ("competitor", target["detail"].get("uses", "")),
+                                       ("trigger", target["signal"])) if v and k in keys}
+            note = " ".join(b for b in (target["why"], "Signal: %s." % target["signal"] if target["signal"] else "",
+                                        "Uses today: %s." % target["detail"]["uses"] if target["detail"].get("uses") else "",
+                                        "Source: %s" % target["source"] if target["source"] else "") if b)
+            open_one = self._open_record(target["company"])
+            if open_one is not None:      # already in the pipeline (a list, a file, by hand): fill that record in, never a second one
+                self._enrich(open_one, contact, person, found, note, owner_market["name"], actor)
+                with self.store._conn() as conn:
+                    conn.execute("UPDATE targets SET status = 'tracked', deal_id = ?, updated_at = ? WHERE id = ?",
+                                 (open_one["id"], st.now(), target["id"]))
+                made.append({"company": target["company"], "deal": open_one["id"], "market_id": target["market_id"],
+                             "contact": contact, "group": open_one["grp"], "existing": True})
+                continue
             deal = self.store.add(
                 contact or target["company"], playbook.first_stage(), actor=actor, company=target["company"], grp=group,
                 email=person.get("email", "") if contact else "", linkedin=person.get("linkedin", "") if contact else "",
                 owner=str(args.get("owner") or ""), source="market map: %s" % owner_market["name"],
                 next_step="First outreach" if contact else "Find the right contact",
-                fields={k: v for k, v in (("title", person.get("title", "") if contact else ""),
-                                          ("location", target["location"]), ("company_size", target["size"]),
-                                          ("competitor", target["detail"].get("uses", "")),
-                                          ("trigger", target["signal"])) if v and k in keys})      # why now, where the playbook keeps it
-            note = " ".join(b for b in (target["why"], "Signal: %s." % target["signal"] if target["signal"] else "",
-                                        "Uses today: %s." % target["detail"]["uses"] if target["detail"].get("uses") else "",
-                                        "Source: %s" % target["source"] if target["source"] else "") if b)
+                fields=found)      # why now, where the playbook keeps it
             if note:
                 self.store.log(deal["id"], "note", "From the %s map. %s" % (owner_market["name"], note), actor=actor)
             with self.store._conn() as conn:
@@ -756,7 +778,11 @@ class Markets:
             self._refresh(market_id)
         out = {"ok": bool(made or already),
                "added_to_pipeline": [{k: v for k, v in (("company", m["company"]), ("deal", m["deal"]), ("contact", m["contact"]),
-                                                         ("group", m["group"])) if v} for m in made]}
+                                                         ("group", m["group"]), ("existing_record", m.get("existing"))) if v}
+                                     for m in made]}
+        if any(m.get("existing") for m in made):
+            out["note"] = ("Where a company already had an open record (existing_record), no second one was made: the map's "
+                           "findings, and its buyer, were added to that record.")
         if already:
             out["already_in_pipeline"] = already
         if unknown:
@@ -764,6 +790,48 @@ class Markets:
         if not out["ok"]:
             out["error"] = "none of those are on a market map"
         return out
+
+    def _open_record(self, company: str) -> Optional[dict]:
+        """The open record already in the pipeline for this company as an account, however it got there ("Snov.io"
+        and "snov.io", "Acme" and "Acme, Inc." are one company): its company and its group both name it. A record that
+        only mentions the company (a candidate who works there, filed under the role they are up for) is someone else's
+        record, and is left alone. The latest touched wins."""
+        key = _company_key(company)
+        if not key:
+            return None
+        with self.store._conn() as conn:
+            rows = conn.execute("SELECT id, company, grp, updated_at FROM deals WHERE status = 'open' AND archived_at = '' "
+                                "AND company != ''").fetchall()
+        same = sorted((dict(r) for r in rows if _company_key(r["company"]) == key and _company_key(r["grp"]) == key),
+                      key=lambda r: r["updated_at"], reverse=True)
+        return self.store.get(same[0]["id"]) if same else None
+
+    def _enrich(self, deal: dict, contact: str, person: dict, found: dict, note: str, map_name: str, actor: str) -> None:
+        """Add what the map knows to a record already in the pipeline. Only what is empty there is filled in, so
+        nothing a person typed is replaced. A buyer the record does not name yet becomes its person; one it names
+        already is left as it is, and the map's buyer goes on it as another person."""
+        values: dict = {}
+        fields = {k: v for k, v in found.items() if k != "title" and not deal["fields"].get(k)}
+        if contact:
+            title = person.get("title", "")
+            nameless = not deal["name"] or _company_key(deal["name"]) in (_company_key(deal["company"]), _company_key(deal["grp"]))
+            if nameless or _company_key(deal["name"]) == _company_key(contact):
+                if nameless:
+                    values["name"] = contact
+                for key in ("email", "linkedin"):
+                    if person.get(key) and not deal[key]:
+                        values[key] = person[key]
+                if title and "title" in found and not deal["fields"].get("title"):
+                    fields["title"] = title
+            elif not any(_company_key(p["name"]) == _company_key(contact) for p in self.store.people(deal["id"])):
+                self.store.person_add(deal["id"], contact, actor=actor, title=title, email=person.get("email", ""),
+                                      linkedin=person.get("linkedin", ""), role="from the %s map" % map_name)
+        if not deal["next_step"] or (contact and deal["next_step"] == "Find the right contact"):
+            values["next_step"] = "First outreach" if contact else "Find the right contact"
+        if values or fields:
+            self.store.update(deal["id"], actor=actor, fields=fields or None, **values)
+        self.store.log(deal["id"], "note", "Matched on the %s map, so this record was filled in rather than a second one "
+                                           "made.%s" % (map_name, " " + note if note else ""), actor=actor)
 
     def dismiss(self, args: dict) -> dict:
         refs = _refs(args)
@@ -854,7 +922,7 @@ class Markets:
         for ref in list(refs)[:25]:
             result = self.click_track(str(ref), actor)
             if result.get("deal"):
-                added.append({"deal": result["deal"]["id"], "name": result["deal"]["name"]})
+                added.append({"deal": result["deal"]["id"], "name": result["deal"]["name"], "existing": bool(result.get("existing"))})
             elif result.get("notice"):
                 already.append(result["notice"])
         return {"ok": bool(added), "added": added, "skipped": already}
@@ -972,9 +1040,15 @@ class Markets:
             task = ("Work out who at %s is the most likely buyer for us, using %s. Put that person on the record with "
                     "gtm_deal(action=\"update\"), then reply here with who you picked and why, and a first-touch note of under 90 "
                     "words." % (target["company"], how))
-        followup = ("[Stoa desk] %s added %s to the pipeline from the market map. The record is already created (id %s), so do "
-                    "not add it again.\n\nYour task: %s Do not send anything." % (actor or "Someone", target["company"], deal["id"], task))
-        return {"deal": deal, "market_id": target["market_id"], "followup": followup, "notice": ""}
+        if made.get("existing_record"):
+            followup = ("[Stoa desk] %s added %s to the pipeline from the market map. It already had an open record (id %s), so "
+                        "the map's findings were added to that record instead of making a second one; do not add it again.\n\n"
+                        "Your task: %s Do not send anything." % (actor or "Someone", target["company"], deal["id"], task))
+        else:
+            followup = ("[Stoa desk] %s added %s to the pipeline from the market map. The record is already created (id %s), so do "
+                        "not add it again.\n\nYour task: %s Do not send anything." % (actor or "Someone", target["company"], deal["id"], task))
+        return {"deal": deal, "market_id": target["market_id"], "followup": followup, "notice": "",
+                "existing": bool(made.get("existing_record"))}
 
 
 def _unpack(row: dict) -> dict:

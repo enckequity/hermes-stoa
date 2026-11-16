@@ -781,6 +781,35 @@ class MarketTests(unittest.TestCase):
         two = self.market({"action": "track", "targets": ["Loose One"]})
         self.assertEqual(self.desk.store.get(two["added_to_pipeline"][0]["deal"])["grp"], "Freight brokers, Midwest")
 
+    def test_track_fills_in_a_record_already_in_the_pipeline(self):
+        # A company first added from a file, by its name alone, then found on a map with its buyer: one record, filled in.
+        store = self.desk.store
+        first = store.add("Meridian Freight", "lead", company="meridian freight", grp="Meridian Freight",
+                          next_step="Apply at the partner page", source="Research", fields={"competitor": "Spreadsheets"})
+        self.define(); self.add()
+        self.market({"action": "add", "companies": [{"company": "Meridian Freight, Inc.",
+                                                    "uses": "Acme TMS", "people": [{"name": "Ada Park", "title": "VP Ops"}]}]})
+        result = self.market({"action": "track", "targets": ["Meridian Freight, Inc."]})
+        made = result["added_to_pipeline"][0]
+        self.assertEqual((made["deal"], made["existing_record"], store.count()), (first["id"], True, 1))
+        self.assertIn("no second one was made", result["note"])
+        deal = store.get(first["id"])
+        self.assertEqual((deal["name"], deal["fields"]["title"], deal["next_step"], deal["source"]),
+                         ("Ada Park", "VP Ops", "Apply at the partner page", "Research"))      # what a person typed stays
+        self.assertEqual(deal["fields"]["competitor"], "Spreadsheets")
+        self.assertIn("filled in rather than a second one", store.activities(deal["id"])[0]["text"])
+        self.assertIn("[in pipeline]", self.market({"action": "show"})["map"])
+        # A record that already names someone else keeps them, and gets the map's buyer as another person.
+        other = store.add("Lee Chan", "lead", company="Northwind Carriers", grp="Northwind Carriers")
+        self.market({"action": "add", "companies": [{"company": "Northwind Carriers", "people": [{"name": "Ada Park", "title": "COO"}]}]})
+        clicked = self.desk.markets.click_track(self.desk.markets.target("Northwind Carriers")["id"], "dashboard")
+        self.assertEqual((clicked["deal"]["id"], clicked["deal"]["name"], clicked["existing"]), (other["id"], "Lee Chan", True))
+        self.assertIn("already had an open record", clicked["followup"])
+        self.assertEqual([(p["name"], p["title"]) for p in store.people(other["id"])], [("Ada Park", "COO")])
+        # A closed record is history: the map opens a new one.
+        store.move(store.add("Loose One", "lead", company="Loose One")["id"], "lead", status="lost")
+        self.assertNotIn("existing_record", self.market({"action": "track", "targets": ["Loose One"]})["added_to_pipeline"][0])
+
     def test_dismiss_hides_from_the_map(self):
         self.define(); self.add()
         self.assertEqual(self.market({"action": "dismiss", "targets": ["Loose One"], "reason": "Too small"})["dismissed"], ["Loose One"])
