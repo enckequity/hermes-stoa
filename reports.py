@@ -906,12 +906,23 @@ class Reports:
             result = self.run(args.get("report"), args.get("period"))
             if not result.get("ok"):
                 return result
-            return dict(self.brief(result), ok=True, note="These are Stoa's own counts. Say what they show in a line or two; the page has the chart.")
+            out = dict(self.brief(result), ok=True, note="These are Stoa's own counts. Say what they show in a line or two; the page has the chart.")
+            if self.desk.desktop_open(session):
+                out["directive"] = self.desk.directive("report", id=result["id"], period=result["window"])
+                out["note"] = ("These are Stoa's own counts. Show the chart by writing that directive as a paragraph by itself, exactly "
+                               "as given: the app draws the live report there. Then say what it shows in a line or two.")
+            return out
         if action == "save":
             out = self.save(args, by=self.desk.actor(), draft=True)
             if out.get("ok"):
                 out["note"] = ("Saved as a draft on the Reports tab: the person keeps it or discards it there. Say in one line what it shows, "
                                "from the figures here. Do not save it again.")
+                if self.desk.desktop_open(session):
+                    found = self.find(out.get("id"))
+                    out["directive"] = self.desk.directive("report", id=out["id"], period=(found or {}).get("period") or "90")
+                    out["note"] = ("Saved as a draft: the person keeps it or discards it. Write that directive as a paragraph by itself, "
+                                   "exactly as given: the app draws the report there with Keep and Discard. Then say in one line what it "
+                                   "shows, from the figures here. Do not save it again.")
             else:
                 out["choices"] = {"count": list(COUNTS), "by": list(BYS) + ["field:<key>"], "when": list(WHENS), "split": list(SPLITS),
                                   "only": list(ONLY_KEYS), "period": [key for key, _ in PERIODS]}

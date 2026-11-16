@@ -196,7 +196,7 @@ def register(ctx) -> None:
 
     # -- tools ----------------------------------------------------------------------------------
     for schema, fn, emoji in (
-        (schemas.GTM_PIPELINE, desk.pipeline, "🏛️"),
+        (schemas.GTM_PIPELINE, lambda args: desk.pipeline(args, _session()), "🏛️"),
         (schemas.GTM_DEAL, lambda args: desk.reason_asked(args) or desk.deal(args), "🏛️"),
         (schemas.GTM_CARD, lambda args: desk.card(args, _session()), "🏛️"),
         (schemas.GTM_MARKET, lambda args: desk.market(args, _session()), "🗺️"),

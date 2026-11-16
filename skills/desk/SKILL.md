@@ -89,9 +89,12 @@ written. If a row comes back `unclear`, ask which record it is and propose again
 There the team has the Stoa pane open beside this conversation, and it redraws whenever you
 change the desk. Two things follow:
 
-- When `gtm_card`, `gtm_market(action="post")` or `gtm_intake` returns a `directive` (a line such
-  as `::stoa-card{id="..."}`), write that line as a paragraph by itself, exactly as given. The app
-  draws the live card or map there, with its buttons. Do not paste the record as text as well.
+- When `gtm_card`, `gtm_market(action="post")`, `gtm_intake`, `gtm_pipeline(view="today")` or
+  `gtm_report` (`read` and `save`) returns a `directive` (a line such as `::stoa-card{id="..."}` or
+  `::stoa-today{pipeline="p2"}`), write that line as a paragraph by itself, exactly as given. The
+  app draws the live card, map, day or report there, with its buttons. Do not paste the same
+  thing as text as well. An answer about every pipeline (`across`) has one line per pipeline:
+  write each, under the pipeline's name.
 - A message like "Dana Whitfield is now at Submitted on the Stoa desk. Open record ... and write
   what is waiting on it." means someone pressed a button in the pane or on a card. Call
   `gtm_deal(action="get")` for that record; the `pending_task` it returns is the writing to do.

@@ -3230,6 +3230,33 @@ class PipelineTests(unittest.TestCase):
         self.assertNotIn("across", one)
         self.assertNotIn("across", self.call("gtm_pipeline"))                     # the board is one pipeline's
 
+    def test_parts_drawn_in_a_chat_name_their_pipeline_once_there_are_several(self):
+        self.session(platform="desktop")
+        self.desk.desktop_seen = time.time()                                      # the app's half has checked in
+        rosa = self.call("gtm_deal", action="add", name="Rosa Lind", company="Ledgerline", next_step="Write to her", next_due="today")["deal"]["id"]
+        self.assertEqual(self.call("gtm_card", deal="Rosa Lind")["directive"], '::stoa-card{id="%s"}' % rosa)      # one pipeline: as before
+        day = self.call("gtm_pipeline", view="today")
+        self.assertEqual(day["directive"], "::stoa-today{}")
+        self.assertIn("Done, Draft and Snooze", day["note"])
+        stages = self.call("gtm_report", action="read", report="stages")
+        self.assertEqual(stages["directive"], '::stoa-report{id="stages" period="90"}')
+        self.second()
+        visa = self.call("gtm_deal", action="add", name="Visa retainer", company="Visa", next_step="Send the SOW", next_due="today", pipeline="My practice")["deal"]["id"]
+        self.assertEqual(self.call("gtm_card", deal="Visa retainer", pipeline="My practice")["directive"], '::stoa-card{id="%s" pipeline="p2"}' % visa)
+        self.assertEqual(self.call("gtm_card", deal="Rosa Lind")["directive"], '::stoa-card{id="%s" pipeline="main"}' % rosa)
+        day = self.call("gtm_pipeline", view="today")                             # one answer, and one list to draw, for each pipeline
+        self.assertEqual([part["directive"] for part in day["across"]], ['::stoa-today{pipeline="main"}', '::stoa-today{pipeline="p2"}'])
+        read = self.call("gtm_report", action="read", report="Win rate", period="year", pipeline="My practice")
+        self.assertEqual(read["directive"], '::stoa-report{id="winrate" period="year" pipeline="p2"}')
+        made = self.call("gtm_report", action="save", title="Value by owner", count="value", by="owner", when="open", pipeline="My practice")
+        self.assertTrue(made["draft"])
+        self.assertEqual(made["directive"], '::stoa-report{id="%s" period="90" pipeline="p2"}' % made["id"])
+        self.assertIn("Keep and Discard", made["note"])
+        for elsewhere in ("ios", "mobile", "slack", "cli", "cron"):               # the phone app and the rest get text, never a line they cannot draw
+            self.session(platform=elsewhere)
+            self.assertNotIn("directive", json.dumps(self.call("gtm_pipeline", view="today", pipeline="My practice")), elsewhere)
+            self.assertNotIn("directive", self.call("gtm_report", action="read", report="stages"), elsewhere)
+
     def test_the_agent_is_told_which_pipelines_there_are_within_its_limit(self):
         self.second()
         section, limit = self.ctx.sections["stoa.desk"]
@@ -3710,6 +3737,45 @@ class DashboardApiTests(unittest.TestCase):
         self.assertIn("-to-share-", clean["filename"])
         with self.assertRaises(api.HTTPException):
             api.export_part({"group": "No such search"})
+
+    def test_a_map_drawn_in_a_chat_acts_on_its_own_pipeline_whatever_the_page_shows(self):
+        api = self.api
+        asks = lambda pipeline="", **ids: api._REQUEST.set((pipeline, ids))
+        self.addCleanup(asks)
+        second = api.pipeline({"verb": "add", "name": "My practice", "playbook": "agency"})["added"]["id"]
+        with self.desk.on(second):
+            self.desk.markets.define({"name": "Practice map", "segments": ["One"]})
+            self.desk.markets.add({"market": "Practice map", "companies": [{"company": "Ada Analytics", "segment": "One"}, {"company": "Bly Labs", "segment": "One"}]})
+            ada = self.desk.markets.target("Ada Analytics")["id"]
+        asks("")                                                                  # the page shows the first pipeline; the companies are on the second's map
+        out = api.targets({"verb": "dismiss", "ids": [ada], "reason": "too small"})
+        self.assertTrue(out.get("ok", True), out)
+        with self.desk.on(second):
+            self.assertEqual(self.desk.markets.target("Ada Analytics")["status"], "dismissed")
+        asks(second)
+        state = api.state()
+        self.assertEqual([m["name"] for m in state["markets"]], ["Practice map"])  # what a map in a chat reads with pipeline="p2"
+
+    def test_a_card_that_names_its_pipeline_gets_that_record_when_both_have_the_same_id(self):
+        api = self.api
+        asks = lambda pipeline="", **ids: api._REQUEST.set((pipeline, ids))
+        self.addCleanup(asks)
+        second = api.pipeline({"verb": "add", "name": "My practice", "playbook": "agency"})["added"]["id"]
+        with self.desk.on(""):
+            dana = self.desk.store.find("Dana Whitfield")
+        with self.desk.on(second):                                                # the same person, the same group: the same id
+            twin = self.desk.deal({"action": "add", "name": "Dana Whitfield", "group": dana["grp"], "value": 5000})["deal"]
+        self.assertEqual(twin["id"], dana["id"])
+        asks("", deal_id=dana["id"])                                              # a card that does not say: the page's pipeline's record
+        self.assertEqual(api.deal(dana["id"])["pipeline"]["name"], "Recruiting desk")
+        asks(second, deal_id=dana["id"])                                          # a card that says pipeline="p2": that one
+        self.assertEqual((api.deal(dana["id"])["pipeline"]["name"], api.deal(dana["id"])["value"]), ("My practice", 5000))
+        drafted = api.act(dana["id"], {"verb": "draft"})
+        self.assertIn("Write the follow-up for Dana Whitfield on the Stoa desk (the My practice pipeline).", drafted["ask"])
+        with self.desk.on(second):
+            self.assertTrue(self.desk.handoff(dana["id"]))                        # the task waits on the second pipeline's record
+        with self.desk.on(""):
+            self.assertFalse(self.desk.handoff(dana["id"]))
 
     def test_the_page_shows_one_pipeline_at_a_time_and_follows_a_record_to_its_own(self):
         api = self.api

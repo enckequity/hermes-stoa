@@ -206,7 +206,7 @@ class Intake:
                         "out; then apply with columns={\"<column>\": \"notes\" | \"field\" | \"skip\"}." % ", ".join(sorted(ignored)[:8]))
         slack = self.desk.slack
         if self.desk.desktop_open(session):
-            out["directive"] = "::stoa-intake{id=\"%s\"}" % intake_id
+            out["directive"] = self.desk.directive("intake", id=intake_id)
             out["note"] = ("Show the review by writing that directive as a paragraph by itself, exactly as given. The app "
                            "draws it with a tick box per row and an Apply button. Add one line on what you found. " + waiting)
             del out["rows"]

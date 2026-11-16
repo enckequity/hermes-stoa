@@ -590,6 +590,14 @@ class Desk:
         where a card or a map can be drawn live in the conversation instead of pasted as text."""
         return (session or {}).get("platform") in ("local", "desktop") and time.time() - self.desktop_seen <= DESKTOP_FRESH
 
+    def directive(self, name: str, **attrs: Any) -> str:
+        """The line that draws one of the app's live parts in a conversation: ``::stoa-<name>{key="value" ...}``. On
+        a desk with more than one pipeline it also names the pipeline the call was about, so the part shows that
+        pipeline whatever the page happens to be showing (a chat with a Bot that keeps one client's pipeline, say)."""
+        if not self.tour() and len(self.pipelines()) > 1:
+            attrs["pipeline"] = self.current()["id"]
+        return "::stoa-%s{%s}" % (name, " ".join('%s="%s"' % (key, str(value).replace('"', "")) for key, value in attrs.items()))
+
     def can_enrich(self, playbook: Optional[Playbook] = None) -> bool:
         """Whether a record can be enriched: the key is set and the playbook has not switched it off."""
         return bool(self.secret(PDL_KEY)) and (playbook or self.playbook()).enrich != "none" and not self.tour()
@@ -656,13 +664,20 @@ class Desk:
                 log.debug("stoa: card refresh failed", exc_info=True)
 
     # -- gtm_pipeline ---------------------------------------------------------------------------
-    def pipeline(self, args: dict) -> dict:
+    def pipeline(self, args: dict, session: Optional[dict] = None) -> dict:
         playbook = self.playbook()
         view = str(args.get("view") or "board").lower()
         if view == "brief":
             return self.brief()
         if view == "today":
-            return self.today()
+            out = self.today()
+            if self.desktop_open(session):
+                out["directive"] = self.directive("today")
+                out["note"] = " ".join(filter(None, [out.get("note"), (
+                    "Show the day by writing that directive as a paragraph by itself, exactly as given. The app draws "
+                    "the live list there, with Done, Draft and Snooze on each record. Then say in a line or two what "
+                    "matters most; do not list the records again.")]))
+            return out
         if view == "cash":
             return self.cash(limit=15)
         if view == "activity":
@@ -3031,7 +3046,7 @@ class Desk:
             channel = session.get("chat_id") or ""
         text = self.text_card(deal)
         if not channel and self.desktop_open(session):
-            return {"ok": True, "posted": False, "directive": "::stoa-card{id=\"%s\"}" % deal["id"],
+            return {"ok": True, "posted": False, "directive": self.directive("card", id=deal["id"]),
                     "note": "Show the card by writing that directive as a paragraph by itself, exactly as given. "
                             "The app draws the live card with its buttons there. Do not also paste the record as text."}
         if self.slack is None or not self.slack.available or not channel:

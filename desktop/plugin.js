@@ -2,8 +2,10 @@
  * Stoa in the Hermes Desktop app and the Webapp.
  *
  * One file, no build step. It adds a Stoa page (Today, the pipeline, the market map, the activity
- * log and Setup), a live pane that sits beside the conversation, and three components the agent
- * can draw inside a reply: a record card, a market map, and the review of a list someone sent in.
+ * log and Setup), a live pane that sits beside the conversation, and five components the agent
+ * can draw inside a reply: a record card, a market map, the review of a list someone sent in, the
+ * day (Today's lists, with their buttons) and one report. Each names its pipeline when the desk has
+ * more than one, so it shows that pipeline whatever the page is showing.
  *
  * Everything here talks to the plugin's own backend (/api/plugins/stoa, the same routes the web
  * dashboard tab uses) through ctx.rest. A button or a form saves at once, with no model involved;
@@ -13,7 +15,7 @@
  */
 import * as SDK from '@hermes/plugin-sdk'
 import { atom, host, queryClient, useQuery, useValue } from '@hermes/plugin-sdk'
-import { Component, createElement as h, useEffect, useMemo, useRef, useState } from 'react'
+import { Component, createContext, createElement as h, useContext, useEffect, useMemo, useRef, useState } from 'react'
 
 let rest = null // ctx.rest, set in register()
 let storage = null // ctx.storage, set in register()
@@ -52,6 +54,10 @@ function matches(deal, f) {
   return [deal.name, deal.company, deal.group, deal.next_step, deal.owner, deal.stage_label].join(' ').toLowerCase().includes(f.text.toLowerCase())
 }
 const STATE = ['stoa', 'state']
+// The pipeline a part drawn in a chat belongs to ('main', 'p2', ...), handed down to the record, map and report inside it so
+// every read and every button names it. Null on the page and in the pane: they follow the page's own pipeline ($pipe).
+const InPipe = createContext(null)
+const inPipe = pipe => (pipe ? { pipeline: pipe } : {})
 const refresh = () => queryClient.invalidateQueries({ queryKey: ['stoa'] })
 const $tab = atom('today') // the page's tab: today | pipeline | cash | market | reports | activity | setup
 const $draft = atom('') // words put in the dock for the person to finish and send
@@ -72,9 +78,9 @@ function offerUndo(last) {
 }
 
 /** A record taken off the desk (its add was undone) comes back, log and all. */
-async function putBack(dealId) {
+async function putBack(dealId, pipe) {
   try {
-    const result = await rest('/deal/' + encodeURIComponent(dealId) + '/restore', { method: 'POST', body: {} })
+    const result = await rest('/deal/' + encodeURIComponent(dealId) + '/restore', { method: 'POST', body: {}, ...inPipe(pipe) })
     refresh()
     host.notify({ kind: 'success', message: result.name + ' is back on the desk.' })
   } catch (error) {
@@ -82,9 +88,9 @@ async function putBack(dealId) {
   }
 }
 
-async function undo(dealId, op) {
+async function undo(dealId, op, pipe) {
   try {
-    const result = await rest('/deal/' + encodeURIComponent(dealId) + '/undo', { method: 'POST', body: { op: op || '' } })
+    const result = await rest('/deal/' + encodeURIComponent(dealId) + '/undo', { method: 'POST', body: { op: op || '' }, ...inPipe(pipe) })
     $last.set(null)
     refresh()
     host.notify({ kind: 'info', message: 'Taken back: ' + result.undid + (result.removed ? '. ' + result.name + ' is off the desk.' : '') })
@@ -134,8 +140,11 @@ const dueTone = deal => (deal.due ? (deal.next_due < today() ? 'bad' : 'warn') :
 const cap = text => (text ? text.charAt(0).toUpperCase() + text.slice(1) : '')
 const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many)
 
-function useDesk() {
-  return useQuery({ queryKey: STATE, queryFn: () => rest('/state'), refetchInterval: 5000, staleTime: 1500 })
+/** The desk as the page shows it; with `pipe` (an id from state.pipelines), as that pipeline has it, whatever the page is showing. */
+function useDesk(pipe) {
+  const own = typeof pipe === 'string' && pipe !== ''
+  return useQuery({ queryKey: own ? ['stoa', 'state', 'in', pipe] : STATE, queryFn: () => rest('/state', own ? { pipeline: pipe } : undefined),
+    refetchInterval: 5000, staleTime: 1500 })
 }
 
 /** Send one line into the chat, as if typed: the conversation the card is in, else the one in focus. */
@@ -163,9 +172,9 @@ function toChat(text, sessionId, lane) {
   return sent
 }
 
-async function act(dealId, body, sessionId) {
+async function act(dealId, body, sessionId, pipe) {
   try {
-    const result = await rest('/deal/' + encodeURIComponent(dealId) + '/act', { method: 'POST', body })
+    const result = await rest('/deal/' + encodeURIComponent(dealId) + '/act', { method: 'POST', body, ...inPipe(pipe) })
     refresh()
     if (result && result.notice) host.notify({ kind: 'info', message: result.notice })
     if (result && result.ask) toChat(result.ask, sessionId)
@@ -177,9 +186,9 @@ async function act(dealId, body, sessionId) {
   }
 }
 
-async function track(target, sessionId) {
+async function track(target, sessionId, pipe) {
   try {
-    const result = await rest('/target/' + encodeURIComponent(target.id) + '/track', { method: 'POST', body: {} })
+    const result = await rest('/target/' + encodeURIComponent(target.id) + '/track', { method: 'POST', body: {}, ...inPipe(pipe) })
     refresh()
     if (result && result.ask) toChat(result.ask, sessionId)
     else if (result && result.notice) host.notify({ kind: 'info', message: result.notice })
@@ -592,6 +601,14 @@ const CSS = `
 .stoa-box { padding: 12px 14px; border: 1px solid var(--ui-stroke-secondary); border-radius: var(--stoa-r); background: var(--ui-bg-card); }
 .stoa-detail { margin: 2px 0 10px; }
 .stoa-inchat { max-width: 460px; margin: 6px 0; }
+.stoa-chatwide { max-width: 640px; margin: 6px 0; container-type: inline-size; }
+.stoa-chathead { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; margin-bottom: 8px; }
+.stoa-chatlist { margin-top: 10px; }
+.stoa-chatlisthead { display: flex; gap: 8px; align-items: baseline; padding: 0 0 3px; }
+.stoa-chatday .stoa-trow { grid-template-columns: minmax(0, 1fr) auto; }
+.stoa-chatday .stoa-trow > .stoa-tacts { grid-column: 1 / -1; justify-content: flex-start; flex-wrap: wrap; padding: 0 0 8px 23px; }
+.stoa-chatrec { grid-column: 1 / -1; padding: 0 0 10px 8px; }
+.stoa-chatfoot { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; justify-content: space-between; margin-top: 12px; padding-top: 10px; border-top: 1px dotted var(--ui-stroke-primary); }
 /* Every bar is a row or two of dots: lit as far as it is filled. */
 .stoa-meter, .stoa-weight, .stoa-rate u, .stoa-fc u, .stoa-billbar, .stoa-path > *::after { -webkit-mask-image: var(--stoa-grid); mask-image: var(--stoa-grid); -webkit-mask-composite: source-in; mask-composite: intersect; }
 .stoa-meter { display: flex; margin: 8px 0 4px; }
@@ -1714,6 +1731,7 @@ const uniq = values => [...new Set(values.filter(Boolean))].sort()
 
 /** Change a record by hand: its next step, its stage, its facts, and a line for the log. */
 function Edit({ deal, state, done }) {
+  const pipe = useContext(InPipe)
   const pb = state.playbook, terms = pb.terms
   const start = { next_step: deal.next_step || '', next_due: deal.next_due || '', value: deal.value ? String(deal.value) : '', owner: deal.owner || '',
     company: deal.company || '', group: deal.group || '', email: deal.email || '', close_on: deal.close_on || '' }
@@ -1722,7 +1740,7 @@ function Edit({ deal, state, done }) {
   const [kind, setKind] = useState('note')
   const [busy, setBusy] = useState(false)
   const set = key => event => setV({ ...v, [key]: event.target.value })
-  const send = body => { setBusy(true); return act(deal.id, body).then(result => { setBusy(false); return result }) }
+  const send = body => { setBusy(true); return act(deal.id, body, undefined, pipe).then(result => { setBusy(false); return result }) }
   const save = () => {
     const body = { verb: 'update' }
     for (const key of Object.keys(v)) {
@@ -1813,7 +1831,9 @@ function NewRecord({ state, close, opened, preset }) {
 
 // -- one record: what it is, what is next, and the buttons ---------------------------------------
 function Record({ id, state: shown, sessionId, close, onCompany, onGroup }) {
-  const query = useQuery({ queryKey: ['stoa', 'deal', id], queryFn: () => rest('/deal/' + encodeURIComponent(id)), staleTime: 1500 })
+  const pipe = useContext(InPipe)
+  const query = useQuery({ queryKey: pipe ? ['stoa', 'deal', id, 'in', pipe] : ['stoa', 'deal', id],
+    queryFn: () => rest('/deal/' + encodeURIComponent(id), pipe ? inPipe(pipe) : undefined), staleTime: 1500 })
   const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState(false)
   const [finishing, setFinishing] = useState(false)
@@ -1824,7 +1844,7 @@ function Record({ id, state: shown, sessionId, close, onCompany, onGroup }) {
   const state = deal.playbook ? { ...shown, playbook: deal.playbook } : shown
   const pb = state.playbook
   const open = deal.status === 'open'
-  const run = body => { setBusy(true); act(id, body, sessionId).then(() => setBusy(false)) }
+  const run = body => { setBusy(true); act(id, body, sessionId, pipe).then(() => setBusy(false)) }
   const facts = [[cap(pb.terms.group), deal.group], [pb.terms.value, money(deal.value, pb.currency)], [cap(pb.terms.owner), deal.owner],
     ['Expected close', open && deal.close_on ? shortDate(deal.close_on) + (deal.close_on < today() ? ' (past)' : '') : '']]
     .concat(pb.fields.map(field => [field.label, (deal.fields || {})[field.key]]))
@@ -1876,19 +1896,20 @@ function Record({ id, state: shown, sessionId, close, onCompany, onGroup }) {
     h(RecordNotes, { key: 'notes-' + deal.id, deal }),
     h(RecordActivity, { key: 'log-' + deal.id, deal, sessionId, full: Boolean(close) }),
     deal.undo ? h(Btn, { kind: 'quiet', disabled: busy, title: 'Put the record back as it was before: ' + deal.undo.text,
-      onClick: () => { setBusy(true); undo(deal.id, deal.undo.op).then(() => setBusy(false)) } },
+      onClick: () => { setBusy(true); undo(deal.id, deal.undo.op, pipe).then(() => setBusy(false)) } },
     h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } }, h(Icon, { name: 'back', size: 13 }), 'Take back the last change')) : null)
 }
 
 /** A few lines kept on the record itself: what to know about it. Edited in place; saved like any other change, so it can be taken back. */
 function RecordNotes({ deal, bare }) {
+  const pipe = useContext(InPipe)
   const [text, setText] = useState(null) // null: showing what is saved
   const [busy, setBusy] = useState(false)
   const saved = deal.notes || ''
   const changed = text !== null && text.trim() !== saved.trim()
   const save = () => {
     setBusy(true)
-    act(deal.id, { verb: 'update', notes: text }).then(result => { setBusy(false); if (result) setText(null) })
+    act(deal.id, { verb: 'update', notes: text }, undefined, pipe).then(result => { setBusy(false); if (result) setText(null) })
   }
   return h('div', { className: bare ? '' : 'stoa-log' },
     bare ? null : h('small', { className: 'stoa-eyebrow' }, 'Notes'),
@@ -1905,6 +1926,7 @@ const LOG_KINDS = { call: 'Call', email: 'Email', meeting: 'Meeting', note: 'Not
 
 /** What happened on the record, newest first, with a line to add to it. */
 function RecordActivity({ deal, sessionId, full }) {
+  const pipe = useContext(InPipe)
   const [all, setAll] = useState(false)
   const [line, setLine] = useState('')
   const [busy, setBusy] = useState(false)
@@ -1914,7 +1936,7 @@ function RecordActivity({ deal, sessionId, full }) {
     const text = line.trim()
     if (!text) return
     setBusy(true)
-    act(deal.id, { verb: 'log', kind: 'note', text }, sessionId).then(result => { setBusy(false); if (result) setLine('') })
+    act(deal.id, { verb: 'log', kind: 'note', text }, sessionId, pipe).then(result => { setBusy(false); if (result) setLine('') })
   }
   return h('div', { className: 'stoa-log' },
     h('div', { className: 'stoa-sechead', style: { padding: 0, alignItems: 'center' } },
@@ -2403,13 +2425,14 @@ const asleep = deal => Boolean(deal.snoozed_until) && deal.snoozed_until > today
 
 /** What comes after a step is done, or the first step for a record that has none. Nothing is saved until the button. */
 function NextStep({ deal, mode, close }) {
+  const pipe = useContext(InPipe)
   const [step, setStep] = useState('')
   const [due, setDue] = useState('')
   const [busy, setBusy] = useState(false)
   const save = () => {
     if (busy || (mode === 'plan' && !step.trim())) return
     setBusy(true)
-    act(deal.id, { verb: mode === 'done' ? 'done' : 'update', next_step: step.trim(), next_due: due }).then(result => { setBusy(false); if (result) close() })
+    act(deal.id, { verb: mode === 'done' ? 'done' : 'update', next_step: step.trim(), next_due: due }, undefined, pipe).then(result => { setBusy(false); if (result) close() })
   }
   return h('div', { className: 'stoa-nextform' },
     mode === 'done' ? h('div', { className: 'stoa-sub', style: { gridColumn: '1 / -1' } }, 'Done: ' + deal.next_step + '. What comes next?') : null,
@@ -2449,9 +2472,9 @@ function Snooze({ deal, busy, run }) {
 }
 
 /** Hand a record's next step to Hermes from the page: it writes in the dock's conversation. */
-function draftFor(deal, quiet) {
-  if (quiet || !deal.next_step) return act(deal.id, { verb: 'draft' })
-  toChat('On the Stoa desk, ' + deal.name + ' (record ' + deal.id + ') has this next step due: “' + deal.next_step + '”. Draft what it needs and show me.')
+function draftFor(deal, quiet, sessionId, pipe, where) {
+  if (quiet || !deal.next_step) return act(deal.id, { verb: 'draft' }, sessionId, pipe)
+  toChat('On the Stoa desk' + (where || '') + ', ' + deal.name + ' (record ' + deal.id + ') has this next step due: “' + deal.next_step + '”. Draft what it needs and show me.', sessionId)
   return Promise.resolve(null)
 }
 
@@ -2493,21 +2516,24 @@ const TODAY_LISTS = [
   { key: 'new', title: 'New, nothing planned', tone: '', help: 'Added in the last week, with no next step yet.' }
 ]
 
+/** What a row on Today says under its name, and the figure on its right, for each list. */
+const dayFacts = pb => ({
+  overdue: (deal, row) => [deal.next_step || deal.stage_label, row.days + 'd overdue'],
+  due_today: deal => [deal.next_step || deal.stage_label, 'today'],
+  drafts: deal => [deal.stage_label + ' · a draft is waiting to be written', ''],
+  invoices_overdue: (deal, row) => ['Invoice' + (row.number ? ' #' + row.number : '') + ' · ' + exact(row.owed, pb.currency) + ' owed', row.days + 'd late'],
+  to_invoice: (deal, row) => [exact(row.amount, pb.currency) + ' · ' + pb.won.label.toLowerCase() + (row.days ? ' ' + row.days + 'd ago' : ' today'), ''],
+  quiet: (deal, row) => [deal.stage_label + ' · nothing for ' + row.days + 'd', 'nudge due after ' + row.expected + 'd'],
+  new: deal => [[deal.company, 'added ' + ago(deal.created_at)].filter(Boolean).join(' · '), '']
+})
+
 function Today({ state, openId, setOpenId, openClient }) {
   const pb = state.playbook, day = state.today
   const [form, setForm] = useState(null) // the row with its "what comes next" form open: { id, mode }
   const [busy, setBusy] = useState('')
   const byId = new Map(state.deals.map(deal => [deal.id, deal]))
   const run = (id, body) => { setBusy(id); return act(id, body).then(() => setBusy('')) }
-  const facts = {
-    overdue: (deal, row) => [deal.next_step || deal.stage_label, row.days + 'd overdue'],
-    due_today: deal => [deal.next_step || deal.stage_label, 'today'],
-    drafts: deal => [deal.stage_label + ' · a draft is waiting to be written', ''],
-    invoices_overdue: (deal, row) => ['Invoice' + (row.number ? ' #' + row.number : '') + ' · ' + exact(row.owed, pb.currency) + ' owed', row.days + 'd late'],
-    to_invoice: (deal, row) => [exact(row.amount, pb.currency) + ' · ' + pb.won.label.toLowerCase() + (row.days ? ' ' + row.days + 'd ago' : ' today'), ''],
-    quiet: (deal, row) => [deal.stage_label + ' · nothing for ' + row.days + 'd', 'nudge due after ' + row.expected + 'd'],
-    new: deal => [[deal.company, 'added ' + ago(deal.created_at)].filter(Boolean).join(' · '), '']
-  }
+  const facts = dayFacts(pb)
   const moves = {
     overdue: deal => [h(Btn, { key: 'done', kind: 'go', title: 'Log it as done and say what comes next', onClick: () => setForm({ id: deal.id, mode: 'done' }) }, '✓  Done'),
       h(Btn, { key: 'draft', title: 'Hermes drafts what this step needs', onClick: () => draftFor(deal) }, 'Draft it'),
@@ -3371,6 +3397,7 @@ function UndoBar() {
 
 // -- the other people on a record ---------------------------------------------------------------------
 function People({ deal, term, title }) {
+  const pipe = useContext(InPipe)
   const blank = { name: '', email: '', title: '', role: '', phone: '' }
   const [adding, setAdding] = useState(false)
   const [v, setV] = useState(blank)
@@ -3378,7 +3405,7 @@ function People({ deal, term, title }) {
   const set = key => event => setV({ ...v, [key]: event.target.value })
   const send = body => {
     setBusy(true)
-    return rest('/deal/' + encodeURIComponent(deal.id) + '/person', { method: 'POST', body })
+    return rest('/deal/' + encodeURIComponent(deal.id) + '/person', { method: 'POST', body, ...inPipe(pipe) })
       .then(result => { refresh(); if (result.last) offerUndo(result.last); return result })
       .catch(error => { host.notifyError(error, 'Stoa could not save that'); return null })
       .then(result => { setBusy(false); return result })
@@ -3522,9 +3549,9 @@ function exact(value, currency) {
 
 const inDays = days => { const d = new Date(Date.now() + days * 864e5); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') }
 
-async function bill(dealId, body) {
+async function bill(dealId, body, pipe) {
   try {
-    const result = await rest('/deal/' + encodeURIComponent(dealId) + '/invoice', { method: 'POST', body })
+    const result = await rest('/deal/' + encodeURIComponent(dealId) + '/invoice', { method: 'POST', body, ...inPipe(pipe) })
     refresh()
     if (result.last) offerUndo(result.last)
     return result
@@ -3536,11 +3563,12 @@ async function bill(dealId, body) {
 
 /** One invoice, with the moves that fit where it stands. */
 function Invoice({ invoice, dealId, client, currency, name, onOpen }) {
+  const pipe = useContext(InPipe)
   const [busy, setBusy] = useState(false)
   const [part, setPart] = useState(null) // null, or the amount being typed for a part payment
   const run = body => {
     setBusy(true)
-    return (client ? billClient(client, { invoice: String(invoice.id), ...body }) : bill(dealId, { invoice: String(invoice.id), ...body }))
+    return (client ? billClient(client, { invoice: String(invoice.id), ...body }) : bill(dealId, { invoice: String(invoice.id), ...body }, pipe))
       .then(result => { setBusy(false); return result })
   }
   const owing = invoice.state === 'sent' || invoice.state === 'partial' || invoice.state === 'overdue'
@@ -3576,6 +3604,7 @@ function Invoice({ invoice, dealId, client, currency, name, onOpen }) {
 
 /** The money on one record: what was billed, what came in, and a form to add an invoice. */
 function Money({ deal, pb }) {
+  const pipe = useContext(InPipe)
   const billing = useValue($billing)
   const money = deal.money || { invoiced: 0, paid: 0, owed: 0, uninvoiced: 0 }
   const invoices = deal.invoices || []
@@ -3593,7 +3622,7 @@ function Money({ deal, pb }) {
   const add = () => {
     if (!(Number(v.amount) > 0) || busy) return
     setBusy(true)
-    bill(deal.id, { verb: 'add', amount: Number(v.amount), number: v.number.trim(), due: v.due, status: v.draft ? 'draft' : 'sent' }).then(result => {
+    bill(deal.id, { verb: 'add', amount: Number(v.amount), number: v.number.trim(), due: v.due, status: v.draft ? 'draft' : 'sent' }, pipe).then(result => {
       setBusy(false)
       if (result) { setAdding(false); setV({ amount: '', number: '', due: inDays(30), draft: false }) }
     })
@@ -4489,6 +4518,7 @@ function Board({ state, openId, setOpenId }) {
 }
 
 function Company({ company, sessionId }) {
+  const pipe = useContext(InPipe)
   const [busy, setBusy] = useState(false)
   const buyer = (company.people || [])[0]
   return h('div', { className: 'stoa-company' },
@@ -4500,7 +4530,7 @@ function Company({ company, sessionId }) {
     h('div', { className: 'stoa-chips', style: { alignItems: 'center' } },
       company.status === 'tracked' ? h(Chip, { tone: 'good' }, 'in the pipeline')
         : company.status === 'dismissed' ? h(Chip, null, 'dismissed')
-          : h(Btn, { disabled: busy, onClick: () => { setBusy(true); track(company, sessionId).then(() => setBusy(false)) } }, 'Add to pipeline'),
+          : h(Btn, { disabled: busy, onClick: () => { setBusy(true); track(company, sessionId, pipe).then(() => setBusy(false)) } }, 'Add to pipeline'),
       company.signal ? h(Chip, { wrap: true }, company.signal) : null))
 }
 
@@ -4800,8 +4830,9 @@ function NewMap({ first, onClose }) {
 /** A map by the numbers, in a window over the page: what is on it and how complete it is, where it came from, what it
     has cost so far, and the limits set on it. Hermes's cost is Hermes's own estimate, counted for the turns that worked on this map. */
 function MapFacts({ market, onClose, onFill }) {
+  const pipe = useContext(InPipe)
   const box = useRef(null)
-  const query = useQuery({ queryKey: ['stoa', 'facts', market.id], queryFn: () => rest('/market/' + encodeURIComponent(market.id) + '/facts'), staleTime: 2000 })
+  const query = useQuery({ queryKey: ['stoa', 'facts', market.id, pipe || ''], queryFn: () => rest('/market/' + encodeURIComponent(market.id) + '/facts', pipe ? inPipe(pipe) : undefined), staleTime: 2000 })
   const [typed, setTyped] = useState(null)
   const [saving, setSaving] = useState(false)
   useEffect(() => { const el = box.current; if (el && !el.open && el.showModal) el.showModal() }, [])
@@ -4811,7 +4842,7 @@ function MapFacts({ market, onClose, onFill }) {
   const save = event => {
     event.preventDefault()
     setSaving(true)
-    rest('/market/' + encodeURIComponent(market.id) + '/limits', { method: 'POST', body: Object.fromEntries(Object.entries(typed || {}).map(([name, value]) => [name, Number(String(value).replace(/[^0-9.]/g, '')) || 0])) })
+    rest('/market/' + encodeURIComponent(market.id) + '/limits', { method: 'POST', ...inPipe(pipe), body: Object.fromEntries(Object.entries(typed || {}).map(([name, value]) => [name, Number(String(value).replace(/[^0-9.]/g, '')) || 0])) })
       .then(result => { refresh(); host.notify({ kind: result.ok ? 'success' : 'info', message: result.ok ? 'Limits saved for this map.' : result.error || 'Stoa could not save that.' }) })
       .catch(error => host.notifyError(error, 'Stoa could not save the limits')).then(() => setSaving(false))
   }
@@ -4871,6 +4902,7 @@ function MapFacts({ market, onClose, onFill }) {
 
 /** The market map on the page: the picture, what is picked beside it, the brief you can weigh, and every company in a table. */
 function MarketMap({ market, markets, onMarket, shape, openRecord }) {
+  const pipe = useContext(InPipe)
   const [lens, setLens] = useState('seg')
   const [mode, setMode] = useState('')      // a form open under the map's name: new | rename | delete
   const [draft, setDraft] = useState('')
@@ -4919,7 +4951,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
   const send = (verb, companies, extra, said) => {
     if (!companies.length || busy) return Promise.resolve(null)
     setBusy(verb)
-    return rest('/targets', { method: 'POST', body: { verb, ids: companies.map(c => c.id), ...(extra || {}) } })
+    return rest('/targets', { method: 'POST', body: { verb, ids: companies.map(c => c.id), ...(extra || {}) }, ...inPipe(pipe) })
       .then(result => { refresh(); const line = said(result); if (line) host.notify({ kind: result.ok === false ? 'info' : 'success', message: line }); return result })
       .catch(error => { host.notifyError(error, 'Stoa could not do that'); return null })
       .then(result => { setBusy(''); return result })
@@ -4967,7 +4999,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
     suggest: () => research('Suggest two neighbouring segments for' + here + ': who they are, and why they would be worth mapping. Do not add anything yet; I will say which.'),
     require: text => research('Add this requirement to' + here + ' and check every company on it against it, with the evidence: ' + text)
   }
-  const save = share => { setSaving(share ? 'share' : 'own'); savePage(market, share).then(() => setSaving('')) }
+  const save = share => { setSaving(share ? 'share' : 'own'); savePage(market, share, pipe).then(() => setSaving('')) }
   const facetBtn = (kind, value, label, big, pct, text, small) => {
     const on = Boolean(facet) && facet.kind === kind && facet.value === value
     return h('button', { type: 'button', key: kind + value, className: 'stoa-mapfacet', 'aria-pressed': on, title: on ? 'Show every company again' : 'Light up these companies on the map',
@@ -5054,7 +5086,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
   }
   const manage = (verb, body, said) => {
     setBusy(verb)
-    return rest('/market/' + encodeURIComponent(market.id) + '/' + verb, { method: 'POST', body })
+    return rest('/market/' + encodeURIComponent(market.id) + '/' + verb, { method: 'POST', body, ...inPipe(pipe) })
       .then(result => { if (result.ok) { setMode(''); host.notify({ kind: 'success', message: said(result) }) } else host.notify({ kind: 'info', message: result.error || 'Stoa could not do that.' }); refresh(); return result })
       .catch(error => { host.notifyError(error, 'Stoa could not do that'); return null })
       .then(result => { setBusy(''); return result })
@@ -5161,8 +5193,8 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
 }
 
 /** Save a map as one web page: a file to keep, host or send. The copy to share leaves out buyers' names and the pipeline. */
-function savePage(market, share) {
-  return rest('/market/' + encodeURIComponent(market.id) + '/page?share=' + (share ? 1 : 0))
+function savePage(market, share, pipe) {
+  return rest('/market/' + encodeURIComponent(market.id) + '/page?share=' + (share ? 1 : 0), pipe ? inPipe(pipe) : undefined)
     .then(file => {
       download(file.filename, file.html, 'text/html')
       host.notify({ kind: 'success', message: share ? 'Saved a copy to share: no buyers\' names, and nothing about your pipeline.' : 'Saved the map as one web page, buyers and pipeline included.' })
@@ -5171,9 +5203,10 @@ function savePage(market, share) {
 }
 
 function Market({ market, sessionId, compact }) {
+  const pipe = useContext(InPipe)
   const numbers = market.numbers
   const [saving, setSaving] = useState('')
-  const save = share => { setSaving(share ? 'share' : 'own'); savePage(market, share).then(() => setSaving('')) }
+  const save = share => { setSaving(share ? 'share' : 'own'); savePage(market, share, pipe).then(() => setSaving('')) }
   return h('div', null,
     h('div', { className: 'stoa-name', style: { fontSize: compact ? 14 : 16 } }, market.name),
     h('div', { className: 'stoa-sub' }, [plural(numbers.companies, 'company', 'companies'), numbers.in_pipeline + ' in the pipeline',
@@ -5189,7 +5222,7 @@ function Market({ market, sessionId, compact }) {
         h('span', { className: 'stoa-grow' }, h('span', { className: 'stoa-name' }, call.company),
           h('span', { className: 'stoa-sub' }, '  ' + [call.segment, call.buyer].filter(Boolean).join(' · ')),
           h('span', { style: { display: 'block' } }, call.why)),
-        call.status === 'tracked' ? h(Chip, { tone: 'good' }, 'in the pipeline') : h(Btn, { onClick: () => track(call, sessionId) }, 'Add')))) : null,
+        call.status === 'tracked' ? h(Chip, { tone: 'good' }, 'in the pipeline') : h(Btn, { onClick: () => track(call, sessionId, pipe) }, 'Add')))) : null,
     h('div', { className: 'stoa-h2' }, 'The map'),
     h('div', { className: 'stoa-cols' }, market.segments.map(segment => h('div', { key: segment.name, className: 'stoa-box' },
       h('div', { style: { display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' } },
@@ -5773,22 +5806,207 @@ function Page() {
 
 // -- drawn inside a reply: ::stoa-card{id="…"} and ::stoa-map{market="…"} ------------------------
 // Attributes are model output: checked, and nothing is drawn when they do not name something real.
+// -- parts drawn in a conversation ------------------------------------------------------------------------
+// The agent writes a line such as ::stoa-card{id="..."} and the app draws the live part there. On a desk with more than
+// one pipeline the line also names its pipeline (pipeline="p2"), and the part shows that pipeline whatever the page is
+// showing: a chat with a Bot that keeps one client's pipeline, say. A line without one (an older chat) is the page's.
+const pipeAttr = attrs => {
+  const pipe = String((attrs && attrs.pipeline) || '').trim()
+  return /^(main|p[0-9]{1,3})$/.test(pipe) ? pipe : null
+}
+
+/** The name of the pipeline a desk state is for, when the desk has more than one ('' otherwise). */
+function pipeName(state) {
+  const pipes = (state && state.pipelines) || []
+  if (pipes.length < 2) return ''
+  const found = pipes.find(item => item.id === state.pipeline)
+  return found ? found.name : ''
+}
+
+/** Open the Stoa page on one tab, showing the pipeline a part drawn in a chat is about. */
+function openDesk(tab, pipe) {
+  if (pipe) {
+    const id = pipe === 'main' ? '' : pipe
+    if ($pipe.get() !== id) { $pipe.set(id); if (storage) storage.set('pipe', id); refresh() }
+  }
+  $tab.set(tab)
+  host.navigate('/stoa')
+}
+
+// Today in a chat: the lists about records, with the same buttons as the page. What needs the page (lists waiting for
+// approval, months to bill) is counted at the foot, with a way there.
+const CHAT_DAY = ['overdue', 'due_today', 'drafts', 'invoices_overdue', 'to_invoice', 'quiet', 'new']
+const CHAT_ROWS = 5
+
+function TodayInChat({ attrs, sessionId }) {
+  const pipe = pipeAttr(attrs)
+  const query = useDesk(pipe)
+  const [openId, setOpenId] = useState('')
+  const [form, setForm] = useState(null) // the row with its "what comes next" form open: { id, mode }
+  const [busy, setBusy] = useState('')
+  const state = query.data
+  if (!state || !state.today || !state.playbook) return null
+  const pb = state.playbook, day = state.today, counts = day.counts || {}
+  const here = sessionId ?? null
+  const byId = new Map((state.deals || []).map(deal => [deal.id, deal]))
+  const run = (id, body) => { setBusy(id); return act(id, body, here, pipe).then(() => setBusy('')) }
+  const facts = dayFacts(pb)
+  const name = pipeName(state)
+  const where = name ? ' (the ' + name + ' pipeline)' : ''
+  const snooze = deal => h(Snooze, { key: 'snooze', deal, busy: busy === deal.id, run: body => run(deal.id, body) })
+  const moves = {
+    overdue: deal => [h(Btn, { key: 'done', kind: 'go', title: 'Log it as done and say what comes next', onClick: () => setForm({ id: deal.id, mode: 'done' }) }, '✓  Done'),
+      h(Btn, { key: 'draft', title: 'Hermes drafts what this step needs', onClick: () => draftFor(deal, false, here, pipe, where) }, 'Draft it'), snooze(deal)],
+    drafts: deal => [h(Btn, { key: 'write', kind: 'go', onClick: () => toChat('Do the writing task waiting on ' + deal.name + ' on the Stoa desk' + where + ' (record ' + deal.id + ').', here) }, 'Write it now')],
+    invoices_overdue: (deal, row) => [
+      h(Btn, { key: 'paid', kind: 'go', title: 'Everything still owed came in', onClick: () => bill(deal.id, { verb: 'pay', invoice: String(row.invoice) }, pipe) }, 'Paid'),
+      h(Btn, { key: 'remind', title: 'Hermes drafts a payment reminder', onClick: () => toChat('On the Stoa desk' + where + ', ' + deal.name + ' (record ' + deal.id + ') has an invoice'
+        + (row.number ? ' #' + row.number : '') + ' with ' + exact(row.owed, pb.currency) + ' still owed, ' + row.days + ' days past due. Draft a short, polite payment reminder and show me.', here) }, 'Draft a reminder'),
+      snooze(deal)],
+    to_invoice: deal => [h(Btn, { key: 'open', kind: 'go', title: 'Open the record: its invoices are at the foot', onClick: () => setOpenId(deal.id) }, 'Add invoice'), snooze(deal)],
+    quiet: deal => [h(Btn, { key: 'draft', kind: 'go', title: 'Hermes drafts a follow-up from the record and its log', onClick: () => draftFor(deal, true, here, pipe, where) }, 'Draft a nudge'), snooze(deal)],
+    new: deal => [h(Btn, { key: 'plan', kind: 'go', onClick: () => setForm({ id: deal.id, mode: 'plan' }) }, 'Plan the next step')]
+  }
+  moves.due_today = moves.overdue
+  const lists = CHAT_DAY.map(key => ({ ...TODAY_LISTS.find(item => item.key === key), rows: day[key] || [] })).filter(list => list.rows.length)
+  const row = (list, item) => {
+    const deal = byId.get(item.id)
+    if (!deal) return null
+    const [sub, right] = facts[list.key](deal, item)
+    const opened = openId === deal.id
+    return h('div', { key: list.key + deal.id + ':' + (item.invoice || ''), className: 'stoa-trow', 'data-open': opened ? '1' : '0' },
+      h('button', { type: 'button', className: 'stoa-tmain', title: opened ? 'Close the record' : 'Open the record here', 'aria-expanded': opened, onClick: () => setOpenId(opened ? '' : deal.id) },
+        h('i', { className: 'stoa-dot', 'data-tone': list.tone }),
+        h('span', { className: 'stoa-grow' },
+          h('span', { className: 'stoa-name stoa-clip', style: { display: 'block' } }, deal.name,
+            deal.value ? h('span', { className: 'stoa-sub', style: { fontWeight: 400 } }, '  ' + money(deal.value, pb.currency)) : null),
+          h('span', { className: 'stoa-sub stoa-clip', style: { display: 'block' } }, sub))),
+      right ? h('span', { className: 'stoa-num', 'data-tone': list.tone }, right) : null,
+      h('span', { className: 'stoa-tacts' }, moves[list.key](deal, item)),
+      form && form.id === deal.id ? h(NextStep, { deal, mode: form.mode, close: () => setForm(null) }) : null,
+      opened ? h('div', { className: 'stoa-chatrec' }, h(Record, { id: deal.id, state, sessionId: here, close: () => setOpenId('') })) : null)
+  }
+  const elsewhere = [
+    counts.approvals ? plural(counts.approvals, 'list waiting for your approval', 'lists waiting for your approval') : '',
+    (day.to_bill || []).length ? plural(day.to_bill.length, 'month to bill', 'months to bill') : '',
+    (day.client_overdue || []).length ? plural(day.client_overdue.length, 'client invoice overdue', 'client invoices overdue') : '',
+    counts.coming ? counts.coming + ' coming up this week' : '',
+    counts.snoozed ? counts.snoozed + ' snoozed' : ''].filter(Boolean)
+  return h(InPipe.Provider, { value: pipe }, h('div', { className: 'stoa stoa-box stoa-chatwide stoa-chatday' }, h(Style),
+    h('div', { className: 'stoa-chathead' },
+      h('div', { className: 'stoa-grow' },
+        h('div', { className: 'stoa-eyebrow' }, 'Today' + (name ? ' · ' + name : '') + (state.tour ? ' · sample data' : '')),
+        h('div', { className: 'stoa-name', style: { fontSize: 15, marginTop: 2 } },
+          day.needs ? plural(day.needs, 'thing needs you', 'things need you') : 'Nothing needs you today'))),
+    lists.length ? lists.map(list => h('section', { key: list.key, className: 'stoa-chatlist' },
+      h('div', { className: 'stoa-chatlisthead', title: list.help },
+        h('b', { className: 'stoa-foldcount', 'data-tone': list.tone || '' }, String(counts[list.key] || list.rows.length)),
+        h('span', { className: 'stoa-eyebrow' }, list.key === 'to_invoice' ? pb.won.label + ', not invoiced' : list.title)),
+      list.rows.slice(0, CHAT_ROWS).map(item => row(list, item)),
+      list.rows.length > CHAT_ROWS ? h('div', { className: 'stoa-sub', style: { padding: '4px 0 0 23px' } }, 'and ' + (list.rows.length - CHAT_ROWS) + ' more on the desk') : null))
+      : h('p', { className: 'stoa-sub', style: { margin: 0 } }, (state.deals || []).length ? 'No next step is due and nobody has gone quiet.' : 'The desk is empty.'),
+    h('div', { className: 'stoa-chatfoot' },
+      h('span', { className: 'stoa-sub' }, elsewhere.join(' · ')),
+      h(Btn, { kind: 'quiet', onClick: () => openDesk('today', pipe) }, 'Open the desk  ›'))))
+}
+
+// One report in a chat: its chart, worked out from the desk each time it is drawn, the records behind a bar, and Keep or
+// Discard while it is a draft Hermes made.
+const CHAT_PERIODS = [['30', 'Last 30 days'], ['90', 'Last 90 days'], ['quarter', 'This quarter'], ['year', 'This year'], ['all', 'All time']]
+
+function ReportInChat({ attrs, sessionId }) {
+  const pipe = pipeAttr(attrs)
+  const asked = String((attrs && attrs.id) || '').trim()
+  const valid = /^[a-z0-9][a-z0-9-]{0,48}$/i.test(asked)
+  const [id, setId] = useState(asked)
+  const [period, setPeriod] = useState(() => (CHAT_PERIODS.some(item => item[0] === (attrs && attrs.period)) ? attrs.period : '90'))
+  const [sel, setSel] = useState('')
+  const [openId, setOpenId] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [gone, setGone] = useState(false)
+  const desk = useDesk(pipe)
+  const own = pipe ? { pipeline: pipe } : {}
+  const query = useQuery({ queryKey: ['stoa', 'report', 'in', pipe || '', id, period],
+    queryFn: () => rest('/reports/' + encodeURIComponent(id) + '?period=' + encodeURIComponent(period) + '&compare=1', pipe ? own : undefined),
+    enabled: valid && !gone, staleTime: 1500, retry: false })
+  if (!valid) return null
+  const frame = (...children) => h(InPipe.Provider, { value: pipe }, h('div', { className: 'stoa stoa-box stoa-chatwide stoa-rep' }, h(Style), ...children))
+  if (gone) return frame(h('p', { className: 'stoa-sub', style: { margin: 0 } }, 'Discarded. Nothing on the desk was touched.'))
+  const result = query.data, state = desk.data
+  if (query.error && !result) return frame(h('p', { className: 'stoa-sub', style: { margin: 0 } }, 'That report is not on the desk any more.'))
+  if (!result || !state || !state.playbook) return frame(h('p', { className: 'stoa-sub', style: { margin: 0 } }, 'Working it out…'))
+  const pb = state.playbook, here = sessionId ?? null
+  const press = async verb => {
+    setBusy(true)
+    try {
+      const out = await rest('/reports/' + encodeURIComponent(result.id), { method: 'POST', body: { verb }, ...own })
+      if (out && out.ok === false) host.notify({ kind: 'warning', message: out.error || 'That could not be done.' })
+      else if (verb === 'discard') setGone(true)
+      else {
+        if (out && out.id && out.id !== id) setId(out.id)
+        host.notify({ kind: 'success', message: 'Kept. It is on the Reports tab.' })
+      }
+      refresh()
+    } catch (error) {
+      host.notifyError(error, 'Stoa could not change the report')
+    }
+    setBusy(false)
+  }
+  const picked = (result.rows || []).find(item => item.key === sel && (item.records || []).length) || null
+  const name = pipeName(state)
+  return frame(
+    h('div', { className: 'stoa-chathead' },
+      h('div', { className: 'stoa-grow', style: { minWidth: 0 } },
+        h('div', { className: 'stoa-eyebrow' }, 'Report' + (name ? ' · ' + name : '')),
+        h('div', { className: 'stoa-name', style: { fontSize: 15, marginTop: 2 } }, result.title),
+        result.line ? h('div', { className: 'stoa-sub' }, result.line) : null),
+      result.period ? h('select', { className: 'stoa-select', 'aria-label': 'Period', value: period, onChange: event => { setPeriod(event.target.value); setSel('') } },
+        CHAT_PERIODS.map(item => h('option', { key: item[0], value: item[0] }, item[1]))) : null),
+    result.draft ? h('div', { className: 'stoa-repdraft', role: 'status', style: { marginBottom: 10 } },
+      h('span', null, h('b', null, result.replaces ? 'Hermes made a new version of a report.' : 'Hermes made this report.'), ' It is a draft until you keep it.'),
+      h('div', null,
+        h(Btn, { kind: 'go', disabled: busy, onClick: () => press('keep') }, result.replaces ? 'Keep it in place of the old one' : 'Keep it'),
+        h(Btn, { disabled: busy, onClick: () => press('discard') }, 'Discard'))) : null,
+    result.empty ? h('p', { className: 'stoa-sub', style: { margin: 0 } }, result.empty) : h(RepBody, { result, pb, sel, onPick: key => { setSel(key); setOpenId('') } }),
+    result.empty ? null : h('div', { style: { marginTop: 8 } }, h(RepLegend, { result })),
+    h(RepSays, { says: result.says }),
+    picked ? h('div', { className: 'stoa-chatlist' },
+      h('div', { className: 'stoa-chatlisthead' }, h('span', { className: 'stoa-eyebrow' }, 'The ' + plural(picked.records.length, pb.terms.deal, pb.terms.deals) + ' behind ' + picked.label)),
+      picked.records.slice(0, 8).map(item => h('div', { key: item.id, className: 'stoa-trow', 'data-open': openId === item.id ? '1' : '0' },
+        h('button', { type: 'button', className: 'stoa-tmain', 'aria-expanded': openId === item.id, onClick: () => setOpenId(openId === item.id ? '' : item.id) },
+          h('i', { className: 'stoa-dot', 'data-tone': '' }),
+          h('span', { className: 'stoa-grow' },
+            h('span', { className: 'stoa-name stoa-clip', style: { display: 'block' } }, item.name),
+            h('span', { className: 'stoa-sub stoa-clip', style: { display: 'block' } }, [item.stage, item.company || item.group].filter(Boolean).join(' · ')))),
+        h('span', { className: 'stoa-num' }, result.unit === 'days' ? item.days + 'd' : money(item.value, pb.currency) || ''),
+        openId === item.id ? h('div', { className: 'stoa-chatrec' }, h(Record, { id: item.id, state, sessionId: here, close: () => setOpenId('') })) : null)),
+      picked.records.length > 8 ? h('div', { className: 'stoa-sub', style: { padding: '4px 0 0 23px' } }, 'and ' + (picked.records.length - 8) + ' more in the report on the desk') : null) : null,
+    h('div', { className: 'stoa-chatfoot' },
+      h('span', { className: 'stoa-sub' }, (result.rows || []).some(item => (item.records || []).length) && !picked ? 'Press a bar\'s name to see what is behind it.' : ''),
+      h('span', { className: 'stoa-btns', style: { margin: 0 } },
+        h(Btn, { kind: 'quiet', title: 'Sends these figures to Hermes in this chat', onClick: () => toChat('Read the Stoa report "' + result.title + '" with gtm_report (action "read", report "'
+          + result.id + '", period "' + period + '"' + (name ? ', pipeline "' + name + '"' : '') + ') and tell me what stands out and what you would do about it.', here) }, 'Ask about it'),
+        h(Btn, { kind: 'quiet', onClick: () => { setRep({ open: result.id, list: false, making: false, period }); openDesk('reports', pipe) } }, 'Open on the desk  ›'))))
+}
+
 function CardInChat({ attrs, sessionId }) {
-  const query = useDesk()
+  const pipe = pipeAttr(attrs)
+  const query = useDesk(pipe)
   const id = String((attrs && attrs.id) || '').trim()
   if (!id || id.length > 80 || /[\s/\\]/.test(id) || !query.data) return null
-  return h('div', { className: 'stoa stoa-inchat' }, h(Style), h(Record, { id, state: query.data, sessionId: sessionId ?? null }))
+  return h(InPipe.Provider, { value: pipe }, h('div', { className: 'stoa stoa-inchat' }, h(Style), h(Record, { id, state: query.data, sessionId: sessionId ?? null })))
 }
 
 function MapInChat({ attrs, sessionId }) {
-  const query = useDesk()
+  const pipe = pipeAttr(attrs)
+  const query = useDesk(pipe)
   const want = String((attrs && attrs.market) || '').trim().toLowerCase()
   if (!query.data || want.length > 120) return null
   const markets = query.data.markets
   const market = markets.find(item => item.id === want || item.name.toLowerCase() === want) || (want ? null : markets[0])
   if (!market) return null
-  return h('div', { className: 'stoa stoa-box', style: { margin: '6px 0', maxWidth: 760 } }, h(Style),
-    h(Market, { market, sessionId: sessionId ?? null, compact: true }))
+  return h(InPipe.Provider, { value: pipe }, h('div', { className: 'stoa stoa-box', style: { margin: '6px 0', maxWidth: 760 } }, h(Style),
+    h(Market, { market, sessionId: sessionId ?? null, compact: true })))
 }
 
 function ReviewInChat({ attrs }) {
@@ -5804,9 +6022,11 @@ export default {
     storage = ctx.storage
     try { $pipe.set(String((storage && storage.get('pipe', '')) || '')) } catch { /* no storage: the first pipeline */ }
     // Every request names the pipeline the page is showing (an opaque id such as p2, never its name).
+    // A part drawn in a chat may name its own: rest(path, { pipeline: 'p2', ... }). 'main' is the first.
     rest = (path, options) => {
-      const pipe = $pipe.get()
-      return ctx.rest(pipe && pipe !== 'main' ? path + (path.includes('?') ? '&' : '?') + 'pipeline=' + encodeURIComponent(pipe) : path, options)
+      const { pipeline, ...rest_ } = options || {}
+      const pipe = typeof pipeline === 'string' ? pipeline : $pipe.get()
+      return ctx.rest(pipe && pipe !== 'main' ? path + (path.includes('?') ? '&' : '?') + 'pipeline=' + encodeURIComponent(pipe) : path, options ? rest_ : options)
     }
     try { $folds.set({ ...(storage.get('folds', {}) || {}) }) } catch { /* no storage: every group starts closed */ }
     for (const lane of Object.keys(LANES)) {
@@ -5865,6 +6085,8 @@ export default {
       { id: 'card', area: 'transcript.directives', data: { name: 'stoa-card', render: props => h(CardInChat, props) } },
       { id: 'map', area: 'transcript.directives', data: { name: 'stoa-map', render: props => h(MapInChat, props) } },
       { id: 'intake', area: 'transcript.directives', data: { name: 'stoa-intake', render: props => h(ReviewInChat, props) } },
+      { id: 'today', area: 'transcript.directives', data: { name: 'stoa-today', render: props => h(TodayInChat, props) } },
+      { id: 'report', area: 'transcript.directives', data: { name: 'stoa-report', render: props => h(ReportInChat, props) } },
       { id: 'open', area: 'palette', data: { id: 'stoa.open', label: 'Stoa: open the desk', keywords: ['pipeline', 'gtm', 'market map'], run: () => host.navigate('/stoa') } }
     ])
   }

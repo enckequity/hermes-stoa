@@ -66,7 +66,12 @@ In the Hermes Desktop app and the Webapp, Stoa sits beside the conversation.
   record. The change is saved at once, one line goes into the open chat as if you had typed it,
   and the draft comes back in the conversation.
 - **Cards in the conversation.** Ask *"show me Dana"* and the reply contains the live card, with
-  its buttons, not a description of it. *"Show me the market map"* draws the map the same way.
+  its buttons, not a description of it. *"Show me the market map"* draws the map the same way,
+  *"what needs me today?"* draws the day (overdue, due, gone quiet, with **Done**, **Draft** and
+  **Snooze** on each and the record opening in place), and *"how's our win rate?"* draws the report,
+  with a period picker and the records behind each bar. A report Hermes makes for you arrives with
+  **Keep it** and **Discard**. On a desk with several pipelines each one shows the pipeline it is
+  about, whatever the page is showing. Messaging apps and the phone app get the same answer as text.
 - **A page of its own.** **Stoa** in the sidebar opens on **Today**, then the funnel with its
   conversion rates and the pipeline board with the same filters, the market map (a picture you pick
   companies on, with its reading beside it),

@@ -79,17 +79,18 @@ def desk():
     return d
 
 
-def _which(d) -> str:
+def _which(d, more: tuple = ()) -> str:
     """The pipeline a request is about: the one the page is showing, unless the request names a record, a list, a
     map company or a map by id that only another pipeline has. Then that one: a card drawn in a chat, or a button on
-    it, works whatever the page happens to be showing."""
+    it, works whatever the page happens to be showing. ``more``: checks of the same kind for ids a route finds in its
+    body rather than its path (the companies picked on a map)."""
     want, params = _REQUEST.get()
     listed = [] if d.tour() else d.pipelines()
     if len(listed) < 2:
         return ""
     ids = [entry["id"] for entry in listed]
     chosen = want if want in ids else "main"
-    checks = []
+    checks = list(more)
     if params.get("deal_id"):
         checks.append(lambda: d.store.get(str(params["deal_id"])) or d.store.get(str(params["deal_id"]), archived=True))
     if params.get("intake_id"):
@@ -170,13 +171,16 @@ def _ask(d, deal_id: str, verb: str) -> str:
     for writing. The task itself waits on the record; this just points the agent at it."""
     record = d.store.get(deal_id) or {}
     name = record.get("name") or deal_id
+    # With several pipelines the agent is told which, or it looks in the first: a record of the same name and group in
+    # two pipelines has the same id, and the first one's would be the one it wrote for.
+    where = " (the %s pipeline)" % d.current()["name"] if not d.tour() and len(d.pipelines()) > 1 else ""
     if verb == "draft":
-        return "Write the follow-up for %s on the Stoa desk. The task is waiting on record %s." % (name, deal_id)
+        return "Write the follow-up for %s on the Stoa desk%s. The task is waiting on record %s." % (name, where, deal_id)
     if verb == "track":
-        return ("%s was just added to the Stoa desk from the market map. Open record %s and do the task waiting on it."
-                % (record.get("company") or name, deal_id))
-    return ("%s is now at %s on the Stoa desk. Open record %s and write what is waiting on it."
-            % (name, d.playbook().label(record.get("stage", "")), deal_id))
+        return ("%s was just added to the Stoa desk%s from the market map. Open record %s and do the task waiting on it."
+                % (record.get("company") or name, where, deal_id))
+    return ("%s is now at %s on the Stoa desk%s. Open record %s and write what is waiting on it."
+            % (name, d.playbook().label(record.get("stage", "")), where, deal_id))
 
 
 @router.post("/hello")
@@ -956,6 +960,8 @@ def targets(body: dict = Body(...)) -> dict:
     verb, ids = str(body.get("verb") or ""), [str(i) for i in (body.get("ids") or []) if i][:50]
     if not ids:
         raise HTTPException(400, "no companies were picked")
+    # The ids are in the body, not the path: a map drawn in a chat for another pipeline than the page's finds its own here.
+    importlib.import_module(type(d).__module__).PIPELINE.set(_which(d, (lambda: d.markets.target(ids[0]),)))
     if verb == "track":
         result = d.markets.track_many(ids, d.actor() or "Someone")
     elif verb == "dismiss":
