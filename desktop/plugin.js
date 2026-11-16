@@ -564,6 +564,11 @@ const CSS = `
   /* Two sets of stripes that cross: what is left is a grid of 2px dots, 4px apart. Used as a mask. */
   --stoa-grid: repeating-linear-gradient(90deg, #000 0 2px, transparent 2px 4px), repeating-linear-gradient(0deg, #000 0 2px, transparent 2px 4px); }
 .stoa *, .stoa *::before, .stoa *::after { box-sizing: border-box; }
+/* The app turns text selection off for the whole window and back on for its own messages. The desk's text (a name, an
+   email, a note, an answer) is the person's to select and copy. A card that is dragged, and a button, stay as they were. */
+.stoa { -webkit-user-select: text; user-select: text; }
+.stoa [draggable="true"], .stoa [draggable="true"] *, .stoa button, .stoa [role="button"], .stoa summary { -webkit-user-select: none; user-select: none; }
+.stoa button.stoa-proplink, .stoa input, .stoa textarea { -webkit-user-select: text; user-select: text; }
 .stoa-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .stoa-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 12px 18px; }
 .stoa-page { height: 100%; overflow: auto; padding: 24px 34px 0; }
@@ -1751,7 +1756,7 @@ function Edit({ deal, state, done }) {
     send(body).then(result => { if (result) done() })
   }
   const log = () => { if (note.trim()) send({ verb: 'log', kind, text: note.trim() }).then(result => { if (result) setNote('') }) }
-  const open = deal.status === 'open'
+  const open = deal.status === 'open', active = open || Boolean(deal.in_delivery)      // a win still in delivery keeps its next step
   return h('div', { className: 'stoa-edit' },
     h('div', { className: 'stoa-form' },
       h(Field, { label: 'Next step', wide: true, value: v.next_step, onChange: set('next_step') }),
@@ -1843,7 +1848,7 @@ function Record({ id, state: shown, sessionId, close, onCompany, onGroup }) {
   const elsewhere = Boolean(deal.pipeline && shown.pipeline && deal.pipeline.id !== shown.pipeline)     // from a pipeline the page is not showing
   const state = deal.playbook ? { ...shown, playbook: deal.playbook } : shown
   const pb = state.playbook
-  const open = deal.status === 'open'
+  const open = deal.status === 'open', active = open || Boolean(deal.in_delivery)      // a win still in delivery keeps its next step
   const run = body => { setBusy(true); act(id, body, sessionId, pipe).then(() => setBusy(false)) }
   const facts = [[cap(pb.terms.group), deal.group], [pb.terms.value, money(deal.value, pb.currency)], [cap(pb.terms.owner), deal.owner],
     ['Expected close', open && deal.close_on ? shortDate(deal.close_on) + (deal.close_on < today() ? ' (past)' : '') : '']]
@@ -1873,9 +1878,9 @@ function Record({ id, state: shown, sessionId, close, onCompany, onGroup }) {
       h('div', null, deal.next_step, deal.next_due ? h('span', { className: 'stoa-sub' }, '  ' + dueLabel(deal)) : null)) : null,
     h('div', { className: 'stoa-btns' },
       open && deal.advance ? h(Btn, { kind: 'primary', disabled: busy, onClick: () => run({ verb: 'advance', extra: deal.stage }) }, deal.advance + '  →') : null,
-      open && deal.next_step ? h(Btn, { disabled: busy, title: 'The next step is done: log it and say what comes next', onClick: () => setFinishing(!finishing) }, 'Done') : null,
-      open ? h(Btn, { disabled: busy, onClick: () => run({ verb: 'draft' }) }, 'Draft follow-up') : null,
-      open ? h(Snooze, { deal, busy, run }) : null,
+      active && deal.next_step ? h(Btn, { disabled: busy, title: 'The next step is done: log it and say what comes next', onClick: () => setFinishing(!finishing) }, 'Done') : null,
+      active ? h(Btn, { disabled: busy, onClick: () => run({ verb: 'draft' }) }, 'Draft follow-up') : null,
+      active ? h(Snooze, { deal, busy, run }) : null,
       open ? h('select', { className: 'stoa-select', value: '', disabled: busy, 'aria-label': pb.lost.label,
         onChange: event => { if (event.target.value !== '') run({ verb: 'lost', extra: event.target.value }) } },
         [h('option', { key: 'none', value: '' }, pb.lost.label + '…')].concat(pb.lost.reasons.map((reason, index) =>
@@ -1885,7 +1890,7 @@ function Record({ id, state: shown, sessionId, close, onCompany, onGroup }) {
         deal.delivery_stages.map(stage => h('option', { key: stage.id, value: stage.id }, stage.label))) : null,
       !open ? h(Btn, { kind: deal.status === 'won' ? '' : 'primary', disabled: busy, onClick: () => run({ verb: 'reopen' }) }, 'Reopen') : null,
       h(Btn, { kind: 'quiet', onClick: () => setEditing(!editing) }, editing ? 'Close editing' : 'Edit')),
-    finishing && open && deal.next_step ? h(NextStep, { deal, mode: 'done', close: () => setFinishing(false) }) : null,
+    finishing && active && deal.next_step ? h(NextStep, { deal, mode: 'done', close: () => setFinishing(false) }) : null,
     editing ? h(Edit, { key: deal.stage, deal, state, done: () => setEditing(false) }) : null,
     facts.length ? h('div', { className: 'stoa-facts' }, facts.map(pair =>
       h('div', { key: pair[0], style: pair[0] === 'Email' || pair[0] === 'Phone' ? { gridColumn: '1 / -1' } : undefined }, h('small', { className: 'stoa-eyebrow' }, pair[0]), h('span', null, String(pair[1]))))) : null,
@@ -2144,7 +2149,8 @@ function Pane() {
   const state = query.data, pb = state.playbook, totals = state.totals
   const everyone = state.deals.filter(deal => deal.status === 'open')
   const open = everyone.filter(deal => matches(deal, filter))
-  const due = open.filter(deal => deal.due).sort((a, b) => (a.next_due < b.next_due ? -1 : 1))
+  // due: open records, and wins still in delivery, whose next step counts until the work is through
+  const due = state.deals.filter(deal => deal.due && (deal.status === 'open' || deal.in_delivery) && matches(deal, filter)).sort((a, b) => (a.next_due < b.next_due ? -1 : 1))
   const quiet = open.filter(deal => deal.stale && !deal.due)
   const toggle = id => setOpenId(openId === id ? '' : id)
   const listed = (deal, key, sub, right, tone) => [
@@ -3730,6 +3736,7 @@ function Cash({ state, openId, setOpenId, openClient }) {
         onClick: () => setOpenId(openId === record.id ? '' : record.id) },
       h('h5', null, h('span', { className: 'stoa-clip' }, record.name), record.value ? h('span', { className: 'stoa-num' }, money(record.value, pb.currency)) : null),
       h('div', { className: 'stoa-sub stoa-clip' }, record.company || ' '),
+      record.next_step ? h('div', { className: 'stoa-clip', style: { marginTop: 6, fontSize: 12 } }, record.next_step, record.next_due ? h('span', { className: 'stoa-sub' }, '  ' + shortDate(record.next_due)) : null) : null,
       record.value ? h(BillBar, { value: record.value, invoiced: record.invoiced, paid: record.paid }) : null,
       h('div', { className: 'stoa-chips', style: { marginTop: 6 } },
         record.overdue ? h(Chip, { tone: 'bad' }, 'invoice overdue') : null,
@@ -3801,7 +3808,7 @@ function RecordList({ rows, pb, openRecord, showCompany, underStage }) {
 
 /** The stages as one bar, the record's place on it plain to see. A stage pressed moves it there (and can be taken back). */
 function Path({ deal, pb, busy, run }) {
-  const open = deal.status === 'open'
+  const open = deal.status === 'open', active = open || Boolean(deal.in_delivery)      // a win still in delivery keeps its next step
   const end = deal.status === 'won' ? ['won', pb.won.label] : deal.status === 'lost' ? ['lost', pb.lost.label + (deal.lost_reason ? ': ' + deal.lost_reason : '')] : ['todo', pb.won.label]
   return h('div', { className: 'stoa-path', role: 'list', 'aria-label': 'Stages' },
     pb.stages.map((stage, index) => {
@@ -3957,7 +3964,7 @@ function RecordPage({ id, state: shown, sessionId, back, backLabel, openRecord, 
   const elsewhere = Boolean(deal.pipeline && shown.pipeline && deal.pipeline.id !== shown.pipeline)
   const state = deal.playbook ? { ...shown, playbook: deal.playbook } : shown
   const pb = state.playbook, terms = pb.terms
-  const open = deal.status === 'open'
+  const open = deal.status === 'open', active = open || Boolean(deal.in_delivery)      // a win still in delivery keeps its next step
   const run = body => { setBusy(true); act(id, body, sessionId).then(() => setBusy(false)) }
   const inStage = daysSince(deal.stage_at)
   const oneLine = pb.group_is_company && deal.group && (!deal.company || sameName(deal.company, deal.group))
@@ -3991,15 +3998,16 @@ function RecordPage({ id, state: shown, sessionId, back, backLabel, openRecord, 
     h('div', { className: 'stoa-rpbar' },
       h('div', { className: 'stoa-rpnext' },
         h('small', { className: 'stoa-eyebrow' }, 'Next step'),
-        open ? (deal.next_step
+        active ? (deal.next_step
           ? h('div', { className: 'stoa-rpnextline' }, h('span', { className: 'stoa-name' }, deal.next_step), deal.next_due ? h('span', { className: 'stoa-num', 'data-tone': dueTone(deal) }, dueLabel(deal)) : null)
-          : h('div', { className: 'stoa-sub' }, 'Nothing planned.'))
-          : h('div', { className: 'stoa-sub' }, (deal.status === 'won' ? pb.won.label : pb.lost.label + (deal.lost_reason ? ': ' + deal.lost_reason : '')) + '. Nothing more to do here unless it is reopened.')),
+          : h('div', { className: 'stoa-sub' }, open ? 'Nothing planned.' : 'Nothing planned. ' + pb.won.label + ', and still in ' + (deal.delivery_label || 'delivery').toLowerCase() + ': plan what comes next.'))
+          : h('div', { className: 'stoa-sub' }, (deal.status === 'won' ? pb.won.label + (deal.delivery_label ? ' and ' + deal.delivery_label.toLowerCase() : '') + '. What follows goes on its people and its company.'
+            : pb.lost.label + (deal.lost_reason ? ': ' + deal.lost_reason : '') + '. Nothing more to do here unless it is reopened.'))),
       h('div', { className: 'stoa-btns', style: { marginTop: 0 } },
-        open && deal.next_step ? h(Btn, { disabled: busy, title: 'The next step is done: log it and say what comes next', onClick: () => setNextForm(nextForm === 'done' ? '' : 'done') }, 'Done') : null,
-        open ? h(Btn, { disabled: busy, onClick: () => setNextForm(nextForm === 'plan' ? '' : 'plan') }, deal.next_step ? 'Change' : 'Plan the next step') : null,
-        open ? h(Btn, { disabled: busy, onClick: () => run({ verb: 'draft' }) }, 'Draft follow-up') : null,
-        open ? h(Snooze, { deal, busy, run }) : null,
+        active && deal.next_step ? h(Btn, { disabled: busy, title: 'The next step is done: log it and say what comes next', onClick: () => setNextForm(nextForm === 'done' ? '' : 'done') }, 'Done') : null,
+        active ? h(Btn, { disabled: busy, onClick: () => setNextForm(nextForm === 'plan' ? '' : 'plan') }, deal.next_step ? 'Change' : 'Plan the next step') : null,
+        active ? h(Btn, { disabled: busy, onClick: () => run({ verb: 'draft' }) }, 'Draft follow-up') : null,
+        active ? h(Snooze, { deal, busy, run }) : null,
         open ? h('select', { className: 'stoa-select', value: '', disabled: busy, 'aria-label': pb.lost.label,
           onChange: event => { if (event.target.value !== '') run({ verb: 'lost', extra: event.target.value }) } },
         [h('option', { key: 'none', value: '' }, pb.lost.label + '…')].concat(pb.lost.reasons.map((reason, index) => h('option', { key: index, value: String(index) }, reason)))) : null,
@@ -4008,7 +4016,7 @@ function RecordPage({ id, state: shown, sessionId, back, backLabel, openRecord, 
         deal.delivery_stages.map(stage => h('option', { key: stage.id, value: stage.id }, stage.label))) : null,
         !open ? h(Btn, { disabled: busy, onClick: () => run({ verb: 'reopen' }) }, 'Reopen') : null,
         open && deal.advance ? h(Btn, { kind: 'primary', disabled: busy, onClick: () => run({ verb: 'advance', extra: deal.stage }) }, deal.advance + '  →') : null)),
-    nextForm && open ? h('div', { className: 'stoa-box', style: { marginTop: 10 } }, h(NextStep, { deal, mode: nextForm === 'done' && deal.next_step ? 'done' : 'plan', close: () => setNextForm('') })) : null,
+    nextForm && active ? h('div', { className: 'stoa-box', style: { marginTop: 10 } }, h(NextStep, { deal, mode: nextForm === 'done' && deal.next_step ? 'done' : 'plan', close: () => setNextForm('') })) : null,
     h('div', { className: 'stoa-rpgrid' },
       h('div', { className: 'stoa-rpcol' }, h(RecordDetails, { deal, pb, state, openGroup, openCompany })),
       h('div', { className: 'stoa-rpcol' },
@@ -4508,7 +4516,7 @@ function Board({ state, openId, setOpenId }) {
         h('div', { className: 'stoa-cardfoot', style: { marginTop: 0 } },
           h('span', { className: 'stoa-sub stoa-clip' }, [deal.company, deal.group && deal.group !== deal.company ? deal.group : ''].filter(Boolean).join(' · ') || ' '),
           deal.owner ? h('em', null, deal.owner) : null),
-        deal.next_step && !column.won ? h('div', { className: 'stoa-clip', style: { marginTop: 6, fontSize: 12 } }, deal.next_step) : null,
+        deal.next_step && (!column.won || deal.in_delivery) ? h('div', { className: 'stoa-clip', style: { marginTop: 6, fontSize: 12 } }, deal.next_step) : null,
         deal.due || deal.stale || deal.pending || column.other ? h('div', { className: 'stoa-chips' },
           column.other ? h(Chip, null, deal.stage_label) : null,
           deal.due ? h(Chip, { tone: dueTone(deal) }, deal.next_due < today() ? 'overdue' : 'due today') : null,

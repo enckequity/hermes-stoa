@@ -776,10 +776,14 @@ class MarketTests(unittest.TestCase):
                            "email": "ada@northwind.example"})
         deal = self.desk.store.get(one["added_to_pipeline"][0]["deal"])
         self.assertEqual((deal["name"], deal["email"], deal["fields"]["title"], deal["next_step"]),
-                         ("Ada Park", "ada@northwind.example", "VP Ops", "First outreach"))
-        self.desk._set_config("playbook", "recruiting")
-        two = self.market({"action": "track", "targets": ["Loose One"]})
-        self.assertEqual(self.desk.store.get(two["added_to_pipeline"][0]["deal"])["grp"], "Freight brokers, Midwest")
+                         ("Northwind Carriers", "", "VP Ops", "First outreach"))      # the deal, named for the company
+        self.assertEqual([(p["name"], p["email"], p["title"], p["role"]) for p in self.desk.store.people(deal["id"])],
+                         [("Ada Park", "ada@northwind.example", "VP Ops", "Buyer, from the market map")])
+        self.desk._set_config("playbook", "recruiting")       # roles: the record is the person, as before
+        two = self.market({"action": "track", "targets": ["Loose One"], "contact": "Bo Reyes", "email": "bo@loose.example"})
+        made = self.desk.store.get(two["added_to_pipeline"][0]["deal"])
+        self.assertEqual((made["grp"], made["name"], made["email"], self.desk.store.people(made["id"])),
+                         ("Freight brokers, Midwest", "Bo Reyes", "bo@loose.example", []))
 
     def test_track_fills_in_a_record_already_in_the_pipeline(self):
         # A company first added from a file, by its name alone, then found on a map with its buyer: one record, filled in.
@@ -795,11 +799,12 @@ class MarketTests(unittest.TestCase):
         self.assertIn("no second one was made", result["note"])
         deal = store.get(first["id"])
         self.assertEqual((deal["name"], deal["fields"]["title"], deal["next_step"], deal["source"]),
-                         ("Ada Park", "VP Ops", "Apply at the partner page", "Research"))      # what a person typed stays
+                         ("Meridian Freight", "VP Ops", "Apply at the partner page", "Research"))      # its name, and what a person typed, stay
+        self.assertEqual([(p["name"], p["title"]) for p in store.people(first["id"])], [("Ada Park", "VP Ops")])
         self.assertEqual(deal["fields"]["competitor"], "Spreadsheets")
         self.assertIn("filled in rather than a second one", store.activities(deal["id"])[0]["text"])
         self.assertIn("[in pipeline]", self.market({"action": "show"})["map"])
-        # A record that already names someone else keeps them, and gets the map's buyer as another person.
+        # A record named for a person (an older one, or one made by hand) keeps them, and gets the map's buyer as another person.
         other = store.add("Lee Chan", "lead", company="Northwind Carriers", grp="Northwind Carriers")
         self.market({"action": "add", "companies": [{"company": "Northwind Carriers", "people": [{"name": "Ada Park", "title": "COO"}]}]})
         clicked = self.desk.markets.click_track(self.desk.markets.target("Northwind Carriers")["id"], "dashboard")
@@ -912,8 +917,9 @@ class MarketTests(unittest.TestCase):
         self.assertEqual((shown["numbers"]["with_signal"], shown["holds"]), (0, []))
         tracked = self.market({"action": "track", "targets": ["Kyoto Inn"], "contact": "miles brandt", "title": "Chief Operating Officer"})
         deal = self.desk.store.get(tracked["added_to_pipeline"][0]["deal"])
-        self.assertEqual((deal["email"], deal["linkedin"], deal["fields"].get("title")),
-                         ("miles@inn.example", "li/miles", "Chief Operating Officer"))
+        buyer = self.desk.store.people(deal["id"])[0]      # a deal is named for the company; its buyer is a person on it
+        self.assertEqual((deal["name"], deal["email"], buyer["name"], buyer["email"], buyer["linkedin"], buyer["title"], deal["fields"].get("title")),
+                         ("Kyoto Inn", "", "Miles Brandt", "miles@inn.example", "li/miles", "Chief Operating Officer", "Chief Operating Officer"))
 
     def test_scheduled_jobs_are_opted_in_by_name(self):
         desk = make_desk(self.tmp.name, config={"channels": ["C1"]})
@@ -951,7 +957,8 @@ class MarketTests(unittest.TestCase):
         tracked = desk.market({"action": "track", "targets": ["Meridian Freight"]})["added_to_pipeline"][0]
         deal = desk.store.get(tracked["deal"])
         self.assertEqual((tracked["contact"], deal["name"], deal["fields"]["title"], deal["next_step"]),
-                         ("Sam Ito", "Sam Ito", "Ops Lead", "First outreach"))
+                         ("Sam Ito", "Meridian Freight", "Ops Lead", "First outreach"))
+        self.assertEqual([(p["name"], p["title"]) for p in desk.store.people(deal["id"])], [("Sam Ito", "Ops Lead")])
 
     def test_export_writes_one_safe_page(self):
         fixture.load(self.desk)
@@ -1733,6 +1740,38 @@ class CashTests(unittest.TestCase):
         self.assertEqual(self.desk.store.get(self.site)["delivery"], "")
         self.desk.undo(self.site)                                                 # the reopen goes back, and so does where it stood
         self.assertEqual((self.desk.store.get(self.site)["status"], self.desk.store.get(self.site)["delivery"]), ("won", "delivered"))
+
+    def test_a_win_keeps_its_next_step_until_delivery_is_through(self):
+        # Won and at kickoff: the work is not done, so the next step shows, comes due and can be marked done.
+        self.desk.deal({"action": "update", "deal": self.site, "next_step": "Send the kickoff note", "next_due": self.day(-2)})
+        view = self.desk.view(self.desk.store.get(self.site))
+        self.assertEqual((view["status"], view["in_delivery"], view["due"]), ("won", True, True))
+        today = self.desk.today(full=False)
+        self.assertEqual(([row["id"] for row in today["overdue"]], today["overdue"][0]["days"], today["counts"]["new"]), ([self.site], 2, 1))
+        self.assertEqual([d["id"] for d in self.desk.brief()["due"]], [self.site])
+        self.assertEqual([d["id"] for d in self.desk.pipeline({"view": "due"})["deals"]], [self.site])
+        lane = self.desk.cash()["delivery"]["records"][0]
+        self.assertEqual((lane["next_step"], lane["next_due"]), ("Send the kickoff note", self.day(-2)))
+        self.assertIn("overdue", self.desk.text_card(self.desk.store.get(self.site)))
+        done = self.desk.deal({"action": "done", "deal": self.site, "next_step": "Check the first draft", "next_due": self.day(3)})["deal"]
+        self.assertEqual((done["next_step"], done["in_delivery"]), ("Check the first draft", True))
+        self.assertEqual([row["id"] for row in self.desk.today(full=False)["coming"]], [self.site])
+        # A won record with nothing planned is not "new, nothing planned": that list is for open records.
+        self.desk.deal({"action": "update", "deal": self.site, "next_step": "", "next_due": ""})
+        self.assertNotIn(self.site, [row["id"] for row in self.desk.today(full=False)["new"]])
+        # Through the last delivery stage, the record is closed: its next step no longer shows or comes due.
+        self.desk.deal({"action": "update", "deal": self.site, "next_step": "Quarterly check-in", "next_due": self.day(-1), "delivery": "delivered"})
+        view = self.desk.view(self.desk.store.get(self.site))
+        self.assertEqual((view.get("in_delivery"), view.get("due")), (None, None))
+        today = self.desk.today(full=False)
+        self.assertEqual((today["overdue"], today["coming"], self.desk.brief()["due"], self.desk.pipeline({"view": "due"})["deals"]), ([], [], [], []))
+        self.assertEqual(self.desk.cash()["delivery"]["records"][0]["next_step"], "")
+        # A playbook with no delivery after a win: a win is simply closed, as before.
+        bare = make_desk(tempfile.mkdtemp(dir=self.tmp.name), playbook="recruiting")
+        if len(bare.playbook().delivery) < 2:
+            one = bare.deal({"action": "add", "name": "Ada Park", "next_step": "Call", "next_due": self.day(-1)})["deal"]["id"]
+            bare.deal({"action": "close", "deal": one, "outcome": "won"})
+            self.assertEqual(bare.today(full=False)["overdue"], [])
 
     def test_invoices_are_billed_part_paid_paid_and_voided(self):
         made = self.desk.invoice({"action": "add", "deal": "Website rebuild", "amount": 15000, "number": "1041", "due": "net 14"})

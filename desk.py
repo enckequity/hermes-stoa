@@ -635,7 +635,8 @@ class Desk:
                "delivery": deal.get("delivery") or "" if deal["status"] == "won" else "",
                "delivery_label": playbook.delivery_label(deal.get("delivery") or "") if deal["status"] == "won" else "",
                "fields": {k: v for k, v in deal["fields"].items() if not k.startswith("_")}, "notes": deal.get("notes") or "",
-               "last_touch": touch, "stale": cards.is_stale(playbook, deal, touch), "due": cards.is_due(deal)}
+               "last_touch": touch, "stale": cards.is_stale(playbook, deal, touch), "due": cards.is_due(deal, playbook),
+               "in_delivery": cards.in_delivery(playbook, deal)}      # won, and its next step still counts
         if deal["grp"]:
             group = (groups.get(st.group_key(deal["grp"])) if groups is not None else self.store.grp_get(deal["grp"])) or {}
             out["client"] = group.get("client") or ""
@@ -694,7 +695,11 @@ class Desk:
         if view == "stale":
             deals = [d for d in deals if cards.is_stale(playbook, d, touches.get(d["id"], ""))]
         elif view == "due":
-            deals = sorted([d for d in deals if cards.is_due(d)], key=cards.due_date)
+            if status == "open":       # a win still in delivery keeps its next step, so it comes due like an open record
+                deals = deals + [d for d in self.store.list(status="won", stage=stage, grp=str(args.get("group") or ""),
+                                                            owner=str(args.get("owner") or ""), query=str(args.get("query") or ""))
+                                 if cards.in_delivery(playbook, d)]
+            deals = sorted([d for d in deals if cards.is_due(d, playbook)], key=cards.due_date)
         limit = _int(args.get("limit") or 60, 60, 1, 500)
         out = {"ok": True, "view": view, "playbook": playbook.name, "count": len(deals),
                "open_value": st.total(d for d in deals if d["status"] == "open")}
@@ -724,9 +729,9 @@ class Desk:
         week_ago = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
         stale, due = [], []
         touches = self.store.touches()
-        for deal in open_deals:
+        for deal in open_deals + [d for d in self.store.list(status="won") if cards.in_delivery(playbook, d)]:
             touch = touches.get(deal["id"], "")
-            if cards.is_due(deal):
+            if cards.is_due(deal, playbook):
                 due.append(self.view(deal, playbook, touches=touches))
             elif cards.is_stale(playbook, deal, touch):
                 row = self.view(deal, playbook, touches=touches)
@@ -762,7 +767,8 @@ class Desk:
         touches, pending = self.store.touches(), self.store.meta_prefix("pending:")
         lists = {key: [] for key in ("overdue", "due_today", "quiet", "new", "coming", "snoozed", "drafts")}
         by_id = {}
-        for deal in self.store.list(status="open"):
+        # Open records, and wins still in delivery: their next steps count until the work is through its last stage.
+        for deal in self.store.list(status="open") + [d for d in self.store.list(status="won") if cards.in_delivery(playbook, d)]:
             by_id[deal["id"]] = deal
             due, touch = cards.due_date(deal), touches.get(deal["id"], "")
             if pending.get(deal["id"]):
@@ -776,7 +782,7 @@ class Desk:
             elif cards.is_stale(playbook, deal, touch):
                 lists["quiet"].append({"id": deal["id"], "days": int(st.days_since(touch or deal["updated_at"]) or 0),
                                        "expected": playbook.stale_days(deal["stage"])})
-            elif not deal["next_step"].strip() and deal["created_at"] >= week_ago:
+            elif deal["status"] == "open" and not deal["next_step"].strip() and deal["created_at"] >= week_ago:
                 lists["new"].append({"id": deal["id"], "days": int(st.days_since(deal["created_at"]) or 0)})
             elif due and due <= soon:
                 lists["coming"].append({"id": deal["id"], "due": due})
@@ -2452,6 +2458,8 @@ class Desk:
             ids = [item["id"] for item in playbook.delivery]
             lane.append({"id": deal["id"], "name": deal["name"], "company": deal["company"], "value": deal["value"],
                          "delivery": deal["delivery"] if deal["delivery"] in ids else (ids[0] if ids else ""), "won_at": deal["stage_at"],
+                         "next_step": deal["next_step"] if cards.in_delivery(playbook, deal) else "",
+                         "next_due": deal["next_due"] if cards.in_delivery(playbook, deal) else "",
                          "invoiced": money["invoiced"], "paid": money["paid"], "owed": money["owed"], "overdue": money["overdue"],
                          "uninvoiced": money["uninvoiced"]})
         order = {"overdue": 0, "partial": 1, "sent": 1, "draft": 2}

@@ -54,6 +54,8 @@ def _clean(value: Any, limit: int = 400) -> str:
     return " ".join(str(value).split())[:limit]
 
 
+BUYER_ROLE = "Buyer, from the market map"      # a buyer the map named, on a record as one of its people
+
 COMPANY_ENDINGS = re.compile(r"[\s,]+(inc|incorporated|llc|ltd|limited|corp|corporation|co|company|gmbh|plc|sa|ag|bv)\.?$")
 
 
@@ -741,6 +743,7 @@ class Markets:
             if named:        # start from what the map knows about that person, then apply what was passed now
                 person = dict(next((p for p in target["detail"].get("people") or [] if p["name"].lower() == named.lower()), {}))
                 person.update({k: _clean(args.get(k), 200) for k in ("title", "email", "linkedin") if _clean(args.get(k), 200)})
+                contact = person.get("name") or named      # spelled as the map has them, where it knows them
             # Where it goes: the group asked for; else what the playbook says; else, for a playbook that does not say,
             # a guess from its word for a group (an "account" is the company itself, a "search" is the map).
             rule = playbook.map_group or ("company" if playbook.terms["group"].lower() in ACCOUNT_WORDS else "map")
@@ -753,21 +756,28 @@ class Markets:
             note = " ".join(b for b in (target["why"], "Signal: %s." % target["signal"] if target["signal"] else "",
                                         "Uses today: %s." % target["detail"]["uses"] if target["detail"].get("uses") else "",
                                         "Source: %s" % target["source"] if target["source"] else "") if b)
+            # What the record is. On a pipeline of deals it is the deal, named for the company, and the buyer is a
+            # person on it. On one of roles or leads the record is the person, as it always was.
+            as_deal = playbook.shape == "deals"
             open_one = self._open_record(target["company"])
             if open_one is not None:      # already in the pipeline (a list, a file, by hand): fill that record in, never a second one
-                self._enrich(open_one, contact, person, found, note, owner_market["name"], actor)
+                self._enrich(open_one, contact, person, found, note, owner_market["name"], actor, as_deal)
                 with self.store._conn() as conn:
                     conn.execute("UPDATE targets SET status = 'tracked', deal_id = ?, updated_at = ? WHERE id = ?",
                                  (open_one["id"], st.now(), target["id"]))
                 made.append({"company": target["company"], "deal": open_one["id"], "market_id": target["market_id"],
                              "contact": contact, "group": open_one["grp"], "existing": True})
                 continue
+            own = contact and not as_deal      # the record is that person
             deal = self.store.add(
-                contact or target["company"], playbook.first_stage(), actor=actor, company=target["company"], grp=group,
-                email=person.get("email", "") if contact else "", linkedin=person.get("linkedin", "") if contact else "",
+                contact if own else target["company"], playbook.first_stage(), actor=actor, company=target["company"], grp=group,
+                email=person.get("email", "") if own else "", linkedin=person.get("linkedin", "") if own else "",
                 owner=str(args.get("owner") or ""), source="market map: %s" % owner_market["name"],
                 next_step="First outreach" if contact else "Find the right contact",
                 fields=found)      # why now, where the playbook keeps it
+            if contact and as_deal:
+                self.store.person_add(deal["id"], contact, actor=actor, title=person.get("title", ""), email=person.get("email", ""),
+                                      linkedin=person.get("linkedin", ""), role=BUYER_ROLE)
             if note:
                 self.store.log(deal["id"], "note", "From the %s map. %s" % (owner_market["name"], note), actor=actor)
             with self.store._conn() as conn:
@@ -806,26 +816,28 @@ class Markets:
                       key=lambda r: r["updated_at"], reverse=True)
         return self.store.get(same[0]["id"]) if same else None
 
-    def _enrich(self, deal: dict, contact: str, person: dict, found: dict, note: str, map_name: str, actor: str) -> None:
+    def _enrich(self, deal: dict, contact: str, person: dict, found: dict, note: str, map_name: str, actor: str,
+                as_deal: bool = False) -> None:
         """Add what the map knows to a record already in the pipeline. Only what is empty there is filled in, so
-        nothing a person typed is replaced. A buyer the record does not name yet becomes its person; one it names
-        already is left as it is, and the map's buyer goes on it as another person."""
+        nothing a person typed is replaced, and the record keeps its name. On a pipeline of deals (``as_deal``) the
+        buyer goes on the record as a person. Elsewhere the record is a person: one that names nobody yet takes the
+        buyer as its own, and one that names someone else keeps them and gets the buyer as another person."""
         values: dict = {}
         fields = {k: v for k, v in found.items() if k != "title" and not deal["fields"].get(k)}
         if contact:
             title = person.get("title", "")
             nameless = not deal["name"] or _company_key(deal["name"]) in (_company_key(deal["company"]), _company_key(deal["grp"]))
-            if nameless or _company_key(deal["name"]) == _company_key(contact):
+            if _company_key(deal["name"]) == _company_key(contact) or (nameless and not as_deal):
                 if nameless:
                     values["name"] = contact
                 for key in ("email", "linkedin"):
                     if person.get(key) and not deal[key]:
                         values[key] = person[key]
-                if title and "title" in found and not deal["fields"].get("title"):
-                    fields["title"] = title
             elif not any(_company_key(p["name"]) == _company_key(contact) for p in self.store.people(deal["id"])):
                 self.store.person_add(deal["id"], contact, actor=actor, title=title, email=person.get("email", ""),
-                                      linkedin=person.get("linkedin", ""), role="from the %s map" % map_name)
+                                      linkedin=person.get("linkedin", ""), role=BUYER_ROLE)
+            if title and "title" in found and not deal["fields"].get("title"):
+                fields["title"] = title
         if not deal["next_step"] or (contact and deal["next_step"] == "Find the right contact"):
             values["next_step"] = "First outreach" if contact else "Find the right contact"
         if values or fields:
@@ -1037,9 +1049,10 @@ class Markets:
         else:
             how = ("gtm_market(action=\"people\", target=\"%s\", titles=[...]) (each person returned costs a credit, so ask for at "
                    "most three)" % target["id"] if self.desk.secret(PDL_KEY) else "your web search tool")
-            task = ("Work out who at %s is the most likely buyer for us, using %s. Put that person on the record with "
-                    "gtm_deal(action=\"update\"), then reply here with who you picked and why, and a first-touch note of under 90 "
-                    "words." % (target["company"], how))
+            put = ("Add that person to the record with gtm_contact(action=\"add\", deal=\"%s\"), leaving the record's name as it is"
+                   % deal["id"] if self.desk.playbook().shape == "deals" else "Put that person on the record with gtm_deal(action=\"update\")")
+            task = ("Work out who at %s is the most likely buyer for us, using %s. %s, then reply here with who you picked and "
+                    "why, and a first-touch note of under 90 words." % (target["company"], how, put))
         if made.get("existing_record"):
             followup = ("[Stoa desk] %s added %s to the pipeline from the market map. It already had an open record (id %s), so "
                         "the map's findings were added to that record instead of making a second one; do not add it again.\n\n"

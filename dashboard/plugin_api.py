@@ -271,7 +271,7 @@ def state() -> dict:
                    "lost": len([x for x in deals if x["status"] == "lost"]),
                    "mapped": sum(m["counts"]["mapped"] for m in markets),
                    "tracked": sum(m["counts"]["tracked"] for m in markets),
-                   "due": len([x for x in open_deals if cards.is_due(x)]),
+                   "due": len([x for x in deals if cards.is_due(x, playbook)]),      # open, or won and still in delivery
                    "stale": len([x for x in open_deals if not cards.is_due(x)
                                  and cards.is_stale(playbook, x, touches.get(x["id"], ""))]),
                    "moves_week": len([a for a in d.store.activities(limit=400, since=week_ago) if a["kind"] == "stage"]),

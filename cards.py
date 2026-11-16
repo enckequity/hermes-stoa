@@ -80,9 +80,23 @@ def due_date(deal: dict) -> str:
     return due if st.ISO_DATE.match(due) else (st.parse_due(due) or "")
 
 
-def is_due(deal: dict) -> bool:
+def in_delivery(playbook, deal: dict) -> bool:
+    """Won, and the work after the win is not finished: the record is short of the playbook's last delivery stage
+    (Onboarding, where the last is Live). Its next step still counts until then. A playbook with one delivery
+    stage, or none, has nowhere to finish, so a win there is simply closed."""
+    if playbook is None or deal["status"] != "won" or len(playbook.delivery) < 2:
+        return False
+    return (deal.get("delivery") or playbook.delivery[0]["id"]) != playbook.delivery[-1]["id"]
+
+
+def working(playbook, deal: dict) -> bool:
+    """Still being worked, so its next step shows and comes due: open, or won and not through delivery yet."""
+    return deal["status"] == "open" or in_delivery(playbook, deal)
+
+
+def is_due(deal: dict, playbook=None) -> bool:
     due = due_date(deal)
-    return deal["status"] == "open" and bool(due) and due <= st.today() and not snoozed(deal)
+    return working(playbook, deal) and bool(due) and due <= st.today() and not snoozed(deal)
 
 
 def facts(playbook, deal: dict) -> list:
@@ -112,7 +126,7 @@ def text_card(playbook, deal: dict, activities: Optional[list] = None, last_touc
     for label, value in facts(playbook, deal):
         lines.append("%s: %s" % (label, value))
     if deal.get("next_step"):
-        due = " (due %s%s)" % (deal["next_due"], ", overdue" if is_due(deal) and due_date(deal) < st.today() else "") \
+        due = " (due %s%s)" % (deal["next_due"], ", overdue" if is_due(deal, playbook) and due_date(deal) < st.today() else "") \
             if deal.get("next_due") else ""
         lines.append("Next: %s%s" % (deal["next_step"], due))
     if is_stale(playbook, deal, last_touch):
@@ -144,7 +158,7 @@ def card_blocks(playbook, deal: dict, activities: Optional[list] = None, last_to
     if deal.get("company"):
         title += "  ·  %s" % _escape(deal["company"])
     flags = []
-    if is_due(deal):
+    if is_due(deal, playbook):
         flags.append(":small_orange_diamond: next step due")
     if is_stale(playbook, deal, last_touch):
         flags.append(":hourglass: quiet %s" % age(last_touch or deal["updated_at"]).replace(" ago", ""))

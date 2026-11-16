@@ -262,8 +262,16 @@ company, invoiced to the fund each month; a fractional lead's retainer. Use `cli
 
 ## People and companies
 
-A record has its own person (its name and email). Everyone else around it, a buyer's boss, the
-finance contact, a hiring manager, goes on the record as another person:
+What a record is named for depends on the pipeline. On a pipeline of deals (B2B sales,
+partnerships, an agency's clients) the record is the deal: name it for the company, or for what
+the deal is ("Snov.io", "Snov.io referral deal"), and put every person on it, the buyer included,
+with `gtm_contact`. Never rename a deal to a person's name, and when you find the right contact
+at a company already on the desk, add them to its record rather than opening one in their name.
+On a pipeline of roles or leads the record is the person (a candidate, a lead), with their own
+name and email.
+
+Everyone else around a record, a buyer's boss, the finance contact, a hiring manager, goes on it
+as another person:
 `gtm_contact(action="add", deal="<id>", name=..., email=..., title=..., role=...)`. A person is
 kept once: add them to a second record with the same email and they are linked, not duplicated;
 their title and email are theirs everywhere, and `role` is their part in that one record. Do this when
@@ -334,7 +342,10 @@ notes, and the facts the playbook names for it (a search's fee terms).
 
 `view="today"` is the list the person sees on the Today tab: overdue, due today, lists waiting for
 their approval, drafts waiting for you, gone quiet, new with nothing planned, and what is coming
-up. Snoozed records are on none of them. Answer from it in that order, and offer one move for the
+up. Snoozed records are on none of them. A won record still in delivery (Onboarding, say, where
+the last stage is Live) keeps its next step: it shows, comes due and can be marked done like an
+open one, until the record reaches the last delivery stage. After that, what follows belongs on
+the people and the company, not on the closed record. Answer from it in that order, and offer one move for the
 first item rather than a plan for all of them. If `drafts` is not empty, those are writing tasks a
 button left for you: open each record with `gtm_deal(action="get")` and do it.
 

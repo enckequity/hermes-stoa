@@ -52,7 +52,9 @@ GTM_DEAL = {
         "properties": {
             "action": {"type": "string", "enum": ["get", "add", "update", "move", "close", "reopen", "log", "done", "snooze", "undo", "restore"]},
             "deal": _DEAL_REF,
-            "name": {"type": "string", "description": "add/update: the person or deal name."},
+            "name": {"type": "string", "description": "add/update: the record's name. On a pipeline of deals that is the company or what "
+                                                    "the deal is, never a person (people go on it with gtm_contact); on one of roles or "
+                                                    "leads it is the person."},
             "company": {"type": "string"},
             "group": {"type": "string", "description": "add/update: the account, search or client this belongs to."},
             "stage": {"type": "string", "description": "add: starting stage (default first). move: target stage id or label, or 'next'."},
