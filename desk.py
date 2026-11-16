@@ -22,6 +22,7 @@ from typing import Any, Callable, Optional
 
 from . import cards, demo, sources
 from . import store as st
+from .database import Database
 from .files import Handed
 from .intake import Intake
 from .market import Markets
@@ -195,6 +196,7 @@ class Desk:
         self.markets = Markets(self)
         self.intake = Intake(self)
         self.reports = Reports(self)
+        self.database = Database(self)        # accounts, deals and people as rows, and the views kept of them
         self.handed = Handed(self)            # the files the talk box handed to Hermes, and removing them
 
     # -- host services --------------------------------------------------------------------------
@@ -765,7 +767,7 @@ class Desk:
         week_ago = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
         soon = (day + dt.timedelta(days=7)).isoformat()
         touches, pending = self.store.touches(), self.store.meta_prefix("pending:")
-        lists = {key: [] for key in ("overdue", "due_today", "quiet", "new", "coming", "snoozed", "drafts")}
+        lists = {key: [] for key in ("overdue", "due_today", "quiet", "new", "unplanned", "coming", "snoozed", "drafts")}
         by_id = {}
         # Open records, and wins still in delivery: their next steps count until the work is through its last stage.
         for deal in self.store.list(status="open") + [d for d in self.store.list(status="won") if cards.in_delivery(playbook, d)]:
@@ -784,11 +786,15 @@ class Desk:
                                        "expected": playbook.stale_days(deal["stage"])})
             elif deal["status"] == "open" and not deal["next_step"].strip() and deal["created_at"] >= week_ago:
                 lists["new"].append({"id": deal["id"], "days": int(st.days_since(deal["created_at"]) or 0)})
+            elif deal["status"] == "won" and not deal["next_step"].strip():      # won, the work begun, and no step for it yet
+                lists["unplanned"].append({"id": deal["id"], "days": int(st.days_since(deal["stage_at"]) or 0),
+                                           "delivery": playbook.delivery_label(deal.get("delivery") or playbook.delivery[0]["id"])})
             elif due and due <= soon:
                 lists["coming"].append({"id": deal["id"], "due": due})
         lists["overdue"].sort(key=lambda row: -row["days"])
         lists["quiet"].sort(key=lambda row: -row["days"])
         lists["new"].sort(key=lambda row: row["days"])
+        lists["unplanned"].sort(key=lambda row: -row["days"])
         lists["coming"].sort(key=lambda row: row["due"])
         lists["snoozed"].sort(key=lambda row: row["until"])
         approvals = self.intake.queue()
@@ -815,7 +821,7 @@ class Desk:
                                "period": i.get("period") or ""} for i in every_invoice if i["deal_id"] in clients and i["state"] == "overdue"],
                              key=lambda row: -row["days"])
         counts = dict({key: len(rows) for key, rows in lists.items()}, approvals=len(approvals), to_bill=len(to_bill), client_overdue=len(client_late))
-        needs = sum(counts[key] for key in ("overdue", "due_today", "quiet", "new", "drafts", "approvals", "invoices_overdue", "to_invoice",
+        needs = sum(counts[key] for key in ("overdue", "due_today", "quiet", "new", "unplanned", "drafts", "approvals", "invoices_overdue", "to_invoice",
                                             "to_bill", "client_overdue"))
         if full:
             lists = {key: [dict(self.view(by_id[row["id"]], playbook, touches=touches), **{k: v for k, v in row.items() if k != "id"})
@@ -857,6 +863,7 @@ class Desk:
         section("Gone quiet", "quiet", lambda d: "%s — %s, quiet %dd (a nudge is due after %dd)"
                 % (d["name"], d["stage_label"], d["days"], d["expected"]))
         section("New, nothing planned yet", "new", lambda d: "%s — %s" % (d["name"], d.get("company") or d["stage_label"]))
+        section("%s, no next step yet" % playbook.won["label"], "unplanned", lambda d: "%s — in %s, nothing planned" % (d["name"], d["delivery"].lower()))
         section("Coming up this week", "coming", lambda d: "%s — %s (%s)" % (d["name"], d.get("next_step", ""), d["due"]))
         if counts["snoozed"]:
             lines += ["", "%d snoozed" % counts["snoozed"]]

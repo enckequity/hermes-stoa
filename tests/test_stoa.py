@@ -1714,6 +1714,122 @@ class MoneyTests(unittest.TestCase):
         self.assertEqual([line["op"] for line in self.desk.store.ledger(made)], ["insert"])
 
 
+class DatabaseTests(unittest.TestCase):
+    """Accounts, deals and people as rows, and the views kept of them."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.desk = make_desk(self.tmp.name, playbook="b2b-sales")
+        add = lambda name, **more: self.desk.deal(dict({"action": "add", "name": name}, **more))["deal"]["id"]      # noqa: E731
+        self.snov = add("Snov.io", company="Snov.io", group="Snov.io", value=5000, source="Research", next_step="Send terms", next_due="+2d")
+        self.second = add("Snov.io renewal", company="snov.io", group="Snov.io", value=1000, owner="Ada")
+        self.old = add("Dana Whitfield", company="Kestrel Labs", group="Kestrel Labs", email="dana@kestrel.example", fields={"title": "VP Ops"})
+        self.desk.store.person_add(self.snov, "Oryna K", title="PR Manager", email="oryna@snov.example", role="Buyer")
+        self.desk.store.person_add(self.second, "Oryna K", email="oryna@snov.example")        # the same person, on a second record
+        self.desk.deal({"action": "close", "deal": self.second, "outcome": "won"})
+        self.desk.market({"action": "define", "name": "Enrichment tools"})
+        self.desk.market({"action": "add", "companies": [{"company": "Snov.io", "website": "snov.io", "segment": "Enrich", "fit": 5, "size": "51-200"},
+                                                         {"company": "Hunter", "segment": "Enrich", "fit": 4, "location": "Remote"},
+                                                         {"company": "Gone Co"}]})
+        self.desk.market({"action": "dismiss", "targets": ["Gone Co"]})
+
+    def test_rows_of_deals_accounts_and_people(self):
+        data = self.desk.database.rows()
+        deals = {row["id"]: row for row in data["deals"]}
+        self.assertEqual(len(deals), 3)
+        one = deals[self.snov]                                   # a deal named for its company: its contact is the first person on it
+        self.assertEqual((one["name"], one["status"], one["stage"], one["contact"], one["contact_title"], one["email"], one["people"], one["value"]),
+                         ("Snov.io", "Open", "Lead", "Oryna K", "PR Manager", "oryna@snov.example", 1, 5000))
+        won = deals[self.second]                                 # won and in onboarding: its status, where the work stands, no stage
+        self.assertEqual((won["status"], won["stage"], won["delivery"], won["state"]), ("Closed won", "", "Onboarding", "won"))
+        older = deals[self.old]                                  # an older record named for a person is its own contact
+        self.assertEqual((older["contact"], older["email"], older["people"]), ("Dana Whitfield", "dana@kestrel.example", 1))
+        accounts = {row["name"]: row for row in data["accounts"]}
+        self.assertEqual(sorted(accounts), ["Hunter", "Kestrel Labs", "Snov.io"])              # one Snov.io however it is typed; the dismissed company is not there
+        snov = accounts["Snov.io"]
+        self.assertEqual((snov["status"], snov["open"], snov["won"], snov["deals"], snov["open_value"], snov["won_value"], snov["people"], snov["owners"]),
+                         ("Customer", 1, 1, 2, 5000, 1000, 1, "Ada"))
+        self.assertEqual((snov["next_step"], snov["maps"], snov["segment"], snov["fit"], snov["size"], snov["domain"], snov["in_pipeline"], snov["group"]),
+                         ("Send terms", "Enrichment tools", "Enrich", 5, "51-200", "snov.io", True, "Snov.io"))
+        hunter = accounts["Hunter"]                              # on a map only
+        self.assertEqual((hunter["status"], hunter["in_pipeline"], hunter["deals"], hunter["location"], bool(hunter["map_id"])), ("On a map", False, 0, "Remote", True))
+        people = {row["name"]: row for row in data["people"]}
+        self.assertEqual(sorted(people), ["Dana Whitfield", "Oryna K"])                        # each person once
+        oryna = people["Oryna K"]
+        self.assertEqual((oryna["company"], oryna["record_count"], oryna["open"], oryna["role"], oryna["email"], [r["id"] for r in oryna["records"]]),
+                         ("Snov.io", 2, 2, "Buyer", "oryna@snov.example", [self.snov, self.second]))
+        self.assertEqual((people["Dana Whitfield"]["title"], people["Dana Whitfield"]["company"]), ("VP Ops", "Kestrel Labs"))
+        self.assertEqual((data["stages"][0], data["delivery"], data["currency"]), ("Lead", ["Onboarding", "Live"], "USD"))
+        json.dumps(data)
+
+    def test_where_the_record_is_the_person(self):
+        desk = make_desk(tempfile.mkdtemp(dir=self.tmp.name), playbook="recruiting")
+        one = desk.deal({"action": "add", "name": "Ingrid Solberg", "company": "Meridian Freight", "group": "Designer · Halcyon", "email": "ingrid@meridian.example"})["deal"]["id"]
+        desk.store.person_add(one, "Hal Manager", email="hal@halcyon.example", role="Hiring manager")
+        data = desk.database.rows()
+        people = {row["name"]: row for row in data["people"]}
+        self.assertEqual((people["Ingrid Solberg"]["company"], people["Ingrid Solberg"]["kind"]), ("Meridian Freight", "Candidate"))
+        self.assertEqual((people["Hal Manager"]["company"], people["Hal Manager"]["role"]), ("", "Hiring manager"))      # not at the candidate's employer
+        self.assertEqual(data["deals"][0]["contact"], "Ingrid Solberg")
+
+    def test_one_change_to_several_records(self):
+        change, get = self.desk.database.change, self.desk.store.get
+        out = change({"ids": [self.snov, self.second, self.old, "ghost"], "set": {"owner": "Lee", "next_step": "Call them", "next_due": "+3d", "name": "hacked"}})
+        self.assertEqual((out["ok"], out["changed"], out["skipped"]), (True, 3, [{"name": "ghost", "why": "no longer on the desk"}]))
+        due = (dt.date.today() + dt.timedelta(days=3)).isoformat()
+        for one in (self.snov, self.second, self.old):          # the won one is still in onboarding, so it takes a next step too
+            self.assertEqual((get(one)["owner"], get(one)["next_step"], get(one)["next_due"]), ("Lee", "Call them", due))
+        self.assertEqual(get(self.snov)["name"], "Snov.io")     # only the facts on the list can be set this way
+        moved = change({"ids": [self.snov, self.second, self.old], "stage": "qualified"})
+        self.assertEqual((moved["changed"], [item["why"] for item in moved["skipped"]]), (2, ["already closed won"]))
+        self.assertEqual((get(self.snov)["stage"], get(self.old)["stage"], get(self.second)["status"]), ("qualified", "qualified", "won"))
+        self.assertEqual(change({"ids": [self.snov], "stage": "qualified"})["error"], "Nothing was changed: already there.")
+        lost = change({"ids": [self.old], "lost": "No budget"})
+        self.assertEqual((lost["changed"], get(self.old)["status"], get(self.old)["lost_reason"]), (1, "lost", "No budget"))
+        closed = change({"ids": [self.old, self.snov], "set": {"next_step": "Send terms"}})
+        self.assertEqual((closed["changed"], closed["skipped"]), (1, [{"name": "Dana Whitfield", "why": "closed, so it has no next step"}]))
+        self.assertTrue(change({"ids": [self.old], "set": {"source": "Event"}})["ok"])          # a fact that is not a next step still fits a closed record
+        self.assertEqual(get(self.old)["source"], "Event")
+        for bad in ({"ids": [self.snov], "stage": "nowhere"}, {"ids": [self.snov]}, {"ids": [], "set": {"owner": "x"}}, {"ids": "x"}, None):
+            self.assertFalse(change(bad)["ok"])
+        self.assertEqual(self.desk.undo(self.old)["ok"], True)          # each change is on its record, to take back there
+        self.assertEqual(get(self.old)["source"], "")
+        rows = self.desk.database.rows()
+        row = next(r for r in rows["deals"] if r["id"] == self.snov)
+        self.assertEqual((row["stage_id"], row["working"], row["delivery_id"]), ("qualified", True, ""))
+        self.assertEqual(next(r for r in rows["deals"] if r["id"] == self.second)["delivery_id"], "onboarding")
+        people = {r["name"]: r["edit"] for r in rows["people"]}
+        self.assertEqual((people["Oryna K"]["deal"], people["Dana Whitfield"]), (self.snov, {"record": self.old}))
+        accounts = {r["name"]: r for r in rows["accounts"]}
+        self.assertEqual((len(accounts["Hunter"]["targets"]), accounts["Snov.io"]["targets"]), (1, []))
+
+    def test_views_are_kept_changed_and_removed(self):
+        save = self.desk.database.save_view
+        made = save({"name": "  Big open  deals ", "object": "deals", "search": "snov", "group": "stage", "sort": {"field": "value", "dir": "desc"},
+                     "filters": [{"field": "status", "op": "is", "value": "Open"}, {"field": "value", "op": "gt", "value": 1000},
+                                 {"field": "DROP TABLE", "op": "is", "value": "x"}, {"field": "fields.use_case", "op": "nonsense", "value": "x"}, "junk"],
+                     "columns": ["name", "value", "fields.use_case", "<script>"]})
+        view = made["view"]
+        self.assertEqual((view["id"], view["name"], view["object"], view["group"], view["sort"], view["columns"], view["search"]),
+                         ("big-open-deals", "Big open deals", "deals", "stage", {"field": "value", "dir": "desc"}, ["name", "value", "fields.use_case"], "snov"))
+        self.assertEqual(view["filters"], [{"field": "status", "op": "is", "value": "Open"}, {"field": "value", "op": "gt", "value": "1000"}])
+        self.assertIn("already called that", save({"name": "big OPEN deals", "object": "deals"})["error"])
+        self.assertTrue(save({"name": "Big open deals", "object": "people"})["ok"])                 # the same name for another kind of row is fine
+        changed = save({"id": "big-open-deals", "name": "Big deals", "object": "deals", "filters": []})
+        self.assertEqual((changed["view"]["id"], changed["view"]["name"], changed["view"]["filters"], len(changed["views"])), ("big-open-deals", "Big deals", [], 2))
+        self.assertFalse(save({"name": "", "object": "deals"})["ok"])
+        self.assertFalse(save({"name": "x", "object": "invoices"})["ok"])
+        self.assertEqual([v["id"] for v in self.desk.database.rows()["views"]], ["big-open-deals", "big-open-deals-2"])
+        self.assertEqual([v["id"] for v in self.desk.database.remove_view("big-open-deals")["views"]], ["big-open-deals-2"])
+        self.assertFalse(self.desk.database.remove_view("big-open-deals")["ok"])
+        for n in range(60):
+            last = save({"name": "View %d" % n, "object": "accounts"})
+        self.assertIn("up to 40 views", last["error"])
+        self.desk.store.meta_set("database_views", "not json")                                      # a damaged row is no views, not an error
+        self.assertEqual(self.desk.database.views(), [])
+
+
 class CashTests(unittest.TestCase):
     """Invoices on a record, where won work stands, and what the pipeline is likely to bring in."""
 
@@ -1758,7 +1874,11 @@ class CashTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in self.desk.today(full=False)["coming"]], [self.site])
         # A won record with nothing planned is not "new, nothing planned": that list is for open records.
         self.desk.deal({"action": "update", "deal": self.site, "next_step": "", "next_due": ""})
-        self.assertNotIn(self.site, [row["id"] for row in self.desk.today(full=False)["new"]])
+        day = self.desk.today(full=False)
+        self.assertNotIn(self.site, [row["id"] for row in day["new"]])
+        # It is asked for its first delivery step instead: won, in kickoff, nothing planned.
+        self.assertEqual(([(row["id"], row["delivery"]) for row in day["unplanned"]], day["counts"]["unplanned"]), ([(self.site, "Kickoff")], 1))
+        self.assertIn("Signed, no next step yet", self.desk.today_text())
         # Through the last delivery stage, the record is closed: its next step no longer shows or comes due.
         self.desk.deal({"action": "update", "deal": self.site, "next_step": "Quarterly check-in", "next_due": self.day(-1), "delivery": "delivered"})
         view = self.desk.view(self.desk.store.get(self.site))
@@ -1866,7 +1986,7 @@ class CashTests(unittest.TestCase):
         today = self.desk.today()
         self.assertEqual([(r["name"], r["number"], r["owed"], r["days"]) for r in today["invoices_overdue"]], [("Workshop", "1050", 4000, 15)])
         self.assertEqual([(r["name"], r["amount"]) for r in today["to_invoice"]], [("Website rebuild", 30000)])
-        self.assertEqual((today["counts"]["invoices_overdue"], today["counts"]["to_invoice"], today["needs"]), (1, 1, 3))    # and one new record
+        self.assertEqual((today["counts"]["invoices_overdue"], today["counts"]["to_invoice"], today["needs"]), (1, 1, 5))    # and one new record, and the two wins at kickoff with no step planned
         text = self.desk.today_text()
         self.assertIn("Invoices overdue (1)", text)
         self.assertIn("Workshop — $4,000 (#1050), 15d late", text)

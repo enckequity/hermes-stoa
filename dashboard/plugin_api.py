@@ -615,6 +615,33 @@ def overview() -> dict:
     return desk().overview()
 
 
+@router.get("/database")
+def database() -> dict:
+    """The Database tab: every account, deal and person on this pipeline as rows, and the views kept of them.
+    Worked out from the plugin's own database; the page filters and sorts them itself."""
+    return desk().database.rows()
+
+
+@router.post("/database/change")
+def database_change(body: dict = Body(...)) -> dict:
+    """The same change to several records picked in the table (facts set, a move to a stage, closed as lost). Each
+    goes through the desk's own path, is logged on its record and can be taken back there."""
+    d = desk()
+    result = d.database.change(body, actor="dashboard")
+    if result.get("changed"):
+        d.announce()
+    return result
+
+
+@router.post("/database/view")
+def database_view(body: dict = Body(...)) -> dict:
+    """Keep a view (a new one, or with ``id`` the one it replaces), or with ``remove`` take one away."""
+    d = desk()
+    if body.get("remove"):
+        return d.database.remove_view(body.get("remove"))
+    return d.database.save_view(body)
+
+
 @router.get("/reports")
 def reports(period: str = "", compare: int = 1) -> dict:
     """The Reports tab: the reports on the dashboard, worked out, and the list of every report this pipeline has.

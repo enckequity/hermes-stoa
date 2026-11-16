@@ -59,7 +59,7 @@ const STATE = ['stoa', 'state']
 const InPipe = createContext(null)
 const inPipe = pipe => (pipe ? { pipeline: pipe } : {})
 const refresh = () => queryClient.invalidateQueries({ queryKey: ['stoa'] })
-const $tab = atom('today') // the page's tab: today | pipeline | cash | market | reports | activity | setup
+const $tab = atom('today') // the page's tab: today | pipeline | database | cash | market | reports | activity | setup
 const $draft = atom('') // words put in the dock for the person to finish and send
 let onPage = false // the Stoa page is what is on screen: a click that calls for writing goes to its dock
 const $onPage = atom(false) // the same, for the pane to watch: beside the open desk it shows other things
@@ -912,6 +912,74 @@ const CSS = `
 .stoa-waiting { display: block; width: fit-content; margin: -6px 0 16px; padding: 6px 13px; border: 1px solid var(--stoa-accent-line); border-radius: var(--stoa-r); background: var(--stoa-accent-soft); color: var(--ui-text-primary); font: inherit; font-size: 12.5px; cursor: pointer; }
 .stoa-waiting b { font-family: var(--stoa-mono); font-weight: 600; }
 .stoa-viewrow { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin: 0 0 14px; }
+/* -- the database: accounts, deals and people as a table to look through ------------------------------ */
+.stoa-dbtop { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 14px; margin: 0 0 14px; }
+.stoa-dbtop .stoa-tabs { margin: 0; }
+.stoa-dbviews { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 12px; }
+.stoa-dbview { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--ui-stroke-secondary); border-radius: var(--stoa-r); background: transparent; color: var(--ui-text-secondary); font-family: var(--stoa-mono); font-size: 11.5px; cursor: pointer; transition: background .15s ease, color .15s ease; }
+.stoa-dbview:hover { background: var(--ui-control-hover-background); color: var(--ui-text-primary); }
+.stoa-dbview[data-on="1"] { border-color: var(--stoa-accent-line); background: var(--stoa-accent-soft); color: var(--ui-text-primary); font-weight: 600; }
+.stoa-dbview[data-own="1"]::before { content: "★"; font-size: 9px; color: var(--stoa-accent-text); }
+.stoa-dbview small { font-size: 10px; opacity: .6; font-weight: 400; }
+.stoa-dbfacets { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.stoa-dbfacet { flex: 0 1 132px; min-width: 96px; padding: 7px 10px 9px; border: 1px solid var(--ui-stroke-secondary); border-radius: var(--stoa-r); background: transparent; color: var(--ui-text-primary); font: inherit; text-align: left; cursor: pointer; transition: background .15s ease, border-color .15s ease; }
+.stoa-dbfacet:hover { background: var(--ui-control-hover-background); }
+.stoa-dbfacet[data-on="1"] { border-color: var(--stoa-accent-line); background: var(--stoa-accent-soft); }
+.stoa-dbfacet span { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+.stoa-dbfacet span b { font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stoa-dbfacet i { display: block; height: 6px; min-width: 6px; margin-top: 7px; background: conic-gradient(from 90deg at 2px 2px, var(--stoa-accent) 90deg, #0000 0) 0 0 / 6px 6px round; }
+.stoa-dbbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 10px; }
+.stoa-dbbar .stoa-input { flex: 0 1 240px; min-width: 120px; height: 28px; padding: 0 9px; border: 1px solid var(--ui-stroke-secondary); border-radius: var(--stoa-r); background: transparent; color: var(--ui-text-primary); font: inherit; font-size: 12px; outline: none; }
+.stoa-dbbar .stoa-input:focus { border-color: var(--ui-stroke-primary); }
+.stoa-dbbar .stoa-input::placeholder { color: var(--ui-text-quaternary); }
+.stoa-dbbar .stoa-menulist { min-width: 220px; }
+.stoa-dbfilters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 10px; }
+.stoa-dbfilter { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 2px 0 9px; border: 1px solid var(--stoa-accent-line); border-radius: var(--stoa-r); background: var(--stoa-accent-soft); font-size: 12px; }
+.stoa-dbfilter b { font-weight: 550; white-space: nowrap; }
+.stoa-dbfilter select, .stoa-dbfilter input { height: 22px; max-width: 170px; padding: 0 4px; border: 0; border-bottom: 1px dotted var(--ui-stroke-primary); border-radius: 0; background: transparent; color: var(--ui-text-primary); font: inherit; font-size: 12px; outline: none; }
+.stoa-dbfilter input[type="number"] { width: 64px; }
+.stoa-dbfilter .stoa-icon { width: 22px; height: 22px; }
+.stoa-dbcheck { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12.5px; cursor: pointer; border-radius: var(--stoa-r); }
+.stoa-dbcheck:hover { background: var(--ui-row-hover-background); }
+.stoa-dbcheck input { accent-color: var(--stoa-accent); }
+.stoa-dbwrap { overflow: auto; max-height: max(360px, calc(100vh - 330px)); border: 1px solid var(--ui-stroke-secondary); border-radius: var(--stoa-r); background: var(--stoa-dbbg); --stoa-dbbg: var(--ui-chat-surface-background, var(--ui-bg-card)); }
+.stoa-db { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
+.stoa-db th { position: sticky; top: 0; z-index: 2; padding: 0; border-bottom: 1px solid var(--ui-stroke-primary); background: color-mix(in srgb, var(--ui-text-primary) 4%, var(--stoa-dbbg)); text-align: left; white-space: nowrap; font-weight: 400; }
+.stoa-db th button { display: flex; align-items: center; gap: 6px; width: 100%; padding: 9px 12px 8px; border: 0; background: transparent; color: var(--ui-text-tertiary); font-family: var(--stoa-mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; cursor: pointer; }
+.stoa-db th button:hover, .stoa-db th[data-sorted="1"] button { color: var(--ui-text-primary); }
+.stoa-db th[data-num="1"] button { justify-content: flex-end; }
+.stoa-db td { max-width: 300px; padding: 7px 12px; border-bottom: 1px dotted var(--ui-stroke-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; background: var(--stoa-dbbg); }
+.stoa-db tbody tr:last-child td { border-bottom: 0; }
+.stoa-db tbody tr:hover td { background: color-mix(in srgb, var(--ui-text-primary) 5%, var(--stoa-dbbg)); }
+.stoa-db td[data-num="1"] { text-align: right; font-family: var(--stoa-mono); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.stoa-db td[data-tone="bad"] { color: var(--ui-red); }
+.stoa-db td[data-tone="warn"] { color: var(--ui-orange); }
+.stoa-db td[data-empty="1"] { color: var(--ui-text-quaternary); }
+.stoa-db th:first-child, .stoa-db td:first-child { position: sticky; left: 0; }
+.stoa-db th:nth-child(2), .stoa-db td:nth-child(2) { position: sticky; left: 36px; box-shadow: inset -1px 0 0 var(--ui-stroke-tertiary); }
+.stoa-db th:first-child, .stoa-db th:nth-child(2) { z-index: 3; }
+.stoa-db td:first-child, .stoa-db td:nth-child(2) { z-index: 1; }
+.stoa-db td:nth-child(2) { max-width: 260px; }
+.stoa-db .stoa-dbtick { width: 36px; min-width: 36px; max-width: 36px; padding: 0 0 0 12px; text-overflow: clip; }
+.stoa-db .stoa-dbtick input { display: block; margin: 0; accent-color: var(--stoa-accent); cursor: pointer; }
+.stoa-db tbody tr[data-on="1"] td { background: color-mix(in srgb, var(--stoa-accent) 9%, var(--stoa-dbbg)); }
+.stoa-db td[data-edit="1"] { cursor: text; }
+.stoa-db td[data-edit="1"]:hover { box-shadow: inset 0 0 0 1px var(--ui-stroke-primary); }
+.stoa-db td[data-editing="1"] { padding: 2px 4px; overflow: visible; box-shadow: inset 0 0 0 2px var(--stoa-accent-line); }
+.stoa-dbedit { display: block; width: 100%; min-width: 120px; height: 28px; padding: 0 7px; border: 0; border-radius: 0; background: transparent; color: var(--ui-text-primary); font: inherit; font-size: 12.5px; outline: none; }
+.stoa-dbname { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.stoa-dbname > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.stoa-dbrename { flex: none; width: 20px; height: 20px; font-size: 12px; opacity: 0; }
+.stoa-db tr:hover .stoa-dbrename, .stoa-dbrename:focus-visible { opacity: .7; }
+.stoa-dbbulk { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 0 10px; padding: 8px 10px; border: 1px solid var(--stoa-accent-line); border-radius: var(--stoa-r); background: var(--stoa-accent-soft); }
+.stoa-dbbulk > b { margin-right: 6px; font-family: var(--stoa-mono); font-size: 11.5px; }
+.stoa-dbbulkform { display: inline-flex; gap: 6px; align-items: center; }
+.stoa-dbbulkform .stoa-field { width: 230px; margin: 0; background: var(--stoa-dbbg, var(--ui-chat-surface-background)); }
+.stoa-db tr.stoa-dbgroup td { position: sticky; left: 0; padding: 8px 12px; border-bottom: 1px solid var(--ui-stroke-secondary); background: color-mix(in srgb, var(--ui-text-primary) 6%, var(--stoa-dbbg)); cursor: pointer; }
+.stoa-db tr.stoa-dbgroup td > span { display: inline-flex; align-items: center; gap: 10px; }
+.stoa-dbfoot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin: 8px 2px 0; }
+.stoa-dbsave { display: inline-flex; gap: 6px; align-items: center; }
+.stoa-dbsave input { width: 190px; margin: 0; }
 .stoa-companies { min-width: 0; }
 .stoa-crow { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.1fr) minmax(0, 1.1fr) 64px 84px; gap: 12px; align-items: center; width: 100%; padding: 9px 10px; border: 0; border-top: 1px dotted var(--ui-stroke-primary); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .stoa-crow[data-cols="7"] { grid-template-columns: minmax(0, 2fr) minmax(0, 1.2fr) 76px minmax(0, 1fr) minmax(0, 1fr) 52px 80px; }
@@ -2430,7 +2498,7 @@ const shortDate = iso => { const d = new Date(iso + 'T12:00:00'); return isNaN(d
 const asleep = deal => Boolean(deal.snoozed_until) && deal.snoozed_until > today()
 
 /** What comes after a step is done, or the first step for a record that has none. Nothing is saved until the button. */
-function NextStep({ deal, mode, close }) {
+function NextStep({ deal, mode, close, lead }) {
   const pipe = useContext(InPipe)
   const [step, setStep] = useState('')
   const [due, setDue] = useState('')
@@ -2442,6 +2510,7 @@ function NextStep({ deal, mode, close }) {
   }
   return h('div', { className: 'stoa-nextform' },
     mode === 'done' ? h('div', { className: 'stoa-sub', style: { gridColumn: '1 / -1' } }, 'Done: ' + deal.next_step + '. What comes next?') : null,
+    mode !== 'done' && lead ? h('div', { className: 'stoa-sub', style: { gridColumn: '1 / -1' } }, lead) : null,
     h('input', { className: 'stoa-field', autoFocus: true, value: step, 'aria-label': 'The next step',
       placeholder: mode === 'done' ? 'The next step (leave empty if nothing is planned)' : 'The next step',
       onChange: event => setStep(event.target.value),
@@ -2519,7 +2588,8 @@ const TODAY_LISTS = [
   { key: 'invoices_overdue', title: 'Invoices overdue', tone: 'bad', help: 'Sent, not paid in full, and past the due date.' },
   { key: 'to_invoice', title: 'Won, not invoiced', tone: 'warn', help: 'Won in the last two months with no invoice on the record. Shown once the desk keeps invoices at all.' },
   { key: 'quiet', title: 'Gone quiet', tone: '', help: 'No call, email, note or move for longer than the stage allows. Your playbook sets the days for each stage.' },
-  { key: 'new', title: 'New, nothing planned', tone: '', help: 'Added in the last week, with no next step yet.' }
+  { key: 'new', title: 'New, nothing planned', tone: '', help: 'Added in the last week, with no next step yet.' },
+  { key: 'unplanned', title: 'Won, no next step yet', tone: 'warn', help: 'Won, and the work after the win has begun (onboarding, say), but nothing is planned for it. Plan its first step.' }
 ]
 
 /** What a row on Today says under its name, and the figure on its right, for each list. */
@@ -2530,7 +2600,8 @@ const dayFacts = pb => ({
   invoices_overdue: (deal, row) => ['Invoice' + (row.number ? ' #' + row.number : '') + ' · ' + exact(row.owed, pb.currency) + ' owed', row.days + 'd late'],
   to_invoice: (deal, row) => [exact(row.amount, pb.currency) + ' · ' + pb.won.label.toLowerCase() + (row.days ? ' ' + row.days + 'd ago' : ' today'), ''],
   quiet: (deal, row) => [deal.stage_label + ' · nothing for ' + row.days + 'd', 'nudge due after ' + row.expected + 'd'],
-  new: deal => [[deal.company, 'added ' + ago(deal.created_at)].filter(Boolean).join(' · '), '']
+  new: deal => [[deal.company, 'added ' + ago(deal.created_at)].filter(Boolean).join(' · '), ''],
+  unplanned: (deal, row) => ['In ' + (row.delivery || 'delivery').toLowerCase() + ' · nothing planned', row.days ? row.days + 'd' : 'today']
 })
 
 function Today({ state, openId, setOpenId, openClient }) {
@@ -2556,6 +2627,7 @@ function Today({ state, openId, setOpenId, openClient }) {
     quiet: deal => [h(Btn, { key: 'draft', kind: 'go', title: 'Hermes drafts a follow-up from the record and its log', onClick: () => draftFor(deal, true) }, 'Draft a nudge'),
       h(Snooze, { key: 'snooze', deal, busy: busy === deal.id, run: body => run(deal.id, body) })],
     new: deal => [h(Btn, { key: 'plan', kind: 'go', onClick: () => setForm({ id: deal.id, mode: 'plan' }) }, 'Plan the next step')],
+    unplanned: (deal, row) => [h(Btn, { key: 'plan', kind: 'go', onClick: () => setForm({ id: deal.id, mode: 'plan' }) }, 'Plan the ' + (row.delivery || 'next').toLowerCase() + ' step')],
   }
   moves.due_today = moves.overdue
   const rows = (key, tone) => (day[key] || []).map(row => {
@@ -3402,7 +3474,7 @@ function UndoBar() {
 }
 
 // -- the other people on a record ---------------------------------------------------------------------
-function People({ deal, term, title }) {
+function People({ deal, term, title, whole }) {
   const pipe = useContext(InPipe)
   const blank = { name: '', email: '', title: '', role: '', phone: '' }
   const [adding, setAdding] = useState(false)
@@ -3435,11 +3507,12 @@ function People({ deal, term, title }) {
       h('span', { className: 'stoa-grow' },
         h('span', { className: 'stoa-name' }, person.name),
         person.role || person.title ? h('span', { className: 'stoa-sub' }, '  ' + [person.role, person.title].filter(Boolean).join(' · ')) : null,
-        person.email || person.phone || person.also_on ? h('span', { className: 'stoa-sub', style: { display: 'block', overflowWrap: 'anywhere' } },
-          [person.email, person.phone, person.also_on ? 'also on ' + plural(person.also_on, 'other record', 'other records') : ''].filter(Boolean).join(' · ')) : null),
+        person.email || person.phone || person.linkedin || person.also_on ? h('span', { className: 'stoa-sub', style: { display: 'block', overflowWrap: 'anywhere' } },
+          [person.email, person.phone, person.linkedin, person.also_on ? 'also on ' + plural(person.also_on, 'other record', 'other records') : ''].filter(Boolean).join(' · ')) : null),
       h('button', { type: 'button', className: 'stoa-icon', style: { width: 24, height: 24 }, disabled: busy, title: 'Take ' + person.name + ' off this record',
         'aria-label': 'Remove ' + person.name, onClick: () => send({ verb: 'remove', person: String(person.id) }) }, h(Icon, { name: 'x', size: 12 })))),
-    !people.length && !adding ? h('div', { className: 'stoa-sub' }, 'Nobody else yet. Add the people around this ' + term + ' (a hiring manager, an assistant, finance), and what they send is filed here too.') : null,
+    !people.length && !adding ? h('div', { className: 'stoa-sub' }, whole ? 'Nobody yet. Add the people on this ' + term + ' (the buyer, their boss, finance), and what they send is filed here too.'
+      : 'Nobody else yet. Add the people around this ' + term + ' (a hiring manager, an assistant, finance), and what they send is filed here too.') : null,
     adding ? h('div', null,
       h('div', { className: 'stoa-form', style: { marginTop: 8 } },
         h(Field, { label: 'Name', autoFocus: true, value: v.name, onChange: set('name'), onKeyDown: enter }),
@@ -3950,7 +4023,6 @@ function RecordRelated({ deal, pb, state, openRecord, openGroup, openCompany, op
         : h('div', { className: 'stoa-sub', style: { marginTop: 6 } }, 'Nothing else in it yet.')) : null,
     atCompany.length ? h(Section, { title: 'Also at ' + deal.company, aside: h('button', { type: 'button', className: 'stoa-proplink stoa-sub', onClick: () => openCompany(deal.company) }, 'Open  ›') },
       h(RecordList, { rows: sortOpen(atCompany).slice(0, 5), pb, openRecord })) : null,
-    h('section', { className: 'stoa-box stoa-rpsec' }, h(People, { deal, term: pb.terms.deal, title: 'Other people' })),
     billed ? h('section', { className: 'stoa-box stoa-rpsec' }, h(Money, { deal, pb })) : null)
 }
 
@@ -3959,6 +4031,14 @@ function RecordPage({ id, state: shown, sessionId, back, backLabel, openRecord, 
   const [busy, setBusy] = useState(false)
   const [nextForm, setNextForm] = useState('') // '', 'done' or 'plan'
   const deal = query.data
+  // The moment a record is won and its delivery begins, ask for the first step of that: the step it had was for the sale.
+  const was = useRef('')
+  const [justWon, setJustWon] = useState(false)
+  useEffect(() => {
+    if (!deal) return
+    if (was.current === 'open' && deal.status === 'won' && deal.in_delivery) { setJustWon(true); setNextForm('plan') }
+    was.current = deal.status
+  }, [deal ? deal.status : ''])
   if (query.error) return h('div', null, h(BackRow, { back, label: backLabel }), h('div', { className: 'stoa-box stoa-sub' }, 'That record is no longer on the desk.'))
   if (!deal) return h('div', null, h(BackRow, { back, label: backLabel }), h('div', { className: 'stoa-sub' }, 'Loading…'))
   const elsewhere = Boolean(deal.pipeline && shown.pipeline && deal.pipeline.id !== shown.pipeline)
@@ -3967,6 +4047,8 @@ function RecordPage({ id, state: shown, sessionId, back, backLabel, openRecord, 
   const open = deal.status === 'open', active = open || Boolean(deal.in_delivery)      // a win still in delivery keeps its next step
   const run = body => { setBusy(true); act(id, body, sessionId).then(() => setBusy(false)) }
   const inStage = daysSince(deal.stage_at)
+  // Once it is won and in delivery, the step is that stage's: "Onboarding next step".
+  const phase = (deal.delivery_label || 'delivery').toLowerCase(), stepName = !open && deal.in_delivery ? cap(phase) + ' next step' : 'Next step'
   const oneLine = pb.group_is_company && deal.group && (!deal.company || sameName(deal.company, deal.group))
   // Where it sits: "at" its company, "in" its group (and who that group is for, when the name does not already say).
   const where = []
@@ -3997,15 +4079,15 @@ function RecordPage({ id, state: shown, sessionId, back, backLabel, openRecord, 
     h(Path, { deal, pb, busy, run }),
     h('div', { className: 'stoa-rpbar' },
       h('div', { className: 'stoa-rpnext' },
-        h('small', { className: 'stoa-eyebrow' }, 'Next step'),
+        h('small', { className: 'stoa-eyebrow' }, stepName),
         active ? (deal.next_step
           ? h('div', { className: 'stoa-rpnextline' }, h('span', { className: 'stoa-name' }, deal.next_step), deal.next_due ? h('span', { className: 'stoa-num', 'data-tone': dueTone(deal) }, dueLabel(deal)) : null)
-          : h('div', { className: 'stoa-sub' }, open ? 'Nothing planned.' : 'Nothing planned. ' + pb.won.label + ', and still in ' + (deal.delivery_label || 'delivery').toLowerCase() + ': plan what comes next.'))
+          : h('div', { className: 'stoa-sub' }, open ? 'Nothing planned.' : 'Nothing planned for ' + phase + ' yet.'))
           : h('div', { className: 'stoa-sub' }, (deal.status === 'won' ? pb.won.label + (deal.delivery_label ? ' and ' + deal.delivery_label.toLowerCase() : '') + '. What follows goes on its people and its company.'
             : pb.lost.label + (deal.lost_reason ? ': ' + deal.lost_reason : '') + '. Nothing more to do here unless it is reopened.'))),
       h('div', { className: 'stoa-btns', style: { marginTop: 0 } },
         active && deal.next_step ? h(Btn, { disabled: busy, title: 'The next step is done: log it and say what comes next', onClick: () => setNextForm(nextForm === 'done' ? '' : 'done') }, 'Done') : null,
-        active ? h(Btn, { disabled: busy, onClick: () => setNextForm(nextForm === 'plan' ? '' : 'plan') }, deal.next_step ? 'Change' : 'Plan the next step') : null,
+        active ? h(Btn, { kind: !open && !deal.next_step ? 'primary' : '', disabled: busy, onClick: () => { setJustWon(false); setNextForm(nextForm === 'plan' ? '' : 'plan') } }, deal.next_step ? 'Change' : open ? 'Plan the next step' : 'Plan the ' + phase + ' step') : null,
         active ? h(Btn, { disabled: busy, onClick: () => run({ verb: 'draft' }) }, 'Draft follow-up') : null,
         active ? h(Snooze, { deal, busy, run }) : null,
         open ? h('select', { className: 'stoa-select', value: '', disabled: busy, 'aria-label': pb.lost.label,
@@ -4016,11 +4098,15 @@ function RecordPage({ id, state: shown, sessionId, back, backLabel, openRecord, 
         deal.delivery_stages.map(stage => h('option', { key: stage.id, value: stage.id }, stage.label))) : null,
         !open ? h(Btn, { disabled: busy, onClick: () => run({ verb: 'reopen' }) }, 'Reopen') : null,
         open && deal.advance ? h(Btn, { kind: 'primary', disabled: busy, onClick: () => run({ verb: 'advance', extra: deal.stage }) }, deal.advance + '  →') : null)),
-    nextForm && active ? h('div', { className: 'stoa-box', style: { marginTop: 10 } }, h(NextStep, { deal, mode: nextForm === 'done' && deal.next_step ? 'done' : 'plan', close: () => setNextForm('') })) : null,
+    nextForm && active ? h('div', { className: 'stoa-box', style: { marginTop: 10 } }, h(NextStep, { deal, mode: nextForm === 'done' && deal.next_step ? 'done' : 'plan',
+      lead: justWon ? pb.won.label + ', and now in ' + phase + '. What is the first ' + phase + ' step?' + (deal.next_step ? ' It replaces “' + deal.next_step + '”.' : '') : '',
+      close: () => { setNextForm(''); setJustWon(false) } })) : null,
     h('div', { className: 'stoa-rpgrid' },
       h('div', { className: 'stoa-rpcol' }, h(RecordDetails, { deal, pb, state, openGroup, openCompany })),
       h('div', { className: 'stoa-rpcol' },
         h(Section, { title: 'Notes' }, h(RecordNotes, { key: 'notes-' + deal.id, deal, bare: true })),
+        // On a deal everyone is a person on it. Where the record is itself a person (a candidate, a lead) these are the others.
+        h('section', { className: 'stoa-box stoa-rpsec' }, h(People, { deal, term: pb.terms.deal, title: pb.shape === 'deals' ? 'People' : 'Other people', whole: pb.shape === 'deals' })),
         h(Timeline, { deal, sessionId })),
       h(RecordRelated, { deal, pb, state, openRecord, openGroup, openCompany, openClient })))
 }
@@ -5629,6 +5715,579 @@ function Reports({ state, openRecord }) {
       h('p', { className: 'stoa-sub', style: { margin: 0, maxWidth: '76ch' } }, 'Hermes turns the words into a saved report, once, and it waits as a draft for you to keep. After that Stoa works it out from your desk each time you open it: no model call, nothing sent anywhere.')))
 }
 
+// -- the database: every account, deal and person on the desk, to look through ------------------------
+// The Pipeline tab shows work by stage. This shows everything that is kept, as rows: search it, filter it, sort it,
+// group it, choose the columns, and keep a way of looking as a view. The rows come from the plugin's backend; all of
+// the looking is done here, so it answers as fast as you can click.
+const DB_THINGS = [['accounts', 'Accounts'], ['deals', 'Deals'], ['people', 'People']]
+const DB_OPS = {
+  text: [['contains', 'contains'], ['not_contains', 'does not contain'], ['is', 'is'], ['is_not', 'is not'], ['empty', 'is empty'], ['not_empty', 'is not empty']],
+  pick: [['is', 'is'], ['is_not', 'is not'], ['empty', 'is empty'], ['not_empty', 'is not empty']],
+  number: [['gt', 'is at least'], ['lt', 'is at most'], ['is', 'is exactly']],
+  date: [['next', 'is due within (days)'], ['last', 'was in the last (days)'], ['older', 'was more than (days) ago'], ['before', 'is before'], ['after', 'is after'], ['empty', 'is empty'], ['not_empty', 'is not empty']],
+  yes: [['is', 'is']]
+}
+const DB_BARE = ['empty', 'not_empty']                    // these need no value
+const DB_DAYS = ['next', 'last', 'older']                  // these take a number of days
+const $db = atom({ thing: 'deals', accounts: null, deals: null, people: null })      // what is being looked at, kept while the page is open
+
+const dbValue = (row, key) => (key.startsWith('fields.') ? (row.fields || {})[key.slice(7)] : row[key])
+const dbText = value => (value === true ? 'Yes' : value === false ? 'No' : value === null || value === undefined ? '' : String(value))
+const dbDay = offset => { const d = new Date(); d.setDate(d.getDate() + offset); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') }
+const dbKind = col => (col.type === 'money' || col.type === 'number' ? 'number' : col.type === 'date' ? 'date' : col.type === 'yes' ? 'yes' : col.type === 'pick' ? 'pick' : 'text')
+
+/** The columns of each kind of row. `on` marks the ones shown until a person chooses otherwise. */
+function dbColumns(thing, data, pb) {
+  const terms = pb.terms, one = pb.group_is_company
+  if (thing === 'deals') return [
+    { key: 'name', label: cap(terms.deal), type: 'text', on: true },
+    { key: 'company', label: cap(terms.company || 'company'), type: 'pick', on: true },
+    { key: 'group', label: cap(terms.group), type: 'pick', on: !one },
+    { key: 'status', label: 'Status', type: 'pick', on: true, order: ['Open', pb.won.label, pb.lost.label] },
+    { key: 'stage', label: 'Stage', type: 'pick', on: true, order: data.stages },
+    { key: 'delivery', label: 'After the win', type: 'pick', order: data.delivery },
+    { key: 'value', label: cap(terms.value || 'value'), type: 'money', on: true },
+    { key: 'owner', label: cap(terms.owner || 'owner'), type: 'pick', on: true },
+    { key: 'next_step', label: 'Next step', type: 'text', on: true },
+    { key: 'next_due', label: 'Due', type: 'date', on: true },
+    { key: 'contact', label: 'Main contact', type: 'text', on: true },
+    { key: 'contact_title', label: 'Contact title', type: 'text' },
+    { key: 'email', label: 'Email', type: 'text' },
+    { key: 'phone', label: 'Phone', type: 'text' },
+    { key: 'linkedin', label: 'LinkedIn', type: 'text' },
+    { key: 'people', label: 'People', type: 'number' },
+    { key: 'source', label: 'Source', type: 'pick' },
+    { key: 'close_on', label: 'Expected close', type: 'date' },
+    { key: 'last_touch', label: 'Last touch', type: 'date', on: true },
+    { key: 'stage_at', label: 'In stage since', type: 'date' },
+    { key: 'created_at', label: 'Added', type: 'date' },
+    { key: 'lost_reason', label: 'Lost because', type: 'pick' },
+    { key: 'notes', label: 'Notes', type: 'text' }
+  ].concat((data.fields || []).map(field => ({ key: 'fields.' + field.key, label: field.label, type: 'text' })))
+  if (thing === 'accounts') return [
+    { key: 'name', label: one ? cap(terms.group) : 'Company', type: 'text', on: true },
+    { key: 'status', label: 'Status', type: 'pick', on: true, order: ['Customer', 'Open', 'Lost', 'On a map'] },
+    { key: 'open', label: 'Open ' + terms.deals, type: 'number', on: true },
+    { key: 'open_value', label: 'Open value', type: 'money', on: true },
+    { key: 'won', label: pb.won.label, type: 'number' },
+    { key: 'won_value', label: 'Won value', type: 'money', on: true },
+    { key: 'lost', label: pb.lost.label, type: 'number' },
+    { key: 'deals', label: 'All ' + terms.deals, type: 'number' },
+    { key: 'people', label: 'People', type: 'number', on: true },
+    { key: 'owners', label: cap(terms.owner || 'owner'), type: 'pick', many: true },
+    { key: 'next_step', label: 'Next step', type: 'text', on: true },
+    { key: 'next_due', label: 'Due', type: 'date', on: true },
+    { key: 'last_touch', label: 'Last touch', type: 'date', on: true },
+    { key: 'sources', label: 'Source', type: 'pick', many: true },
+    { key: 'domain', label: 'Website', type: 'text' },
+    { key: 'location', label: 'Location', type: 'text' },
+    { key: 'size', label: 'Size', type: 'text' },
+    { key: 'segment', label: 'Segment', type: 'pick' },
+    { key: 'fit', label: 'Fit', type: 'number' },
+    { key: 'maps', label: 'Market map', type: 'pick', many: true },
+    { key: 'signal', label: 'Signal', type: 'text' },
+    { key: 'note', label: 'Notes', type: 'text' },
+    { key: 'created_at', label: 'Added', type: 'date' },
+    { key: 'in_pipeline', label: 'In the pipeline', type: 'yes' }
+  ]
+  return [
+    { key: 'name', label: 'Name', type: 'text', on: true },
+    { key: 'title', label: 'Title', type: 'text', on: true },
+    { key: 'company', label: 'Company', type: 'pick', on: true },
+    { key: 'email', label: 'Email', type: 'text', on: true },
+    { key: 'phone', label: 'Phone', type: 'text' },
+    { key: 'linkedin', label: 'LinkedIn', type: 'text' },
+    { key: 'role', label: 'Role', type: 'text', on: true },
+    { key: 'record_names', label: 'On', type: 'text', on: true },
+    { key: 'record_count', label: cap(terms.deals), type: 'number' },
+    { key: 'open', label: 'Open ' + terms.deals, type: 'number' },
+    { key: 'kind', label: 'Kind', type: 'pick' },
+    { key: 'last_touch', label: 'Last touch', type: 'date', on: true },
+    { key: 'created_at', label: 'Added', type: 'date' },
+    { key: 'note', label: 'Notes', type: 'text' }
+  ]
+}
+
+/** The views that come with the tab. A person's own are kept by the backend and listed after these. */
+function dbStarters(thing, data, pb) {
+  const f = (field, op, value) => ({ field, op, value: value === undefined ? '' : String(value) })
+  if (thing === 'deals') return [
+    { id: '@all', name: 'All ' + pb.terms.deals, filters: [] },
+    { id: '@open', name: 'Open', filters: [f('status', 'is', 'Open')], sort: { field: 'value', dir: 'desc' } },
+    { id: '@due', name: 'Due this week', filters: [f('next_due', 'next', 7)], sort: { field: 'next_due', dir: 'asc' } },
+    { id: '@unplanned', name: 'No next step', filters: [f('status', 'is_not', pb.lost.label), f('next_step', 'empty')] },
+    { id: '@quiet', name: 'Quiet for two weeks', filters: [f('status', 'is', 'Open'), f('last_touch', 'older', 14)], sort: { field: 'last_touch', dir: 'asc' } }
+  ].concat(data.delivery.length ? [{ id: '@won', name: 'After the win', filters: [f('status', 'is', pb.won.label)], group: 'delivery' }] : [{ id: '@won', name: pb.won.label, filters: [f('status', 'is', pb.won.label)] }])
+    .concat([{ id: '@lost', name: pb.lost.label, filters: [f('status', 'is', pb.lost.label)], group: 'lost_reason' }, { id: '@stage', name: 'By stage', filters: [f('status', 'is', 'Open')], group: 'stage' }])
+  if (thing === 'accounts') return [
+    { id: '@in', name: 'In the pipeline', filters: [f('in_pipeline', 'is', 'Yes')] },
+    { id: '@customers', name: 'Customers', filters: [f('status', 'is', 'Customer')], sort: { field: 'won_value', dir: 'desc' } },
+    { id: '@nobody', name: 'Nobody named yet', filters: [f('in_pipeline', 'is', 'Yes'), f('people', 'is', 0)] },
+    { id: '@map', name: 'On a map, not in the pipeline', filters: [f('status', 'is', 'On a map')], sort: { field: 'fit', dir: 'desc' },
+      columns: ['name', 'status', 'segment', 'fit', 'size', 'location', 'signal', 'maps'] },
+    { id: '@all', name: 'All accounts', filters: [] }
+  ]
+  return [
+    { id: '@all', name: 'All people', filters: [] },
+    { id: '@active', name: 'On open ' + pb.terms.deals, filters: [f('open', 'gt', 1)] },
+    { id: '@noemail', name: 'No email yet', filters: [f('email', 'empty')] },
+    { id: '@company', name: 'By company', filters: [], group: 'company' }
+  ]
+}
+
+/** Whether a row passes one filter. */
+function dbPass(row, filter, col) {
+  const raw = dbValue(row, filter.field), text = dbText(raw).trim(), want = String(filter.value || '').trim()
+  const kind = dbKind(col), nothing = kind === 'number' ? !Number(raw) : text === ''
+  if (filter.op === 'empty') return nothing
+  if (filter.op === 'not_empty') return !nothing
+  if (want === '') return true                                   // a filter still being filled in holds nothing back
+  const low = text.toLowerCase(), wanted = want.toLowerCase()
+  const parts = col.many ? low.split(',').map(part => part.trim()) : [low]
+  if (kind === 'number') {
+    const n = Number(raw) || 0, w = Number(want)
+    if (isNaN(w)) return true
+    return filter.op === 'gt' ? n >= w : filter.op === 'lt' ? n <= w : filter.op === 'is_not' ? n !== w : n === w
+  }
+  if (kind === 'date') {
+    const days = Math.max(0, Math.round(Number(want)) || 0), day = text.slice(0, 10)
+    if (filter.op === 'next') return Boolean(day) && day <= dbDay(days)
+    if (filter.op === 'last') return Boolean(day) && day >= dbDay(-days) && day <= dbDay(0)
+    if (filter.op === 'older') return Boolean(day) && day < dbDay(-days)
+    if (filter.op === 'before') return Boolean(day) && day < want
+    if (filter.op === 'after') return Boolean(day) && day > want
+    return true
+  }
+  if (filter.op === 'is') return parts.includes(wanted)
+  if (filter.op === 'is_not') return !parts.includes(wanted)
+  if (filter.op === 'contains') return low.includes(wanted)
+  if (filter.op === 'not_contains') return !low.includes(wanted)
+  return true
+}
+
+/** The rows a way of looking shows: several "is" on one column are either-or, everything else must all hold. */
+function dbShown(rows, look, columns, shownCols) {
+  const byKey = new Map(columns.map(col => [col.key, col]))
+  const live = look.filters.filter(filter => byKey.has(filter.field))
+  const either = new Map()
+  const rest_ = []
+  for (const filter of live) {
+    if (filter.op === 'is' && String(filter.value || '').trim()) either.set(filter.field, (either.get(filter.field) || []).concat([filter]))
+    else rest_.push(filter)
+  }
+  const words = look.search.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  const searched = shownCols.map(col => col.key).concat(['name', 'company', 'email'])
+  let out = rows.filter(row => rest_.every(filter => dbPass(row, filter, byKey.get(filter.field)))
+    && [...either.values()].every(list => list.some(filter => dbPass(row, filter, byKey.get(filter.field))))
+    && (!words.length || (() => { const hay = searched.map(key => dbText(dbValue(row, key))).join(' \n ').toLowerCase(); return words.every(word => hay.includes(word)) })()))
+  const col = look.sort && byKey.get(look.sort.field)
+  if (col) {
+    const way = look.sort.dir === 'desc' ? -1 : 1, num = dbKind(col) === 'number'
+    const rank = col.order ? new Map(col.order.map((label, index) => [label, index])) : null
+    out = out.map((row, index) => [row, index]).sort((a, b) => {
+      const x = dbValue(a[0], col.key), y = dbValue(b[0], col.key)
+      const xe = num ? x === '' || x == null : !dbText(x), ye = num ? y === '' || y == null : !dbText(y)
+      if (xe !== ye) return xe ? 1 : -1                         // nothing there goes last, whichever way it is sorted
+      let d = 0
+      if (num) d = (Number(x) || 0) - (Number(y) || 0)
+      else if (rank && rank.has(x) && rank.has(y)) d = rank.get(x) - rank.get(y)
+      else d = dbText(x).localeCompare(dbText(y), undefined, { numeric: true, sensitivity: 'base' })
+      return d * way || a[1] - b[1]
+    }).map(pair => pair[0])
+  }
+  return out
+}
+
+/** One filter, as a sentence you can change: the column, how it is compared, and with what. */
+function DbFilter({ filter, columns, rows, change, remove }) {
+  const col = columns.find(item => item.key === filter.field) || columns[0], kind = dbKind(col), ops = DB_OPS[kind]
+  const values = useMemo(() => {
+    if (kind !== 'pick' && kind !== 'yes') return []
+    if (kind === 'yes') return ['Yes', 'No']
+    const seen = new Set()
+    for (const row of rows) for (const part of (col.many ? dbText(dbValue(row, col.key)).split(',') : [dbText(dbValue(row, col.key))])) if (part.trim()) seen.add(part.trim())
+    const list = [...seen].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
+    return col.order ? col.order.filter(label => seen.has(label)).concat(list.filter(label => !col.order.includes(label))) : list
+  }, [rows, col.key])
+  const setOp = op => change({ ...filter, op, value: DB_BARE.includes(op) ? '' : DB_DAYS.includes(op) !== DB_DAYS.includes(filter.op) || DB_BARE.includes(filter.op) ? (DB_DAYS.includes(op) ? '7' : '') : filter.value })
+  const input = DB_BARE.includes(filter.op) ? null
+    : (kind === 'pick' || kind === 'yes') ? h('select', { value: filter.value, 'aria-label': 'Value', onChange: event => change({ ...filter, value: event.target.value }) },
+      [h('option', { key: '', value: '' }, 'choose…')].concat((values.includes(filter.value) || !filter.value ? values : [filter.value].concat(values)).map(value => h('option', { key: value, value }, value))))
+      : kind === 'number' || DB_DAYS.includes(filter.op) ? h('input', { type: 'number', min: 0, value: filter.value, 'aria-label': DB_DAYS.includes(filter.op) ? 'Days' : 'Value', placeholder: DB_DAYS.includes(filter.op) ? 'days' : '0',
+        onChange: event => change({ ...filter, value: event.target.value }) })
+        : kind === 'date' ? h('input', { type: 'date', value: filter.value, 'aria-label': 'Date', onChange: event => change({ ...filter, value: event.target.value }) })
+          : h('input', { value: filter.value, autoFocus: !filter.value, placeholder: 'type…', 'aria-label': 'Value', onChange: event => change({ ...filter, value: event.target.value }) })
+  return h('span', { className: 'stoa-dbfilter' },
+    h('b', null, col.label),
+    h('select', { value: filter.op, 'aria-label': 'How ' + col.label + ' is compared', onChange: event => setOp(event.target.value) }, ops.map(pair => h('option', { key: pair[0], value: pair[0] }, pair[1]))),
+    input,
+    h('button', { type: 'button', className: 'stoa-icon', title: 'Remove this filter', 'aria-label': 'Remove the filter on ' + col.label, onClick: remove }, h(Icon, { name: 'x', size: 11 })))
+}
+
+/** What changing a cell saves, or null where the cell only shows something worked out from elsewhere.
+ *  Every save goes the way the record's own page saves it, so it is logged there and can be taken back. */
+function dbEditor(thing, row, col, pb) {
+  const key = col.key
+  const send = (path, body) => rest(path, { method: 'POST', body }).then(result => { refresh(); if (result && result.last) offerUndo(result.last); return result || true })
+    .catch(error => { host.notifyError(error, 'Stoa could not save that'); return null })
+  const update = body => act(row.id, { verb: 'update', ...body })
+  if (thing === 'deals') {
+    if (key === 'stage') return row.state === 'open' ? { kind: 'choice', options: pb.stages.map(stage => [stage.id, stage.label]), value: row.stage_id, save: value => act(row.id, { verb: 'move', stage: value }) } : null
+    if (key === 'delivery') return row.state === 'won' && (pb.delivery || []).length ? { kind: 'choice', options: pb.delivery.map(item => [item.id, item.label]), value: row.delivery_id, save: value => update({ delivery: value }) } : null
+    if (key === 'next_step' || key === 'next_due') return row.working ? { kind: key === 'next_due' ? 'date' : 'text', save: value => update({ [key]: value }) } : null
+    if (key === 'name') return { kind: 'text', must: true, save: value => update({ name: value }) }
+    if (key === 'value') return { kind: 'number', save: value => update({ value: value === '' ? 0 : Number(value) }) }
+    if (key === 'close_on') return { kind: 'date', save: value => update({ close_on: value }) }
+    if (key === 'owner' || key === 'source') return { kind: 'suggest', save: value => update({ [key]: value }) }
+    if (key === 'notes') return { kind: 'text', save: value => update({ notes: value }) }
+    if (key.startsWith('fields.')) return { kind: 'text', save: value => update({ fields: { [key.slice(7)]: value } }) }
+    return null
+  }
+  if (thing === 'people') {
+    const how = row.edit || {}
+    if (!['name', 'title', 'email', 'phone', 'linkedin'].includes(key)) return null
+    const must = key === 'name'
+    if (how.record) return { kind: 'text', must, save: value => act(how.record, { verb: 'update', ...(key === 'title' ? { fields: { title: value } } : { [key]: value }) }) }
+    const body = value => ({ verb: 'update', person: how.person, [key === 'name' ? 'new_name' : key]: value })
+    if (how.deal) return { kind: 'text', must, save: value => send('/deal/' + encodeURIComponent(how.deal) + '/person', body(value)) }
+    if (how.group) return { kind: 'text', must, save: value => send('/group/person', { ...body(value), group: how.group }) }
+    return null
+  }
+  if ((key === 'domain' || key === 'note') && row.in_pipeline) return { kind: 'text', save: value => send('/company', { name: row.name, [key]: value }) }
+  return null
+}
+
+/** A cell while it is being changed. Enter or a click elsewhere saves; Escape leaves it as it was. */
+function DbEdit({ editor, start, suggestions, done }) {
+  const [value, setValue] = useState(start)
+  const [busy, setBusy] = useState(false)
+  const left = useRef(false)
+  const commit = next => {
+    if (busy || left.current) return
+    const clean = typeof next === 'string' ? next.trim() : next
+    if (String(clean) === String(start) || (editor.must && !clean)) { left.current = true; done(); return }
+    setBusy(true)
+    Promise.resolve(editor.save(clean)).then(result => { left.current = true; done(result ? clean : undefined) })
+  }
+  const keys = event => {
+    if (event.key === 'Escape') { event.stopPropagation(); left.current = true; done() }
+    else if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); commit(value) }
+  }
+  if (editor.kind === 'choice') return h('select', { className: 'stoa-dbedit', autoFocus: true, value, disabled: busy, 'aria-label': 'Change it',
+    onChange: event => { setValue(event.target.value); commit(event.target.value) }, onBlur: () => { if (!busy && !left.current) { left.current = true; done() } }, onKeyDown: keys },
+  editor.options.map(pair => h('option', { key: pair[0], value: pair[0] }, pair[1])))
+  const listId = editor.kind === 'suggest' ? 'stoa-dbsuggest' : undefined
+  return h('span', null,
+    h('input', { className: 'stoa-dbedit', autoFocus: true, disabled: busy, value, list: listId, 'aria-label': 'Change it',
+      type: editor.kind === 'number' ? 'number' : editor.kind === 'date' ? 'date' : 'text', min: editor.kind === 'number' ? 0 : undefined, step: editor.kind === 'number' ? 'any' : undefined,
+      onFocus: event => { if (editor.kind !== 'date' && event.target.select) event.target.select() },
+      onChange: event => setValue(event.target.value), onBlur: () => commit(value), onKeyDown: keys }),
+    listId ? h('datalist', { id: listId }, (suggestions || []).map(item => h('option', { key: item, value: item }))) : null)
+}
+
+/** One cell, drawn for what it holds. A name opens what it names. A cell that can be changed is changed in place:
+ *  press it. Everything can be selected and copied, a cell being changed included. */
+function DbCell({ row, col, thing, pb, currency, open, editor, editing, patched, edit, done, suggestions }) {
+  const raw = patched !== undefined ? patched : dbValue(row, col.key), text = dbText(raw)
+  const number = dbKind(col) === 'number'
+  if (editing && editor) return h('td', { 'data-num': '0', 'data-editing': '1' },
+    h(DbEdit, { editor, start: editor.kind === 'choice' ? editor.value || '' : col.type === 'date' ? text.slice(0, 10) : number ? (Number(raw) ? String(raw) : '') : text, suggestions, done }))
+  // Pressing a cell that can be changed changes it, unless the press was the end of selecting its text.
+  const press = editor && col.key !== 'name' ? () => { if (!String(window.getSelection ? window.getSelection() : '').trim()) edit() } : undefined
+  const props = { 'data-num': number ? '1' : '0', 'data-edit': editor && col.key !== 'name' ? '1' : '0', title: editor && col.key !== 'name' ? (text.length > 28 ? text + '\n' : '') + 'Press to change' : text.length > 28 ? text : undefined, onClick: press }
+  if (col.key === 'name') return h('td', { 'data-num': '0' }, h('span', { className: 'stoa-dbname' },
+    open && open.row ? h('button', { type: 'button', className: 'stoa-proplink stoa-name', onClick: open.row }, text || '—') : h('span', { className: 'stoa-name' }, text || '—'),
+    editor ? h('button', { type: 'button', className: 'stoa-icon stoa-dbrename', title: 'Rename', 'aria-label': 'Rename ' + text, onClick: edit }, '✎') : null))
+  if (!text || (number && !Number(raw))) return h('td', { ...props, 'data-empty': '1' }, col.type === 'number' && raw === 0 ? '0' : '—')
+  if (col.type === 'money') return h('td', props, exact(Number(raw), currency) || '—')
+  if (col.type === 'date') {
+    const late = col.key === 'next_due' && text < today(), now = col.key === 'next_due' && text === today()
+    return h('td', { ...props, 'data-tone': late ? 'bad' : now ? 'warn' : '' }, shortDate(text.slice(0, 10)) + (late ? ' · overdue' : now ? ' · today' : ''))
+  }
+  if (col.key === 'status') return h('td', props, h(Chip, { tone: text === pb.won.label || text === 'Customer' ? 'good' : '' }, text))
+  if (col.key === 'fit') return h('td', { ...props, 'data-num': '0' }, h(Fit, { value: Number(raw) }))
+  if (col.key === 'company' && open && open.company) return h('td', props, h('button', { type: 'button', className: 'stoa-proplink', onClick: () => open.company(text) }, text))
+  if (col.key === 'record_names' && thing === 'people' && open) return h('td', props, (row.records || []).map((item, index) => [index ? ', ' : null,
+    h('button', { key: item.id, type: 'button', className: 'stoa-proplink', onClick: () => open.record(item.id) }, item.name)]), row.record_count > (row.records || []).length ? ' and ' + (row.record_count - row.records.length) + ' more' : null)
+  return h('td', props, text)
+}
+
+/** What can be done to the rows that are ticked: the same change to each, said once. */
+function DbBulk({ thing, picked, pb, data, noun, suggestions, onDone, clear, exportRows, copyEmails, emails }) {
+  const [doing, setDoing] = useState(null)      // { kind, value, due } while a change is being filled in
+  const [busy, setBusy] = useState(false)
+  const n = picked.length
+  const targets = thing === 'accounts' ? picked.flatMap(row => row.targets || []) : []
+  const said = result => {
+    const skipped = result.skipped || []
+    return skipped.length ? '  ' + plural(skipped.length, 'was', 'were') + ' left as ' + (skipped.length === 1 ? 'it was' : 'they were') + ' (' + skipped[0].name + ': ' + skipped[0].why + (skipped.length > 1 ? ', and ' + (skipped.length - 1) + ' more' : '') + ').' : ''
+  }
+  const apply = (body, done) => {
+    setBusy(true)
+    rest('/database/change', { method: 'POST', body: { ids: picked.map(row => row.id), ...body } }).then(result => {
+      setBusy(false)
+      if (!result.ok) { host.notify({ kind: 'info', message: result.error }); return }
+      refresh()
+      setDoing(null)
+      host.notify({ kind: 'success', message: done(result.changed) + said(result) + '  Each is logged on its record, where it can be taken back.' })
+      onDone()
+    }).catch(error => { setBusy(false); host.notifyError(error, 'Stoa could not make that change') })
+  }
+  const many = count => plural(count, noun[0], noun[1])
+  const go = () => {
+    const value = String(doing.value || '').trim()
+    if (doing.kind === 'owner') apply({ set: { owner: value } }, count => (value ? value + ' now owns ' + many(count) + '.' : 'Owner cleared on ' + many(count) + '.'))
+    else if (doing.kind === 'source') apply({ set: { source: value } }, count => 'Source set on ' + many(count) + '.')
+    else if (doing.kind === 'next') apply({ set: { next_step: value, next_due: doing.due || '' } }, count => 'Next step set on ' + many(count) + '.')
+    else if (doing.kind === 'close') apply({ set: { close_on: value } }, count => 'Expected close set on ' + many(count) + '.')
+    else if (doing.kind === 'stage') apply({ stage: value }, count => many(count) + ' moved to ' + ((pb.stages.find(stage => stage.id === value) || {}).label || value) + '.')
+    else if (doing.kind === 'lost') apply({ lost: value }, count => many(count) + ' closed as ' + pb.lost.label.toLowerCase() + '.')
+  }
+  const track = () => {
+    setBusy(true)
+    rest('/targets', { method: 'POST', body: { verb: 'track', ids: targets.slice(0, 50) } }).then(result => {
+      setBusy(false); refresh(); onDone()
+      const added = (result.added || []).length
+      host.notify({ kind: added ? 'success' : 'info', message: added ? plural(added, 'company is', 'companies are') + ' now in the pipeline, each with what the map knows.' : 'Nothing was added: ' + ((result.skipped || [])[0] || 'they are already in the pipeline.') })
+    }).catch(error => { setBusy(false); host.notifyError(error, 'Stoa could not add those') })
+  }
+  const ready = doing && (doing.kind === 'owner' || (doing.kind === 'next' ? Boolean(String(doing.value || '').trim() || doing.due) : Boolean(String(doing.value || '').trim())))
+  const set = patch => setDoing({ ...doing, ...patch })
+  const enter = event => { if (event.key === 'Enter' && ready && !busy) go(); if (event.key === 'Escape') setDoing(null) }
+  const form = !doing ? null
+    : doing.kind === 'stage' ? h('select', { className: 'stoa-select', autoFocus: true, value: doing.value, 'aria-label': 'Stage', onChange: event => set({ value: event.target.value }) },
+      [h('option', { key: '', value: '' }, 'Move to…')].concat(pb.stages.map(stage => h('option', { key: stage.id, value: stage.id }, stage.label))))
+      : doing.kind === 'lost' ? h('select', { className: 'stoa-select', autoFocus: true, value: doing.value, 'aria-label': 'Why', onChange: event => set({ value: event.target.value }) },
+        [h('option', { key: '', value: '' }, 'Why…')].concat((pb.lost.reasons || []).concat(['Other']).map(reason => h('option', { key: reason, value: reason }, reason))))
+        : doing.kind === 'close' ? h('input', { className: 'stoa-field', type: 'date', autoFocus: true, value: doing.value, 'aria-label': 'Expected close', onChange: event => set({ value: event.target.value }), onKeyDown: enter })
+          : [h('input', { key: 'v', className: 'stoa-field', autoFocus: true, value: doing.value, list: doing.kind === 'next' ? undefined : 'stoa-dbbulklist', onKeyDown: enter,
+            placeholder: doing.kind === 'owner' ? 'Who owns them (empty for nobody)' : doing.kind === 'source' ? 'Where they came from' : 'The next step', 'aria-label': 'Value', onChange: event => set({ value: event.target.value }) }),
+            doing.kind === 'next' ? h('input', { key: 'd', className: 'stoa-field', type: 'date', value: doing.due || '', min: today(), 'aria-label': 'Due', style: { width: 140 }, onChange: event => set({ due: event.target.value }), onKeyDown: enter }) : null,
+            doing.kind === 'next' ? null : h('datalist', { key: 'l', id: 'stoa-dbbulklist' }, (suggestions[doing.kind] || []).map(item => h('option', { key: item, value: item })))]
+  const start = (kind, label) => h(Btn, { key: kind, disabled: busy, onClick: () => setDoing({ kind, value: '', due: '' }) }, label)
+  const NAMES = { owner: 'Owner', source: 'Source', next: 'Next step', close: 'Expected close', stage: 'Stage', lost: pb.lost.label }
+  return h('div', { className: 'stoa-dbbulk', role: 'region', 'aria-label': 'What to do with the rows ticked' },
+    h('b', null, plural(n, noun[0], noun[1]) + ' ticked'),
+    doing
+      ? [h('span', { key: 'what', className: 'stoa-eyebrow' }, NAMES[doing.kind]), h('span', { key: 'form', className: 'stoa-dbbulkform' }, form),
+        h(Btn, { key: 'go', kind: doing.kind === 'lost' ? 'danger' : 'primary', disabled: busy || !ready, onClick: go }, busy ? 'Saving…' : 'Apply to ' + n),
+        h(Btn, { key: 'no', kind: 'quiet', disabled: busy, onClick: () => setDoing(null) }, 'Cancel')]
+      : (thing === 'deals' ? [start('owner', 'Set owner'), start('stage', 'Move to stage'), start('next', 'Set next step'), start('source', 'Set source'), start('close', 'Set expected close'), start('lost', 'Close as ' + pb.lost.label.toLowerCase())] : [])
+        .concat(targets.length ? [h(Btn, { key: 'track', kind: 'go', disabled: busy, title: 'Open a ' + pb.terms.deal + ' for each company that is on a map and not yet in the pipeline', onClick: track }, busy ? 'Adding…' : 'Add ' + targets.length + ' to the pipeline')] : [])
+        .concat([h('span', { key: 'gap', className: 'stoa-grow' }),
+          emails.length ? h(Btn, { key: 'copy', kind: 'quiet', onClick: copyEmails }, 'Copy ' + plural(emails.length, 'email', 'emails')) : null,
+          h(Btn, { key: 'csv', kind: 'quiet', onClick: exportRows }, 'Export these'),
+          h(Btn, { key: 'clear', kind: 'quiet', onClick: clear }, 'Untick all')]))
+}
+
+function Database({ state, openRecord, openGroup, openCompany, openMap }) {
+  const pb = state.playbook
+  const query = useQuery({ queryKey: ['stoa', 'database', state.pipeline || ''], queryFn: () => rest('/database'), refetchInterval: 20000, staleTime: 1500 })
+  const db = useValue($db)
+  const [saving, setSaving] = useState(null)            // the name being typed for a view, or null
+  const [shut, setShut] = useState({})                  // the groups folded away
+  const [editing, setEditing] = useState(null)          // the cell being changed: { row, col }
+  const [patches, setPatches] = useState({})            // what was just saved, shown until the desk answers with it
+  const [picked, setPicked] = useState(() => new Set()) // the rows ticked
+  const lastPick = useRef(null)
+  // Where you were (accounts, deals or people; the view, its filters and columns) is there when you come back.
+  useEffect(() => {
+    const kept = storage ? storage.get('database', null) : null
+    if (kept && typeof kept === 'object' && DB_THINGS.some(pair => pair[0] === kept.thing)) $db.set({ thing: kept.thing, accounts: kept.accounts || null, deals: kept.deals || null, people: kept.people || null })
+  }, [])
+  useEffect(() => { if (storage) storage.set('database', db) }, [db])
+  const data = query.data
+  const thing = db.thing
+  const columns = useMemo(() => (data ? dbColumns(thing, data, pb) : []), [data, thing, pb])
+  const starters = useMemo(() => (data ? dbStarters(thing, data, pb) : []), [data, thing, pb])
+  useEffect(() => { setPatches({}) }, [data])
+  if (!data) return h(Unavailable, { error: query.error, loading: query.isLoading })
+  const rows = data[thing] || []
+  const kept = (data.views || []).filter(view => view.object === thing)
+  const views = starters.filter(view => view.id !== '@map' || (data.accounts || []).some(row => !row.in_pipeline)).concat(kept)
+  const blank = view => ({ view: view.id, filters: (view.filters || []).map(item => ({ ...item })), search: view.search || '', sort: view.sort && view.sort.field ? { ...view.sort } : null,
+    group: view.group || '', columns: view.columns && view.columns.length ? view.columns.slice() : null })
+  const look = db[thing] || blank(views[0])
+  const set = patch => $db.set({ ...db, [thing]: { ...look, ...patch } })
+  const current = views.find(view => view.id === look.view) || views[0]
+  const pick = view => { $db.set({ ...db, [thing]: blank(view) }); setSaving(null); setShut({}); setEditing(null) }
+  const keyOf = row => row.id || row.key
+  const shownCols = (look.columns ? look.columns.map(key => columns.find(col => col.key === key)).filter(Boolean) : columns.filter(col => col.on))
+  const cols = shownCols.some(col => col.key === 'name') ? shownCols : [columns[0]].concat(shownCols)
+  const shown = dbShown(rows, look, columns, cols)
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+  const base = blank(current)
+  const edited = !same({ ...look, view: '' }, { ...base, view: '' })
+  const own = !String(current.id).startsWith('@')
+  const noun = { accounts: ['account', 'accounts'], deals: [pb.terms.deal, pb.terms.deals], people: ['person', 'people'] }[thing]
+  // what a name opens
+  const open = {
+    record: openRecord,
+    company: name => { const row = (data.accounts || []).find(item => sameName(item.name, name)); if (row && row.in_pipeline && pb.group_is_company && row.group) openGroup(row.group); else openCompany(name) },
+    row: null
+  }
+  const opener = row => (thing === 'deals' ? () => openRecord(row.id)
+    : thing === 'accounts' ? (row.in_pipeline ? () => open.company(row.name) : row.map_id ? () => openMap(row.map_id) : null)
+      : row.records && row.records.length ? () => openRecord(row.records[0].id) : null)
+  // a number worth adding up, for the foot of the table and each group
+  const sumCol = columns.find(col => col.key === (thing === 'deals' ? 'value' : thing === 'accounts' ? 'open_value' : ''))
+  const total = list => (sumCol ? list.reduce((sum, row) => sum + (Number(dbValue(row, sumCol.key)) || 0), 0) : 0)
+  // the breakdown: the rows by one column, to see the spread and press into it
+  const facetCol = columns.find(col => col.key === (look.group || { deals: 'stage', accounts: 'status', people: 'company' }[thing]))
+  const facetOf = row => (facetCol ? (facetCol.many ? dbText(dbValue(row, facetCol.key)).split(',').map(part => part.trim()).filter(Boolean) : [dbText(dbValue(row, facetCol.key))]) : [])
+  const facets = (() => {
+    if (!facetCol) return []
+    // counted over the rows the other filters leave, so the values not picked stay there to press
+    const among = look.filters.some(filter => filter.field === facetCol.key) ? dbShown(rows, { ...look, sort: null, filters: look.filters.filter(filter => filter.field !== facetCol.key) }, columns, cols) : shown
+    const count = new Map()
+    for (const row of among) for (const label of (facetOf(row).length ? facetOf(row) : [''])) count.set(label, (count.get(label) || 0) + 1)
+    const list = [...count.entries()].map(([label, n]) => ({ label, n })).filter(item => item.label)
+    const rank = facetCol.order ? new Map(facetCol.order.map((label, index) => [label, index])) : null
+    const place = label => (rank && rank.has(label) ? rank.get(label) : 999)         // the playbook's order where it has one, then the commonest
+    list.sort((a, b) => place(a.label) - place(b.label) || b.n - a.n || a.label.localeCompare(b.label))
+    return list.slice(0, 9)
+  })()
+  const most = Math.max(1, ...facets.map(item => item.n))
+  const facetOn = label => look.filters.some(filter => filter.field === facetCol.key && filter.op === 'is' && filter.value === label)
+  const toggleFacet = label => set({ filters: facetOn(label) ? look.filters.filter(filter => !(filter.field === facetCol.key && filter.op === 'is' && filter.value === label))
+    : look.filters.concat([{ field: facetCol.key, op: 'is', value: label }]) })
+  // groups
+  const groupCol = look.group ? columns.find(col => col.key === look.group) : null
+  const sections = (() => {
+    if (!groupCol) return [{ label: '', rows: shown }]
+    const by = new Map()
+    for (const row of shown) { const label = dbText(dbValue(row, groupCol.key)); by.set(label, (by.get(label) || []).concat([row])) }
+    const list = [...by.entries()].map(([label, list_]) => ({ label, rows: list_ }))
+    const rank = groupCol.order ? new Map(groupCol.order.map((label, index) => [label, index])) : null
+    const place = label => (rank && rank.has(label) ? rank.get(label) : 999)
+    list.sort((a, b) => (!a.label) - (!b.label) || place(a.label) - place(b.label) || (dbKind(groupCol) === 'number' ? Number(b.label) - Number(a.label) : a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' })))
+    return list
+  })()
+  const sortBy = key => set({ sort: !look.sort || look.sort.field !== key ? { field: key, dir: ['money', 'number', 'date'].includes(columns.find(col => col.key === key).type) && key !== 'next_due' ? 'desc' : 'asc' }
+    : look.sort.dir === (['money', 'number', 'date'].includes(columns.find(col => col.key === key).type) && key !== 'next_due' ? 'desc' : 'asc') ? { field: key, dir: look.sort.dir === 'asc' ? 'desc' : 'asc' } : null })
+  const toggleCol = key => { const now = cols.map(col => col.key); const next = now.includes(key) ? now.filter(item => item !== key) : columns.map(col => col.key).filter(item => now.includes(item) || item === key); set({ columns: next }) }
+  const addFilter = col => { const kind = dbKind(col); set({ filters: look.filters.concat([{ field: col.key, op: DB_OPS[kind][0][0], value: kind === 'date' ? '7' : kind === 'yes' ? 'Yes' : '' }]) }) }
+  const keep = (name, id) => rest('/database/view', { method: 'POST', body: { id: id || '', name, object: thing, filters: look.filters.filter(filter => DB_BARE.includes(filter.op) || String(filter.value).trim()),
+    search: look.search, sort: look.sort || {}, group: look.group, columns: look.columns || [] } })
+    .then(result => {
+      if (!result.ok) { host.notify({ kind: 'info', message: result.error }); return }
+      queryClient.setQueryData(['stoa', 'database', state.pipeline || ''], old => (old ? { ...old, views: result.views } : old))
+      $db.set({ ...db, [thing]: { ...look, view: result.view.id, filters: result.view.filters.map(item => ({ ...item })) } })
+      setSaving(null)
+      host.notify({ kind: 'success', message: id ? '“' + name + '” now opens like this.' : 'Kept as “' + name + '”. It is with the other views, marked with a star.' })
+    }).catch(error => host.notifyError(error, 'Stoa could not keep that view'))
+  const drop = view => rest('/database/view', { method: 'POST', body: { remove: view.id } }).then(result => {
+    if (!result.ok) { host.notify({ kind: 'info', message: result.error }); return }
+    queryClient.setQueryData(['stoa', 'database', state.pipeline || ''], old => (old ? { ...old, views: result.views } : old))
+    $db.set({ ...db, [thing]: blank(starters[0]) })
+    host.notify({ kind: 'success', message: '“' + view.name + '” is no longer kept. Nothing on the desk changed.' })
+  }).catch(error => host.notifyError(error, 'Stoa could not remove that view'))
+  const ticked = shown.filter(row => picked.has(keyOf(row)))        // the ticked rows that are on screen
+  const scope = ticked.length ? ticked : shown
+  const csv = () => {
+    const cell = value => { const text = dbText(value); return /[",\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text }
+    download('stoa-' + thing + '-' + today() + '.csv', [cols.map(col => cell(col.label)).join(',')].concat(scope.map(row => cols.map(col => cell(dbValue(row, col.key))).join(','))).join('\n'), 'text/csv')
+  }
+  const emails = [...new Set(scope.map(row => String(row.email || '').trim()).filter(Boolean))]
+  const suggestions = { owner: [...new Set((data.deals || []).map(row => row.owner).filter(Boolean))].sort(), source: [...new Set((data.deals || []).map(row => row.source).filter(Boolean))].sort() }
+  const order = sections.flatMap(section => (shut[section.label || '—'] ? [] : section.rows))
+  const tick = (row, event) => {
+    const key = keyOf(row), next = new Set(picked), on = !picked.has(key)
+    const from = event && event.shiftKey && lastPick.current ? order.findIndex(item => keyOf(item) === lastPick.current) : -1, to = order.findIndex(item => keyOf(item) === key)
+    const span = from >= 0 && to >= 0 ? order.slice(Math.min(from, to), Math.max(from, to) + 1) : [row]      // Shift ticks every row between this one and the last
+    for (const item of span) { if (on) next.add(keyOf(item)); else next.delete(keyOf(item)) }
+    lastPick.current = key
+    setPicked(next)
+  }
+  const allTicked = shown.length > 0 && ticked.length === shown.length
+  const tickAll = () => setPicked(allTicked ? new Set() : new Set(shown.map(keyOf)))
+  const copyEmails = async () => {
+    try { await navigator.clipboard.writeText(emails.join(', ')); host.notify({ kind: 'success', message: plural(emails.length, 'address', 'addresses') + ' copied.' }) }
+    catch { host.notify({ kind: 'info', message: 'This window would not let Stoa copy. Add the Email column and select the addresses in the table.' }) }
+  }
+  const figure = [plural(shown.length, noun[0], noun[1]) + (shown.length !== rows.length ? ' of ' + rows.length : ''), sumCol && total(shown) ? money(total(shown), data.currency) + ' ' + sumCol.label.toLowerCase() : ''].filter(Boolean).join('  ·  ')
+  const head = h('thead', null, h('tr', null, [h('th', { key: '@tick', className: 'stoa-dbtick' },
+    h('input', { type: 'checkbox', checked: allTicked, ref: el => { if (el) el.indeterminate = ticked.length > 0 && !allTicked }, title: allTicked ? 'Untick them all' : 'Tick every row shown',
+      'aria-label': allTicked ? 'Untick every row' : 'Tick every row shown', onChange: tickAll }))].concat(cols.map(col => h('th', { key: col.key, 'data-num': dbKind(col) === 'number' && col.key !== 'fit' ? '1' : '0', 'data-sorted': look.sort && look.sort.field === col.key ? '1' : '0',
+    'aria-sort': look.sort && look.sort.field === col.key ? (look.sort.dir === 'asc' ? 'ascending' : 'descending') : 'none' },
+    h('button', { type: 'button', title: 'Sort by ' + col.label.toLowerCase(), onClick: () => sortBy(col.key) }, col.label,
+      look.sort && look.sort.field === col.key ? h('span', { 'aria-hidden': true }, look.sort.dir === 'asc' ? '↑' : '↓') : null))))))
+  const body = sections.flatMap(section => {
+    const folded = Boolean(shut[section.label || '—'])
+    const lead = groupCol ? [h('tr', { key: 'g:' + section.label, className: 'stoa-dbgroup', onClick: () => setShut({ ...shut, [section.label || '—']: !folded }) },
+      h('td', { colSpan: cols.length + 1 }, h('span', null,
+        h('span', { className: 'stoa-sub', 'aria-hidden': true }, folded ? '▸' : '▾'),
+        h('b', null, section.label || 'No ' + groupCol.label.toLowerCase()),
+        h('span', { className: 'stoa-num' }, [String(section.rows.length), sumCol && total(section.rows) ? money(total(section.rows), data.currency) : ''].filter(Boolean).join('  ·  ')))))] : []
+    return lead.concat(folded ? [] : section.rows.map(row => {
+      const key = keyOf(row), on = picked.has(key)
+      return h('tr', { key, 'data-on': on ? '1' : '0' },
+        [h('td', { key: '@tick', className: 'stoa-dbtick' }, h('input', { type: 'checkbox', checked: on, 'aria-label': (on ? 'Untick ' : 'Tick ') + (row.name || 'this row'),
+          onChange: () => {}, onClick: event => tick(row, event) }))].concat(cols.map(col => {
+          const editor = dbEditor(thing, row, col, pb), here = Boolean(editing) && editing.row === key && editing.col === col.key
+          return h(DbCell, { key: col.key, row, col, thing, pb, currency: data.currency, open: { ...open, row: opener(row) }, editor, editing: here,
+            patched: (patches[key] || {})[col.key], suggestions: suggestions[col.key],
+            edit: () => setEditing({ row: key, col: col.key }),
+            done: value => {
+              if (value !== undefined) setPatches(now => ({ ...now, [key]: { ...(now[key] || {}), [col.key]: editor.kind === 'choice' ? (editor.options.find(pair => pair[0] === value) || [0, value])[1] : value } }))
+              setEditing(null)
+            } })
+        })))
+    }))
+  })
+  return h('div', { className: 'stoa-dbpage' },
+    h('div', { className: 'stoa-dbtop' },
+      h('div', { className: 'stoa-tabs', role: 'tablist', 'aria-label': 'What to look through' }, DB_THINGS.map(pair =>
+        h('button', { type: 'button', key: pair[0], role: 'tab', 'aria-selected': thing === pair[0], className: 'stoa-tab', 'data-on': thing === pair[0] ? '1' : '0',
+          onClick: () => { $db.set({ ...db, thing: pair[0] }); setSaving(null); setShut({}); setEditing(null); setPicked(new Set()); lastPick.current = null } }, pair[0] === 'deals' ? cap(pb.terms.deals) : pair[0] === 'accounts' && pb.group_is_company ? cap(pb.terms.groups) : pair[1],
+        h('small', null, String((data[pair[0]] || []).length))))),
+      h('span', { className: 'stoa-sub' }, 'Everything on the desk. Press a name to open it, a cell to change it, a box to tick the row. Anything can be selected and copied.')),
+    h('div', { className: 'stoa-dbviews', role: 'group', 'aria-label': 'Views' },
+      views.map(view => h('button', { type: 'button', key: view.id, className: 'stoa-dbview', 'data-on': current.id === view.id ? '1' : '0', 'data-own': String(view.id).startsWith('@') ? '0' : '1',
+        'aria-pressed': current.id === view.id, title: String(view.id).startsWith('@') ? 'A view that comes with Stoa' : 'A view you kept', onClick: () => pick(view) },
+      view.name, current.id === view.id && edited ? h('small', null, 'changed') : null)),
+      saving === null
+        ? [edited && own ? h(Btn, { key: 'update', kind: 'go', title: 'Keep these changes in “' + current.name + '”', onClick: () => keep(current.name, current.id) }, 'Save changes') : null,
+          edited || !own ? h(Btn, { key: 'new', kind: edited && !own ? 'go' : 'quiet', title: 'Keep what you are looking at now (its filters, order, grouping and columns) as a view of your own', onClick: () => setSaving('') }, '+  Save as a view') : null,
+          edited ? h(Btn, { key: 'reset', kind: 'quiet', onClick: () => pick(current) }, 'Reset') : null,
+          own ? h(Btn, { key: 'drop', kind: 'quiet', title: 'Stop keeping this view. Nothing on the desk changes.', onClick: () => drop(current) }, 'Remove view') : null]
+        : h('span', { className: 'stoa-dbsave' },
+          h('input', { className: 'stoa-field', autoFocus: true, value: saving, placeholder: 'Name this view', 'aria-label': 'The name of the view', maxLength: 60,
+            onChange: event => setSaving(event.target.value), onKeyDown: event => { if (event.key === 'Enter' && saving.trim()) keep(saving.trim()); if (event.key === 'Escape') setSaving(null) } }),
+          h(Btn, { kind: 'primary', disabled: !saving.trim(), onClick: () => keep(saving.trim()) }, 'Keep'), h(Btn, { kind: 'quiet', onClick: () => setSaving(null) }, 'Cancel'))),
+    facets.length > 1 || (facets.length === 1 && facetOn(facets[0].label)) ? h('div', { className: 'stoa-dbfacets', role: 'group', 'aria-label': 'By ' + facetCol.label.toLowerCase() }, facets.map(item =>
+      h('button', { type: 'button', key: item.label, className: 'stoa-dbfacet', 'data-on': facetOn(item.label) ? '1' : '0', 'aria-pressed': facetOn(item.label),
+        title: facetOn(item.label) ? 'Showing only these. Press to let go.' : 'Show only ' + facetCol.label.toLowerCase() + ' “' + item.label + '”', onClick: () => toggleFacet(item.label) },
+      h('span', null, h('b', null, item.label), h('span', { className: 'stoa-num' }, String(item.n))),
+      h('i', { style: { width: Math.max(6, Math.round(100 * item.n / most)) + '%' } })))) : null,
+    h('div', { className: 'stoa-dbbar' },
+      h('input', { className: 'stoa-input', value: look.search, placeholder: 'Search ' + noun[1] + '…', 'aria-label': 'Search', onChange: event => set({ search: event.target.value }) }),
+      h(Menu, { label: '+  Filter', title: 'Show only the rows where a column is, contains or is past something' }, columns.map(col => h(MenuItem, { key: col.key, title: col.label, onClick: () => addFilter(col) }))),
+      h(Menu, { label: groupCol ? 'Grouped by ' + groupCol.label.toLowerCase() : 'Group', title: 'Put the rows under a heading for each value of one column' },
+        [h(MenuItem, { key: '', title: 'No grouping', on: !groupCol, onClick: () => { set({ group: '' }); setShut({}) } })].concat(columns.filter(col => col.type === 'pick' || col.type === 'yes' || col.key === 'fit')
+          .map(col => h(MenuItem, { key: col.key, title: col.label, on: look.group === col.key, onClick: () => { set({ group: col.key }); setShut({}) } })))),
+      h(Menu, { label: 'Columns  ' + cols.length, title: 'Choose what each row shows' },
+        columns.map(col => h('label', { key: col.key, className: 'stoa-dbcheck' },
+          h('input', { type: 'checkbox', checked: cols.some(item => item.key === col.key), disabled: col.key === 'name', onChange: () => toggleCol(col.key) }), col.label))
+          .concat(look.columns ? [h('div', { key: 'rule', className: 'stoa-menurule' }), h(MenuItem, { key: 'reset', title: 'Back to the usual columns', onClick: () => set({ columns: current.columns && current.columns.length ? current.columns.slice() : null }) })] : [])),
+      h('span', { className: 'stoa-grow' }),
+      emails.length && !ticked.length ? h(Btn, { kind: 'quiet', title: 'Copy the email addresses of the rows shown', onClick: copyEmails }, 'Copy ' + plural(emails.length, 'email', 'emails')) : null,
+      ticked.length ? null : h(Btn, { kind: 'quiet', disabled: !shown.length, title: 'Save the rows and columns shown as a spreadsheet file', onClick: csv }, 'Export CSV')),
+    look.filters.length ? h('div', { className: 'stoa-dbfilters' },
+      look.filters.map((filter, index) => h(DbFilter, { key: index + ':' + filter.field, filter, columns, rows,
+        change: next => set({ filters: look.filters.map((item, at) => (at === index ? next : item)) }), remove: () => set({ filters: look.filters.filter((item, at) => at !== index) }) })),
+      h(Btn, { kind: 'quiet', onClick: () => set({ filters: [] }) }, 'Clear filters')) : null,
+    rows.length === 0
+      ? h('div', { className: 'stoa-box stoa-sub' }, thing === 'people' ? 'Nobody is on the desk yet. People appear here as they are added to a ' + pb.terms.deal + '.' : 'Nothing here yet. It fills in as ' + pb.terms.deals + ' are added.')
+      : shown.length === 0
+        ? h('div', { className: 'stoa-box stoa-sub' }, 'No ' + noun[1] + ' match what you are looking for.  ',
+          h('button', { type: 'button', className: 'stoa-proplink stoa-name', onClick: () => set({ filters: [], search: '' }) }, 'Show them all'))
+        : [ticked.length ? h(DbBulk, { key: 'bulk', thing, picked: ticked, pb, data, noun, suggestions, emails, onDone: () => {}, clear: () => setPicked(new Set()), exportRows: csv, copyEmails }) : null,
+          h('div', { key: 'table', className: 'stoa-dbwrap' }, h('table', { className: 'stoa-db' }, head, h('tbody', null, body)))],
+    h('div', { className: 'stoa-dbfoot' }, h('span', { className: 'stoa-num' }, figure),
+      h('span', { className: 'stoa-sub' }, look.sort ? 'Sorted by ' + (columns.find(col => col.key === look.sort.field) || { label: '' }).label.toLowerCase() + (look.sort.dir === 'asc' ? ', lowest first' : ', highest first') + '. Press a heading to change it.' : 'Press a heading to sort by it.')))
+}
+
 function Page() {
   const query = useDesk()
   const tab = useValue($tab)
@@ -5648,7 +6307,7 @@ function Page() {
   const want = useValue($want)
   useEffect(() => {
     if (!want) return
-    if (!['today', 'pipeline', 'cash', 'reports', 'activity'].includes($tab.get())) $tab.set('pipeline')
+    if (!['today', 'pipeline', 'database', 'cash', 'reports', 'activity'].includes($tab.get())) $tab.set('pipeline')
     setAdding(false)
     setStack(now => (now.length && now[now.length - 1].kind === 'record' && now[now.length - 1].id === want ? now : now.concat([{ kind: 'record', id: want }]).slice(-12)))
     $want.set('')
@@ -5725,7 +6384,7 @@ function Page() {
     ['From the map', totals.tracked, cap(pb.terms.deals) + ' that started on a market map.', ''],
     ['Won', totals.won + (totals.won_value ? ' · ' + money(totals.won_value, pb.currency) : ''), 'Closed as ' + pb.won.label.toLowerCase() + ', all time.', '']]
   const side = adding ? h(NewRecord, { state, close: () => setAdding(false), opened: id => { setAdding(false); openRecord(id) } }) : null
-  const tabLabel = { today: 'Today', pipeline: view === 'groups' ? cap(pb.terms.groups) : view === 'companies' ? 'Companies' : view === 'clients' ? 'Clients' : 'Pipeline', cash: 'Cash', reports: 'Reports', activity: 'Activity' }[tab] || 'Back'
+  const tabLabel = { today: 'Today', pipeline: view === 'groups' ? cap(pb.terms.groups) : view === 'companies' ? 'Companies' : view === 'clients' ? 'Clients' : 'Pipeline', database: 'Database', cash: 'Cash', reports: 'Reports', activity: 'Activity' }[tab] || 'Back'
   const before = stack.length > 1 ? stack[stack.length - 2] : null
   const backLabel = !before ? tabLabel : before.kind === 'record' ? ((state.deals.find(item => item.id === before.id) || {}).name || 'Back') : before.id
   const sheet = !top ? null
@@ -5733,7 +6392,7 @@ function Page() {
       : top.kind === 'group' ? h(GroupPage, { key: 'g:' + top.id, name: top.id, state, back, backLabel, openRecord, openClient, onRenamed: renamed })
         : top.kind === 'client' ? h(ClientPage, { key: 'cl:' + top.id, name: top.id, state, back, backLabel, openRecord, openGroup })
           : h(CompanyPage, { key: 'c:' + top.id, name: top.id, state, back, backLabel, openRecord, openGroup })
-  const paged = Boolean(sheet) && ['today', 'pipeline', 'cash', 'reports', 'activity'].includes(tab)
+  const paged = Boolean(sheet) && ['today', 'pipeline', 'database', 'cash', 'reports', 'activity'].includes(tab)
   const nothing = h('div', { className: 'stoa-sub' },
     h('p', { style: { marginTop: 0 } }, 'Nothing on the desk yet. Add a ' + pb.terms.deal + ' with the button above, tell Stoa about one below, drop a list on the page, or ask it to map a market.'),
     h(Btn, { onClick: () => setTab('setup') }, 'See how it works, or look around with sample data'))
@@ -5764,9 +6423,9 @@ function Page() {
         onClick: item[3] ? () => setTab(item[3]) : undefined }, h('span', { className: 'stoa-eyebrow' }, item[0]), h('b', null, String(item[1])))))),
     h('div', { className: 'stoa-rule' }),
     h('div', { className: 'stoa-tabsrow' },
-      h('div', { className: 'stoa-tabs', role: 'tablist' }, [['today', 'Today', day.needs], ['pipeline', 'Pipeline', totals.open]]
+      h('div', { className: 'stoa-tabs', role: 'tablist' }, [['today', 'Today', day.needs], ['market', 'Market map', totals.mapped], ['pipeline', 'Pipeline', totals.open], ['reports', 'Reports', 0], ['database', 'Database', 0], ['activity', 'Activity', 0]]
         .concat(cashShown ? [['cash', 'Cash', state.cash ? state.cash.strip.overdue.count + (state.cash.strip.to_bill || { count: 0 }).count : 0]] : [])
-        .concat([['market', 'Market map', totals.mapped], ['reports', 'Reports', 0], ['activity', 'Activity', 0], ['setup', 'Setup', 0]]).map(item =>
+        .concat([['setup', 'Setup', 0]]).map(item =>
         h('button', { type: 'button', key: item[0], role: 'tab', 'aria-selected': tab === item[0], className: 'stoa-tab', 'data-on': tab === item[0] ? '1' : '0',
           onClick: () => setTab(item[0]) }, item[1], item[2] ? h('small', null, String(item[2])) : null))),
       (tab === 'today' || tab === 'pipeline') && !welcome ? h(Btn, { onClick: add }, '+  New ' + pb.terms.deal) : null),
@@ -5790,6 +6449,7 @@ function Page() {
           : view === 'groups' && (state.deals.length || groups.length) ? h(Groups, { state, current: '', openGroup })
           : !state.deals.length ? nothing : view === 'companies' ? h(Companies, { state, current: '', openCompany })
             : h(Board, { state, openId: '', setOpenId: openRecord }), side)) : null,
+    !paged && tab === 'database' ? h(Database, { state, openRecord, openGroup, openCompany, openMap: id => { setMarketId(id); setTab('market') } }) : null,
     !paged && tab === 'cash' ? h('div', { className: 'stoa-split', ref: split, 'data-side': '0' },
       h(Cash, { state, openId: '', setOpenId: openRecord, openClient })) : null,
     tab === 'market' ? (market
@@ -5843,7 +6503,7 @@ function openDesk(tab, pipe) {
 
 // Today in a chat: the lists about records, with the same buttons as the page. What needs the page (lists waiting for
 // approval, months to bill) is counted at the foot, with a way there.
-const CHAT_DAY = ['overdue', 'due_today', 'drafts', 'invoices_overdue', 'to_invoice', 'quiet', 'new']
+const CHAT_DAY = ['overdue', 'due_today', 'drafts', 'invoices_overdue', 'to_invoice', 'quiet', 'new', 'unplanned']
 const CHAT_ROWS = 5
 
 function TodayInChat({ attrs, sessionId }) {

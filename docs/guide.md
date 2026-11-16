@@ -129,6 +129,24 @@ In the Hermes Desktop app and the Webapp, Stoa sits beside the conversation.
   that record too.
 
 
+- **Database.** Next to Pipeline: everything the desk keeps, as a table to look through. Three lists:
+  **Accounts** (every company with a record, and every company on a market map), **Deals** (every
+  record, open, won or lost) and **People** (each person once, however many records they are on).
+  Search it, press **+ Filter** to show only the rows where a column is, contains or is past
+  something, press a heading to sort, **Group** to put the rows under a heading for each value,
+  and **Columns** to choose what each row shows. The boxes above the table count the rows by stage
+  (or status, or company): press one to see only those. A handful of views come with it (*Open*,
+  *Due this week*, *No next step*, *After the win*, *Customers*, *On a map, not in the pipeline*);
+  **Save as a view** keeps the way you are looking now as one of your own, marked with a star.
+  Press a name to open it. Press a cell to change it where it is: an owner, a deal size, a next
+  step and its date, a stage, a person's title or email, an account's website. Enter saves, Escape
+  leaves it, and each change is logged on its record with **Undo** offered, as if made on the
+  record's own page. A cell that is worked out from other things (a status, a count, a last touch)
+  is not changed here. Tick rows (Shift ticks a run of them) and a bar offers the same change for
+  all of them at once: set the owner, move to a stage, set the next step, the source or the
+  expected close, or close them as lost; for companies that are only on a map, add them to the
+  pipeline. **Copy emails** and **Export** take the ticked rows, or every row shown when none is.
+  Everything in the table can be selected and copied.
 - **Cash.** The other half of lead to cash, on its own tab. Five figures across the top: won this
   month, collected this month, invoiced and not yet paid, overdue, and won but never invoiced.
   Beneath them, what the open pipeline is likely to bring in, weighted by stage and laid out by
