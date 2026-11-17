@@ -3793,6 +3793,28 @@ class DashboardApiTests(unittest.TestCase):
         with self.assertRaises(self.api.HTTPException):
             self.api.act(nadia, {"verb": "move", "stage": "no-such-stage"})
 
+    def test_the_page_script_parses(self):
+        # `node --check plugin.js` passes whatever is in the file: node has to be told it is a module to read it as one.
+        import shutil, subprocess
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is not installed")
+        with tempfile.TemporaryDirectory() as folder:
+            for source in (ROOT / "desktop" / "plugin.js", ROOT / "pagemap.js"):
+                copy = Path(folder) / (source.stem + ".mjs")
+                copy.write_text(source.read_text(), encoding="utf-8")
+                done = subprocess.run([node, "--check", str(copy)], capture_output=True, text=True, timeout=60)
+                self.assertEqual(done.returncode, 0, "%s does not parse:\n%s" % (source.name, done.stderr[:600]))
+
+    def test_a_card_names_the_first_person_on_its_record(self):
+        ingrid = self.desk.store.find("Ingrid Solberg")["id"]
+        self.assertNotIn("contact", next(card for card in self.api.state()["deals"] if card["id"] == ingrid))      # nobody on it but itself
+        self.desk.store.person_add(ingrid, "Hal Marsh", title="Hiring manager", email="hal@halcyon.example")
+        self.desk.store.person_add(ingrid, "Jo Lind")
+        card = next(card for card in self.api.state()["deals"] if card["id"] == ingrid)
+        self.assertEqual((card["contact"], card["contact_title"], card["people_count"]), ("Hal Marsh", "Hiring manager", 2))
+        self.assertEqual((self.api.deal(ingrid)["contact"], [p["name"] for p in self.api.deal(ingrid)["people"]]), ("Hal Marsh", ["Hal Marsh", "Jo Lind"]))
+
     def test_the_page_gets_today_the_tour_and_setup(self):
         state = self.api.state()
         self.assertEqual((state["tour"], state["fresh"], state["today"]["counts"]["overdue"]), (None, False, 2))

@@ -665,7 +665,34 @@ const CSS = `
 .stoa-card[data-open="1"] { border-color: var(--stoa-accent-line); background: var(--stoa-accent-soft); }
 .stoa-cardfoot { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; margin-top: 6px; font-size: 12px; }
 .stoa-cardfoot em { flex: none; font-style: normal; font-family: var(--stoa-mono); font-size: 10.5px; color: var(--ui-text-tertiary); }
-.stoa-card h5 { display: flex; justify-content: space-between; gap: 8px; margin: 0; font-size: 13px; font-weight: 550; }
+.stoa-card h5 { display: flex; justify-content: space-between; gap: 8px; margin: 0; font-size: 13px; font-weight: 600; }
+.stoa-card[data-tone="bad"] { box-shadow: inset 2px 0 0 var(--ui-red); }
+.stoa-card[data-tone="warn"] { box-shadow: inset 2px 0 0 var(--ui-orange); }
+.stoa-cardwho { margin-top: 1px; font-size: 12px; color: var(--ui-text-tertiary); }
+.stoa-cardwho[data-none="1"] { color: var(--ui-text-quaternary); }
+.stoa-cardnext { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin-top: 7px; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+.stoa-cardnext[data-none="1"] { color: var(--ui-text-quaternary); }
+.stoa-cardmeta { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-top: 8px; padding-top: 7px; border-top: 1px dotted var(--ui-stroke-secondary); }
+.stoa-cardmeta em { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: normal; font-family: var(--stoa-mono); font-size: 10.5px; color: var(--ui-text-tertiary); }
+.stoa-cardfacts { display: flex; flex-wrap: wrap; gap: 2px 10px; min-width: 0; }
+.stoa-cardfact { font-family: var(--stoa-mono); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; color: var(--ui-text-tertiary); white-space: nowrap; }
+.stoa-cardfact[data-tone="bad"] { color: var(--ui-red); }
+.stoa-cardfact[data-tone="warn"] { color: var(--ui-orange); }
+.stoa-cardfact[data-tone="good"] { color: var(--stoa-accent-text); }
+.stoa-boardwrap { position: relative; }
+.stoa-peek { position: absolute; z-index: 40; padding: 12px 14px 10px; border: 1px solid var(--ui-stroke-primary); border-radius: var(--stoa-r); background: var(--ui-chat-surface-background, var(--ui-bg-card)); box-shadow: 0 10px 34px rgba(0, 0, 0, .18); font-size: 12.5px; pointer-events: none; animation: stoa-peekin .14s ease both; }
+@keyframes stoa-peekin { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+.stoa-peekhead b { display: block; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.stoa-peekhead .stoa-sub { display: block; margin-top: 2px; font-family: var(--stoa-mono); font-size: 10.5px; }
+.stoa-peeksec { margin-top: 10px; padding-top: 9px; border-top: 1px dotted var(--ui-stroke-secondary); }
+.stoa-peeksec > small { display: block; margin-bottom: 3px; }
+.stoa-peektext { overflow-wrap: anywhere; }
+.stoa-peeklog { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; gap: 8px; align-items: baseline; margin-top: 4px; }
+.stoa-peeklog:first-of-type { margin-top: 0; }
+.stoa-peekkind { font-family: var(--stoa-mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; color: var(--ui-text-tertiary); }
+.stoa-peeklog .stoa-peektext { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.stoa-peekfoot { margin-top: 10px; padding-top: 8px; border-top: 1px dotted var(--ui-stroke-secondary); font-size: 11px; }
+@media (prefers-reduced-motion: reduce) { .stoa-peek { animation: none; } }
 .stoa-empty { padding: 10px 2px; color: var(--ui-text-quaternary); }
 .stoa-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
 /* A column is as wide as its share and no wider: whatever is in it folds, so one long word or tag cannot push a card past its edge. */
@@ -4554,6 +4581,72 @@ function Pace({ column }) {
   'avg ' + average + 'd here · quiet after ' + column.stale_days + 'd')
 }
 
+/** One card on the board: what it is, who it is with, what happens next, and how it stands. */
+function BoardCard({ deal, pb, column, open, onOpen, onDragEnd, onEnter, onLeave }) {
+  const live = !column.won || deal.in_delivery                     // its next step still counts
+  const named = sameName(deal.name, deal.company) || sameName(deal.name, deal.group)      // the record is named for its company
+  const who = named
+    ? (deal.contact ? [deal.contact, deal.contact_title].filter(Boolean).join(' · ') : '')
+    : [deal.company, deal.group && !sameName(deal.group, deal.company) ? deal.group : ''].filter(Boolean).join(' · ')
+  const late = live && deal.next_due && deal.next_due < today(), now = live && deal.next_due === today()
+  const lateBy = late ? Math.max(1, Math.round((Date.parse(today()) - Date.parse(deal.next_due)) / 864e5)) : 0
+  const here = daysSince(deal.stage_at)
+  const tone = late ? 'bad' : now ? 'warn' : ''
+  const facts = [
+    live && deal.next_due ? h('span', { key: 'due', className: 'stoa-cardfact', 'data-tone': tone, title: 'The next step is due ' + shortDate(deal.next_due) },
+      late ? 'overdue ' + lateBy + 'd' : now ? 'due today' : 'due ' + shortDate(deal.next_due)) : null,
+    column.won ? (deal.delivery_label ? h('span', { key: 'del', className: 'stoa-cardfact' }, deal.delivery_label.toLowerCase()) : null)
+      : here !== null ? h('span', { key: 'here', className: 'stoa-cardfact', title: 'In this stage since ' + shortDate(String(deal.stage_at).slice(0, 10)) }, here === 0 ? 'new here' : here + 'd here') : null,
+    deal.stale && !deal.due ? h('span', { key: 'quiet', className: 'stoa-cardfact', 'data-tone': 'warn', title: 'Nothing logged for longer than this stage allows' }, 'quiet') : null,
+    deal.pending ? h('span', { key: 'draft', className: 'stoa-cardfact', 'data-tone': 'good' }, 'draft waiting') : null,
+    column.other ? h('span', { key: 'stage', className: 'stoa-cardfact' }, deal.stage_label) : null,
+    deal.people_count > 1 ? h('span', { key: 'people', className: 'stoa-cardfact', title: plural(deal.people_count, 'person', 'people') + ' on it' }, deal.people_count + ' people') : null
+  ].filter(Boolean)
+  return h('button', { type: 'button', className: 'stoa-card', 'data-open': open ? '1' : '0', 'data-tone': tone, draggable: !column.won,
+    onDragStart: event => { onLeave(); event.dataTransfer.setData(DRAG, deal.id); event.dataTransfer.effectAllowed = 'move' }, onDragEnd,
+    onMouseEnter: event => onEnter(deal.id, event.currentTarget), onMouseLeave: onLeave, onFocus: event => onEnter(deal.id, event.currentTarget), onBlur: onLeave,
+    onClick: onOpen },
+  h('h5', null, h('span', { className: 'stoa-clip' }, deal.name), deal.value ? h('span', { className: 'stoa-num' }, money(deal.value, pb.currency)) : null),
+  h('div', { className: 'stoa-cardwho stoa-clip', 'data-none': who ? '0' : '1' }, who || (named ? 'No contact yet' : ' ')),
+  live ? h('div', { className: 'stoa-cardnext', 'data-none': deal.next_step ? '0' : '1' }, deal.next_step || 'Nothing planned') : null,
+  facts.length || deal.owner ? h('div', { className: 'stoa-cardmeta' }, h('span', { className: 'stoa-cardfacts' }, facts), deal.owner ? h('em', null, deal.owner) : null) : null)
+}
+
+/** What is behind a card, shown beside it while the pointer rests there: its people, its notes, what happened last.
+ *  It is only to read; pressing the card opens the record. */
+function CardPeek({ deal, pb, at }) {
+  const query = useQuery({ queryKey: ['stoa', 'deal', at.id], queryFn: () => rest('/deal/' + encodeURIComponent(at.id)), staleTime: 1500 })
+  if (!deal) return null
+  const full = query.data
+  const people = full ? (full.people || []) : []
+  // what happened, not the bookkeeping
+  const log = full ? (full.activity || []).filter(entry => !entry.undone && !['created', 'updated', 'person', 'undo', 'restored'].includes(entry.kind)).slice(0, 3) : []
+  const notes = String((full ? full.notes : deal.notes) || '').trim()
+  const status = deal.status === 'won' ? pb.won.label + (deal.delivery_label ? ' · ' + deal.delivery_label : '') : deal.stage_label
+  const here = daysSince(deal.stage_at)
+  const line = [status, deal.status === 'open' && here !== null ? (here === 0 ? 'since today' : here + 'd in this stage') : '', deal.value ? money(deal.value, pb.currency) : '', deal.owner].filter(Boolean).join('  ·  ')
+  const bits = [deal.source ? 'From ' + deal.source : '', deal.created_at ? 'added ' + ago(deal.created_at) : '', deal.last_touch ? 'last touched ' + ago(deal.last_touch) : ''].filter(Boolean).join(' · ')
+  return h('div', { className: 'stoa-peek', role: 'tooltip', style: { left: at.left, width: at.wide, top: at.top, bottom: at.bottom } },
+    h('div', { className: 'stoa-peekhead' }, h('b', null, deal.name), h('span', { className: 'stoa-sub' }, line)),
+    deal.next_step && (deal.status === 'open' || deal.in_delivery) ? h('div', { className: 'stoa-peeksec' }, h('small', { className: 'stoa-eyebrow' }, 'Next step'),
+      h('div', null, deal.next_step, deal.next_due ? h('span', { className: 'stoa-sub' }, '  ' + dueLabel(deal)) : null)) : null,
+    h('div', { className: 'stoa-peeksec' }, h('small', { className: 'stoa-eyebrow' }, 'People'),
+      !full ? h('div', { className: 'stoa-sub' }, deal.contact || '…')
+        : people.length ? people.slice(0, 3).map(person => h('div', { key: person.id, className: 'stoa-clip' }, h('span', { className: 'stoa-name' }, person.name),
+          h('span', { className: 'stoa-sub' }, '  ' + [person.title || person.role, person.email].filter(Boolean).join(' · '))))
+            .concat(people.length > 3 ? [h('div', { key: 'more', className: 'stoa-sub' }, 'and ' + (people.length - 3) + ' more')] : [])
+          : h('div', { className: 'stoa-sub' }, deal.email ? deal.email : 'Nobody on it yet.')),
+    notes ? h('div', { className: 'stoa-peeksec' }, h('small', { className: 'stoa-eyebrow' }, 'Notes'), h('div', { className: 'stoa-peektext' }, notes.length > 260 ? notes.slice(0, 260).trimEnd() + '…' : notes)) : null,
+    h('div', { className: 'stoa-peeksec' }, h('small', { className: 'stoa-eyebrow' }, 'Lately'),
+      !full ? h('div', { className: 'stoa-sub' }, '…')
+        : log.length ? log.map((entry, index) => h('div', { key: index, className: 'stoa-peeklog' },
+          h('span', { className: 'stoa-peekkind' }, LOG_KINDS[entry.kind] || cap(entry.kind)),
+          h('span', { className: 'stoa-peektext' }, entry.text.length > 150 ? entry.text.slice(0, 150).trimEnd() + '…' : entry.text),
+          h('span', { className: 'stoa-sub' }, ago(entry.at))))
+          : h('div', { className: 'stoa-sub' }, 'Nothing logged yet.')),
+    bits ? h('div', { className: 'stoa-peekfoot stoa-sub' }, bits) : null)
+}
+
 function Board({ state, openId, setOpenId }) {
   const pb = state.playbook
   const filter = useValue($filter)
@@ -4585,7 +4678,24 @@ function Board({ state, openId, setOpenId }) {
     if (deal && deal.stage !== target) act(id, { verb: 'move', stage: target })
   }
   const picked = filter.stage && known.has(filter.stage) ? filter.stage : ''       // a stage from another playbook picks out nothing
-  return h('div', { className: 'stoa-board', ref: board }, columns.map((column, place) =>
+  // Resting on a card brings up what is behind it (its people, its notes, what happened last), beside the card.
+  const wrap = useRef(null)
+  const timer = useRef(0)
+  const [peek, setPeek] = useState(null)
+  const hide = () => { clearTimeout(timer.current); setPeek(null) }
+  const show = (id, el) => {
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => {
+      if (!wrap.current || !el.isConnected) return
+      const box = wrap.current.getBoundingClientRect(), card = el.getBoundingClientRect(), wide = 330
+      const right = card.right + 10 + wide <= Math.min(box.right, window.innerWidth) + 4
+      const low = card.top > window.innerHeight * 0.52                  // low on the screen: grow upwards from the card's foot
+      setPeek({ id, left: Math.max(0, right ? card.right - box.left + 10 : card.left - box.left - wide - 10), wide,
+        top: low ? undefined : card.top - box.top, bottom: low ? box.bottom - card.bottom : undefined })
+    }, 420)
+  }
+  useEffect(() => () => clearTimeout(timer.current), [])
+  return h('div', { className: 'stoa-boardwrap', ref: wrap }, h('div', { className: 'stoa-board', ref: board, onScroll: hide }, columns.map((column, place) =>
     h('div', { key: column.id, className: 'stoa-col', 'data-over': over === column.id ? '1' : '0', 'data-dim': picked && column.id !== picked ? '1' : '0',
       'data-spot': picked && column.id === picked ? '1' : '0',
       onDragOver: event => { if (dragging(event) && !column.other) { event.preventDefault(); if (over !== column.id) setOver(column.id) } },
@@ -4595,22 +4705,10 @@ function Board({ state, openId, setOpenId }) {
         h('span', { className: 'stoa-num' }, column.here.length + (column.value ? ' · ' + money(column.value, pb.currency) : ''))),
       h('div', { className: 'stoa-weight', 'data-won': column.won ? '1' : '0' }, h('i', { style: { width: (column.won ? 100 : Math.round((100 * column.value) / most)) + '%', ...heatAt(place, columns.length) } })),
       column.won || column.other ? null : h(Pace, { column }),
-      column.here.length ? column.here.map(deal => h('button', { type: 'button', key: deal.id, className: 'stoa-card', 'data-open': openId === deal.id ? '1' : '0',
-        draggable: !column.won, title: column.won ? undefined : 'Drag to another column to move it',
-        onDragStart: event => { event.dataTransfer.setData(DRAG, deal.id); event.dataTransfer.effectAllowed = 'move' },
-        onDragEnd: () => setOver(''),
-        onClick: () => setOpenId(openId === deal.id ? '' : deal.id) },
-        h('h5', null, h('span', { className: 'stoa-clip' }, deal.name), deal.value ? h('span', { className: 'stoa-num' }, money(deal.value, pb.currency)) : null),
-        h('div', { className: 'stoa-cardfoot', style: { marginTop: 0 } },
-          h('span', { className: 'stoa-sub stoa-clip' }, [deal.company, deal.group && deal.group !== deal.company ? deal.group : ''].filter(Boolean).join(' · ') || ' '),
-          deal.owner ? h('em', null, deal.owner) : null),
-        deal.next_step && (!column.won || deal.in_delivery) ? h('div', { className: 'stoa-clip', style: { marginTop: 6, fontSize: 12 } }, deal.next_step) : null,
-        deal.due || deal.stale || deal.pending || column.other ? h('div', { className: 'stoa-chips' },
-          column.other ? h(Chip, null, deal.stage_label) : null,
-          deal.due ? h(Chip, { tone: dueTone(deal) }, deal.next_due < today() ? 'overdue' : 'due today') : null,
-          deal.stale && !deal.due ? h(Chip, null, 'quiet') : null,
-          deal.pending ? h(Chip, { tone: 'good' }, 'draft waiting') : null) : null))
-        : h('div', { className: 'stoa-empty' }, over === column.id ? 'Drop it here' : '—'))))
+      column.here.length ? column.here.map(deal => h(BoardCard, { key: deal.id, deal, pb, column, open: openId === deal.id,
+        onOpen: () => { hide(); setOpenId(openId === deal.id ? '' : deal.id) }, onDragEnd: () => setOver(''), onEnter: show, onLeave: hide }))
+        : h('div', { className: 'stoa-empty' }, over === column.id ? 'Drop it here' : '—')))),
+  peek ? h(CardPeek, { key: peek.id, deal: state.deals.find(item => item.id === peek.id), pb, at: peek }) : null)
 }
 
 function Company({ company, sessionId }) {

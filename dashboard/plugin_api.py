@@ -143,10 +143,14 @@ def _mod(name: str):
     return importlib.import_module(type(_profile_desk()).__module__.rsplit(".", 1)[0] + "." + name)
 
 
-def _card(d, deal: dict, playbook, touches: Optional[dict] = None, pending: Optional[dict] = None, groups: Optional[dict] = None) -> dict:
-    """One record for the page. ``touches``, ``pending`` and ``groups`` are passed when many are built at
-    once, so the whole board costs three queries instead of three per record."""
+def _card(d, deal: dict, playbook, touches: Optional[dict] = None, pending: Optional[dict] = None, groups: Optional[dict] = None,
+          people: Optional[dict] = None) -> dict:
+    """One record for the page. ``touches``, ``pending``, ``groups`` and ``people`` (``{record id: [the people on
+    it]}``) are passed when many are built at once, so the whole board costs four queries instead of four per record."""
     view = d.view(deal, playbook, touches=touches, groups=groups)
+    on_it = people.get(deal["id"], []) if people is not None else d.store.people(deal["id"])
+    if on_it:                                   # who a card names when the record is not itself a person
+        view["contact"], view["contact_title"], view["people_count"] = on_it[0]["name"], on_it[0]["title"], len(on_it)
     view["position"] = playbook.position(deal["stage"])
     view["stage_at"] = deal["stage_at"]
     view["updated_at"] = deal["updated_at"]
@@ -200,6 +204,9 @@ def state() -> dict:
     names = {deal["id"]: deal["name"] for deal in deals}
     touches, pending = d.store.touches(), d.store.meta_prefix("pending:")
     groups = {row["key"]: row for row in d.store.grps()}
+    people: dict = {}
+    for person in d.store.people():
+        people.setdefault(person["deal_id"], []).append(person)
     cards = _mod("cards")
     import datetime as _dt
     week_ago = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -256,7 +263,7 @@ def state() -> dict:
         "playbook": _playbook(playbook),
         # the pipelines on the desk (one, unless more were opened) and which of them this is
         "pipelines": pipes, "pipeline": here["id"],
-        "deals": [_card(d, deal, playbook, touches, pending, groups) for deal in deals],
+        "deals": [_card(d, deal, playbook, touches, pending, groups, people) for deal in deals],
         "markets": markets,
         "companies": d.companies(),
         "clients": [] if playbook.group_is_company() else d.clients(),
