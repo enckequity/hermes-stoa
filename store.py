@@ -278,6 +278,22 @@ def parse_ts(value: str) -> Optional[dt.datetime]:
         return None
 
 
+def local_day(stamp: Any) -> str:
+    """The day something happened, where the desk is. Times are kept in UTC, so the first ten letters of one are
+    the day in UTC: in Denver that is tomorrow from five in the afternoon. Anything that is not a kept time (a plain
+    date, nothing) comes back as it is."""
+    when = parse_ts(stamp)
+    return when.astimezone().date().isoformat() if when else str(stamp or "")[:10]
+
+
+def day_bounds(first: str, last: str) -> tuple:
+    """The kept times (UTC) at which a stretch of days here begins and ends: midnight on ``first`` to the last second
+    of ``last``, both as the clock on the wall has them. With no ``first``, from the beginning."""
+    stamp = lambda when: when.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")      # noqa: E731  (a time with no zone is the wall clock's)
+    start = stamp(dt.datetime.fromisoformat(first + "T00:00:00")) if first else "0000-01-01T00:00:00Z"
+    return start, stamp(dt.datetime.fromisoformat(last + "T23:59:59"))
+
+
 def days_since(value: str) -> Optional[float]:
     when = parse_ts(value)
     if when is None:

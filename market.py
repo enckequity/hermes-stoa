@@ -330,8 +330,8 @@ class Markets:
         month = st.today()[:7]
         n = lambda name: self._count(market["id"], name)
         calls, unpriced = n("calls"), n("unpriced")
-        return {"ok": True, "id": market["id"], "name": market["name"], "created": (market.get("created_at") or "")[:10],
-                "updated": (market.get("updated_at") or "")[:10], "on_it": on_it,
+        return {"ok": True, "id": market["id"], "name": market["name"], "created": st.local_day(market.get("created_at")),
+                "updated": st.local_day(market.get("updated_at")), "on_it": on_it,
                 "sources": {"links": len(linked), "sites": len(sites), "top": [{"site": site, "links": count} for site, count in sites.most_common(6)]},
                 "gaps": [{"missing": missing, "what": what, "ask": ask} for missing, what, ask in gaps if missing > 0],
                 "cost": {"since": self.store.meta_get("map:%s:since" % market["id"], "")[:10], "last": self.store.meta_get("map:%s:last" % market["id"], ""),
@@ -1116,7 +1116,7 @@ def _view(row: dict, criteria: Optional[list] = None, segment: str = "") -> dict
     count = headcount(row["size"])
     if count:
         out["headcount"] = count
-    out["added"] = (row.get("created_at") or "")[:10]
+    out["added"] = st.local_day(row.get("created_at"))
     out["added_at"] = row.get("created_at") or ""
     return out
 

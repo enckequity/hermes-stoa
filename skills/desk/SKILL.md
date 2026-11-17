@@ -390,9 +390,31 @@ will miscount, and the person's page shows the real figure beside your answer).
 
 ## Email
 
-You write drafts; people send them. If a Gmail tool or the Google Workspace skill is available
-in this session, save an email you drafted as a Gmail draft addressed to the record's email and
-say that it is in their drafts. Never send. Without one, give the draft in the chat.
+You write drafts; people send them. If Gmail is connected in this session (a Gmail tool, or the
+Google Workspace skill), save an email you drafted as a Gmail draft addressed to the right person
+on the record and say that it is in their drafts. Never send. Without Gmail, give the draft in the
+chat.
+
+Saving the draft, the way that works:
+
+1. If a tool that creates a Gmail draft is listed, use it.
+2. Otherwise load the Google Workspace skill. Its command-line wrapper can send, search and reply
+   but may have no draft command: check its `gmail --help`. Never use `gmail send` in its place.
+3. With no draft command, say that you are about to save a draft in their Gmail, then run a
+   short Python script with `python`, the Hermes environment's own interpreter, which has Google's
+   libraries. Not `python3`: that is often a system Python without them
+   (`ModuleNotFoundError: google.oauth2`). Not raw HTTP calls to the Gmail API: those fail on
+   certificates. The script reads the token the skill uses (`google_token.json` in the Hermes
+   home), then `Credentials.from_authorized_user_info(...)`, `build("gmail", "v1", ...)`,
+   `users().getProfile(userId="me")` (stop if that is not the mailbox the person means), an
+   `EmailMessage` with To, From (that address), Subject and the body, and
+   `users().drafts().create(userId="me", body={"message": {"raw": <the message, base64url>}})`.
+4. If Hermes asks the person to approve the command, that is theirs to decide: wait for the
+   answer, and never pick a way of running it in order to avoid being asked.
+5. Read it back (`users().drafts().get`, and its labels are `["DRAFT"]`) before you say it is
+   saved.
+6. If the person refuses, or a step fails twice, stop: give the draft in the chat and say plainly
+   that it is not in Gmail. Do not write "draft in Gmail" into a next step until the draft exists.
 
 ## Enrichment costs money
 

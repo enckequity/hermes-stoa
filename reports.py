@@ -74,7 +74,7 @@ def window(period: Any, today: Optional[dt.date] = None) -> dict:
 
 
 def inside(stamp: str, win: Optional[dict]) -> bool:
-    day = str(stamp or "")[:10]
+    day = st.local_day(stamp)       # the day it happened here, not the day it was in UTC
     return bool(day) and win is not None and (not win["from"] or day >= win["from"]) and day <= win["to"]
 
 
@@ -288,8 +288,8 @@ class Reports:
             was = str(deal["fields"].get("_prev_stage") or "")
             where = "%s%s" % (playbook.lost["label"], " at " + playbook.label(was).lower() if was else "")
         return {"id": deal["id"], "name": deal["name"], "company": deal["company"], "group": deal["grp"], "stage": where,
-                "status": deal["status"], "value": deal["value"], "entered": deal["created_at"][:10],
-                "closed": deal["stage_at"][:10] if deal["status"] in ("won", "lost") else "", "owner": deal["owner"],
+                "status": deal["status"], "value": deal["value"], "entered": st.local_day(deal["created_at"]),
+                "closed": st.local_day(deal["stage_at"]) if deal["status"] in ("won", "lost") else "", "owner": deal["owner"],
                 "reason": deal["lost_reason"], "k": part}
 
     def _money(self, playbook, value: float) -> str:
@@ -347,7 +347,8 @@ class Reports:
         if by == "month":
             stamp = deal["stage_at"] if spec["when"] == "closed" else deal["created_at"]
             when = st.parse_ts(stamp)
-            return stamp[:7], when.strftime("%b %Y") if when else stamp[:7]
+            when = when.astimezone() if when else None      # the month it was here
+            return st.local_day(stamp)[:7], when.strftime("%b %Y") if when else stamp[:7]
         value = str(deal["fields"].get(by[6:]) or "").strip()
         return None, value or "Not set"
 
@@ -555,9 +556,10 @@ class Reports:
         months: list = []
         for deal in mine:
             when = st.parse_ts(deal["stage_at"])
-            label = when.strftime("%b") if when else deal["stage_at"][:7]
-            if not months or months[-1]["key"] != deal["stage_at"][:7]:
-                months.append({"key": deal["stage_at"][:7], "label": label, "won": 0, "lost": 0})
+            when, month = when.astimezone() if when else None, st.local_day(deal["stage_at"])[:7]      # the month it was here
+            label = when.strftime("%b") if when else month
+            if not months or months[-1]["key"] != month:
+                months.append({"key": month, "label": label, "won": 0, "lost": 0})
             months[-1][deal["status"]] += 1
         before = win.get("before") if compare else None
         change, earlier_words = "", ""
@@ -713,8 +715,7 @@ class Reports:
 
     def _hermes(self, entry: dict, win: dict, compare: bool, full: bool) -> dict:
         from .intake import APPLICABLE
-        start = (win["from"] or "0000-01-01") + "T00:00:00Z"
-        end = win["to"] + "T23:59:59Z"
+        start, end = st.day_bounds(win["from"], win["to"])      # the days as they are here, in the UTC the times are kept in
         approved = declined = waiting = 0
         turned_down: dict = {}
         for intake in self.store.intakes_between(start, end, "proposal"):

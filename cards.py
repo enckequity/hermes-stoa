@@ -132,7 +132,7 @@ def text_card(playbook, deal: dict, activities: Optional[list] = None, last_touc
     if is_stale(playbook, deal, last_touch):
         lines.append("Quiet for %s" % age(last_touch or deal["updated_at"]).replace(" ago", ""))
     for act in (activities or [])[:3]:
-        lines.append("- %s  %s%s" % (act["at"][:10], act["text"], " (%s)" % act["actor"] if act.get("actor") else ""))
+        lines.append("- %s  %s%s" % (st.local_day(act["at"]), act["text"], " (%s)" % act["actor"] if act.get("actor") else ""))
     lines.append("id: %s" % deal["id"])
     return "\n".join(lines)
 

@@ -4246,7 +4246,7 @@ class MapOnThePageTests(unittest.TestCase):
         self.assertEqual([headcount(text) for text in ("220 people", "1,200", "Founded 2015, 80 staff", "about 3k employees", "mid-size", "")], [220, 1200, 80, 3000, 0, 0])
         rows = self.companies()
         self.assertEqual(rows["Meridian Freight"]["headcount"], 220)
-        self.assertEqual(rows["Meridian Freight"]["added"], dt.datetime.now(dt.timezone.utc).date().isoformat())
+        self.assertEqual(rows["Meridian Freight"]["added"], dt.date.today().isoformat())       # the day it is here, not in UTC
 
     def test_a_signal_keeps_the_day_it_happened(self):
         from stoa.market import signal_day
@@ -5077,8 +5077,15 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(window("year", dt.date(2026, 1, 3))["before"], {"label": "last year", "from": "2025-01-01", "to": "2025-12-31"})
         self.assertIsNone(window("all", day)["before"])
         self.assertEqual(window("nonsense", day)["id"], "all")
-        self.assertTrue(inside("2026-08-18T00:00:01Z", ninety) and inside("2026-11-15T23:59:59Z", ninety))
-        self.assertFalse(inside("2026-08-17T23:59:59Z", ninety) or inside("", ninety) or inside("2026-11-01T00:00:00Z", None))
+        local = lambda text: dt.datetime.fromisoformat(text).astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")      # noqa: E731  (a wall-clock time, as kept)
+        self.assertTrue(inside(local("2026-08-18T00:00:01"), ninety) and inside(local("2026-11-15T23:59:59"), ninety))      # a day is the day it is here
+        self.assertFalse(inside(local("2026-08-17T23:59:59"), ninety) or inside(local("2026-11-16T00:00:01"), ninety) or inside("", ninety)
+                         or inside("2026-11-01T00:00:00Z", None))
+        self.assertTrue(inside("2026-11-15", ninety))                                                                              # a plain date is taken as it is
+        from stoa.store import day_bounds, local_day
+        start, end = day_bounds("2026-11-15", "2026-11-15")
+        self.assertEqual((local_day(start), local_day(end), local_day("2026-11-15"), local_day(""), day_bounds("", "2026-11-15")[0]),
+                         ("2026-11-15", "2026-11-15", "2026-11-15", "", "0000-01-01T00:00:00Z"))
 
     def test_a_desk_starts_with_nine_reports_seven_of_them_on_the_dashboard(self):
         listed = self.reports.catalog()

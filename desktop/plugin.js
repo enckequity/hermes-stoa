@@ -701,6 +701,7 @@ const CSS = `
 .stoa-fn-block, .stoa-fn-won { transform-box: fill-box; transform-origin: center; animation: stoa-rise .7s cubic-bezier(.2, .7, .2, 1) both; transition: filter .15s ease; }
 .stoa-fn-won { animation: stoa-rise .7s cubic-bezier(.2, .7, .2, 1) both, stoa-glow 3.6s ease-in-out 1s infinite; }
 .stoa-fn-step:last-child .stoa-fn-label, .stoa-fn-step:last-child .stoa-fn-num { fill: var(--ui-text-primary); }
+.stoa-fn-unit { font-family: var(--stoa-mono); font-size: 9.5px; font-weight: 400; letter-spacing: .08em; text-transform: uppercase; fill: var(--ui-text-tertiary); }
 .stoa-fn-link { fill: var(--ui-text-primary); opacity: .17; }
 .stoa-fn-pill { fill: var(--stoa-page); stroke: var(--ui-stroke-secondary); }
 .stoa-fn-hit { fill: transparent; }
@@ -2145,14 +2146,15 @@ function Funnel({ state }) {
     groups.push(h('g', { key: 'g' + index, className: 'stoa-fn-step', 'data-on': on ? '1' : '0', 'data-press': step.id ? '1' : '0',
       'data-heat': Math.min(6, 1 + Math.round((5 * index) / Math.max(1, steps.length - 2))),
       onClick: step.id ? () => setFilter({ stage: on ? '' : step.id }) : undefined },
-      h('title', null, step.id ? (on ? 'Let go of ' + step.label : 'Pick out ' + step.label + ' on the board') : step.label),
+      h('title', null, step.id ? plural(step.reached, pb.terms.deal + ' has', pb.terms.deals + ' have') + ' got as far as ' + step.label + ', counting those now further on or ' + pb.won.label.toLowerCase()
+        + '. ' + step.here + ' ' + (step.here === 1 ? 'is' : 'are') + ' in it now. ' + (on ? 'Press to let go of it.' : 'Press to pick out its column on the board.') : step.label),
       h('rect', { className: 'stoa-fn-hit', x: x - 4, y: 0, width: col - 2, height: H }),
       h('rect', { className: step.won ? 'stoa-fn-won' : 'stoa-fn-block', mask: step.won ? undefined : 'url(#stoa-fn-mask)', x, y: mid - tallness / 2, width: block, height: tallness,
         style: { animationDelay: index * 55 + 'ms' } }),
       h('text', { className: 'stoa-fn-label', x, y: 11 }, step.label.toUpperCase().slice(0, Math.max(6, Math.floor(col / 7.6)))),
-      h('text', { className: 'stoa-fn-num', x, y: 31 }, String(step.reached)),
+      h('text', { className: 'stoa-fn-num', x, y: 31 }, String(step.reached), step.won ? null : h('tspan', { className: 'stoa-fn-unit', dx: 7 }, 'got this far')),
       h('text', { className: 'stoa-fn-sub', x, y: mid + tall / 2 + 22 },
-        step.won ? (step.value ? money(step.value, pb.currency) : '') : step.here + ' here' + (step.value ? ' · ' + money(step.value, pb.currency) : '')),
+        step.won ? (step.value ? money(step.value, pb.currency) : '') : step.here + ' here now' + (step.value ? ' · ' + money(step.value, pb.currency) : '')),
       step.lost ? h('text', { className: 'stoa-fn-sub', x, y: mid + tall / 2 + 35 }, step.lost + ' lost here') : null))
   })
   return h('div', { className: 'stoa-funnel' },
@@ -2164,7 +2166,7 @@ function Funnel({ state }) {
     h('div', { className: 'stoa-funnel-foot' },
       h('span', null, h('b', null, closed ? Math.round((100 * flow.won) / closed) + '%' : '–'), ' win rate' + (closed ? ' (' + flow.won + ' of ' + closed + ' closed)' : '')),
       h('span', null, h('b', null, Math.round((100 * flow.won) / flow.total) + '%'), ' of everything that entered has been ' + flow.won_label.toLowerCase()),
-      h('span', null, 'Percentages are the share that reached the next stage; ' + pb.terms.deals + ' still in a stage have not had their chance yet.')))
+      h('span', null, 'The large number is every ' + pb.terms.deal + ' that got as far as that stage, those now further on included; “here now” is what its column holds. Percentages are the share that reached the next stage.')))
 }
 
 // -- the pane beside the conversation ------------------------------------------------------------

@@ -1692,7 +1692,7 @@ class Desk:
         """The sources people have given their records, the most used first, as they were typed (not the marks
         Stoa puts there itself: a market map, a list, an import, sample data)."""
         counts: dict = {}
-        for deal in self.store.list(status="all"):
+        for deal in sorted(self.store.list(status="all"), key=lambda deal: deal["created_at"]):      # oldest first: "as first typed"
             source = deal["source"].strip()
             low = source.lower()
             if not source or source == demo.SOURCE or low == "import" or low.startswith(("market map", "intake:")):
@@ -3680,7 +3680,7 @@ class Desk:
                        key=lambda d: (playbook.position(d["stage"]) if d["status"] == "open" else 99, d["grp"].lower(), d["name"].lower()))
         rows = [[d["id"], d["name"], d["company"], d["grp"], playbook.label(d["stage"]), d["value"] or "", d["owner"], d["next_step"],
                  d["next_due"], d["email"], d["linkedin"]] + [str(d["fields"].get(field["key"], "")) for field in playbook.fields]
-                + [d["updated_at"][:10]] for d in deals[:limit]]
+                + [st.local_day(d["updated_at"])] for d in deals[:limit]]
         out = {"ok": True, "columns": columns, "rows": rows, "count": len(rows),
                "note": "Write columns as the first row and rows beneath it. Keep the ID column: it is how an edit made in "
                        "the spreadsheet finds its record when the tab is read back with gtm_intake."}

@@ -78,8 +78,8 @@ class Database:
                 "value": deal["value"], "owner": deal["owner"],
                 "next_step": deal["next_step"] if working else "", "next_due": cards.due_date(deal) if working else "",
                 "due": cards.is_due(deal, playbook), "source": deal["source"], "close_on": deal.get("close_on") or "",
-                "created_at": deal["created_at"][:10], "last_touch": (touches.get(deal["id"], "") or deal["updated_at"])[:10],
-                "stage_at": deal["stage_at"][:10], "lost_reason": deal["lost_reason"],
+                "created_at": st.local_day(deal["created_at"]), "last_touch": st.local_day(touches.get(deal["id"], "") or deal["updated_at"]),
+                "stage_at": st.local_day(deal["stage_at"]), "lost_reason": deal["lost_reason"],
                 "people": len(here) + (1 if mine else 0), "contact": contact,
                 "contact_title": str(deal["fields"].get("title") or "") if mine else (first["title"] if first else ""),
                 "email": deal["email"] if mine or not first else first["email"],
@@ -95,13 +95,13 @@ class Database:
             return people.setdefault(key, {
                 "key": key, "edit": edit, "name": source.get("name") or "", "title": source.get("title") or "", "email": source.get("email") or "",
                 "phone": source.get("phone") or "", "linkedin": source.get("linkedin") or "", "company": "", "role": "", "kind": kind,
-                "records": [], "open": 0, "last_touch": "", "created_at": (source.get("created_at") or "")[:10], "note": (source.get("note") or "")[:300]})
+                "records": [], "open": 0, "last_touch": "", "created_at": st.local_day(source.get("created_at")), "note": (source.get("note") or "")[:300]})
 
         def on_record(row: dict, deal: dict, role: str, there: bool) -> None:
             if not any(item["id"] == deal["id"] for item in row["records"]):
                 row["records"].append({"id": deal["id"], "name": deal["name"], "state": deal["status"]})
                 row["open"] += 1 if cards.working(playbook, deal) else 0
-            row["last_touch"] = max(row["last_touch"], (touches.get(deal["id"], "") or deal["updated_at"])[:10])
+            row["last_touch"] = max(row["last_touch"], st.local_day(touches.get(deal["id"], "") or deal["updated_at"]))
             if role and role not in row["role"].split(" · "):
                 row["role"] = " · ".join(part for part in (row["role"], role) if part)
             if there and not row["company"]:
@@ -158,8 +158,8 @@ class Database:
             for bucket, value in (("owners", deal["owner"]), ("sources", deal["source"])):
                 if value and value not in row[bucket]:
                     row[bucket].append(value)
-            row["last_touch"] = max(row["last_touch"], (touches.get(deal["id"], "") or deal["updated_at"])[:10])
-            row["created_at"] = min(row["created_at"] or "9999", deal["created_at"][:10])
+            row["last_touch"] = max(row["last_touch"], st.local_day(touches.get(deal["id"], "") or deal["updated_at"]))
+            row["created_at"] = min(row["created_at"] or "9999", st.local_day(deal["created_at"]))
             due = cards.due_date(deal) if cards.working(playbook, deal) else ""
             if due and (not row["next_due"] or due < row["next_due"]):
                 row["next_due"], row["next_step"] = due, deal["next_step"]
@@ -187,7 +187,7 @@ class Database:
                 if target["status"] != "tracked" and not known and not linked:
                     row["targets"].append(target["id"])
                 if not known and not linked:
-                    row["created_at"] = min(row["created_at"] or "9999", target["created_at"][:10])
+                    row["created_at"] = min(row["created_at"] or "9999", st.local_day(target["created_at"]))
         account_rows = []
         for row in accounts.values():
             row["people"] = len(row.pop("_who"))
