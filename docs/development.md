@@ -3,7 +3,7 @@
 Standard library only. The desk logic has no Hermes imports, so the tests run anywhere:
 
 ```
-python3 -m unittest discover -s tests     # 263 tests, no network
+python3 -m unittest discover -s tests     # 341 tests, no network
 hermes plugins validate . --install-deps
 hermes plugins doctor . --ci
 ```
@@ -16,11 +16,25 @@ hermes plugins doctor . --ci
 | `playbook.py`, `playbooks/` | Playbook loading, validation, and the built-ins |
 | `cards.py` | Block Kit cards and their text twins |
 | `slackdesk.py` | Posting cards and answering button clicks |
+| `reports.py` | Reports: what the desk's records add up to, counted here with no model |
+| `database.py` | The Database tab: accounts, deals and people as rows, and the views a person saves |
 | `intake.py` | Lists sent in: matching rows to records, the review, and applying what was approved |
 | `market.py` | Market maps: segments, requirements, what the map adds up to, and the step into the pipeline |
 | `page.py` | A market map as one self-contained web page |
 | `pagemap.js` | The working map inside that page: written into the file by `page.py`. Kept in step by hand with `mapCompanies` and `mapLayout` in `desktop/plugin.js` |
 | `sources.py` | People Data Labs, Exa and meeting-note sources |
+| `usage.py` | What a map has cost: counts from Hermes's two hooks, per map |
+| `files.py` | The files the talk box handed to Hermes, and removing them |
+| `blueprints.py` | The automations a team can switch on from `/blueprint` |
+| `schemas.py` | Tool schemas: what the model reads to decide when to reach for the desk |
+| `cli.py` | `hermes stoa`: the desk from a terminal |
+| `demo.py` | The two worked examples behind the tour |
 | `dashboard/` | The web tab: `plugin_api.py` (routes, shared with the app half), `dist/index.js` and `dist/style.css` (hand-written, no build step) |
 | `desktop/plugin.js` | The Desktop app and Webapp half: the pane, the page, and the parts drawn in a conversation (a record, a map, a list to review, the day, a report) |
 | `desktop/art.json` | The stoa in the page header (`head`) and on the welcome screen (`welcome`), as grids of cells, one cell a CSS pixel and one character (digits and consonants only, so the plugin scan cannot take a run of them for a key): how bright the stone is, and whether a dark theme and a light theme have a dot there. `plugin_api.py` hands it to the page at `/art`, and `paint` in `plugin.js` draws it on a canvas for the theme, in color or in one ink. It is made outside this repository by a small ray marcher and a stipple pass; `artgrid.py` there writes this file |
+
+## The pictures in these docs
+
+Every screenshot is of the sample data from `hermes stoa demo`, taken in the Webapp on a dark theme at
+twice the pixel density (PNG, about 2,800 px wide) so it stays sharp on a high-density screen. Nothing
+real is in any of them. When a release changes how a tab looks, retake the pictures that show it.

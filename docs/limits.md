@@ -32,6 +32,18 @@
   the call notes filed. What you ask Hermes to do in a chat is done at once and is not counted
   there, and a proposal you altered before approving counts as approved.
 - **A report is not sent anywhere on a schedule.** Open it, download it, or ask Hermes about it.
+- **The database is a way of looking, not a second store.** It has no formulas and no columns of
+  your own beyond the fields your playbook names. A view belongs to one pipeline and to one list
+  (accounts, deals or people), and no table adds pipelines together. A cell that is worked out from
+  other things (a status, a count, a last touch) cannot be typed into. A change to many rows is made
+  one record at a time; a record it does not fit is skipped and named, and each is undone on its own.
+- **The panel beside a card needs a pointer.** Resting on a card opens it; on a touch screen there
+  is nothing to rest, so press the card and read its page.
+- **A record, a map, the day and a report are drawn in a conversation only in the Desktop app and
+  the Webapp.** Messaging apps, the phone app and the terminal get the same answer as text.
+- **Days are the days of the machine Hermes runs on.** Reports, dates and "today" follow that
+  machine's time zone, not the browser's, so a desk hosted in another zone turns over at its
+  midnight.
 - **The web dashboard tab is set-up and status only.** It shows what is set up, how to set up the
   rest, and the desk in totals. It has no pipeline board, no map and no record: those are on the
   Stoa page in the Desktop app and the Webapp. Its totals name pipelines and maps, never a person or

@@ -7,7 +7,9 @@ Every part of Stoa, and its settings. For how a day on the desk goes, see [the g
 | | |
 |---|---|
 | **13 tools** | `gtm_market`, `gtm_pipeline`, `gtm_deal`, `gtm_group`, `gtm_contact`, `gtm_invoice`, `gtm_card`, `gtm_intake`, `gtm_enrich`, `gtm_notes`, `gtm_playbook`, `gtm_export`, `gtm_report` |
+| **Market maps** | Segments, fit scores, evidence and sources on one picture you work on: three views, pick and add to the pipeline, grow, weigh the requirements, a research model of its own, cost and limits per map, and a copy to hand a client |
 | **Reports** | A dashboard and nine reports counted by the plugin from your records, with no model: pipeline by stage, win rate, time in stage, sources, losses, what the map turned into, what Hermes did. Make your own from a few choices, or ask Hermes for one in words |
+| **Database** | Accounts, deals and people as tables: search, filter, sort, group, choose columns, keep views, change a cell in place, change many rows at once, copy emails and export |
 | **Pipelines** | Several side by side on one desk, each with its own records and its own playbook: your own sales beside the work you do for clients |
 | **Searches, accounts, clients** | The group a record is in is a thing of its own: who the client is, where it stands, its terms, and the people on the client's side |
 | **Cash** | Invoices on a record in whole cents, what is owed and overdue, won work that was never billed, a delivery lane after the win, and a forecast weighted by stage |
@@ -15,9 +17,8 @@ Every part of Stoa, and its settings. For how a day on the desk goes, see [the g
 | **Undo and a ledger** | Every change is kept with what it replaced, never altered; an action can be taken back unless that would overwrite a later change |
 | **People and companies** | Several people on a record, each kept once across records, mail matched to the right record by whoever sent it, and one view per company |
 | **Intake** | Send a list in any form; review what is new and what would change; apply what you tick |
-| **Market maps** | Segments, fit scores, evidence and sources, with an **Add to pipeline** button per company |
 | **Slack cards** | Advance, Draft follow-up, Enrich, close with a reason, snooze, reopen |
-| **Desktop app and Webapp** | A live pane beside the chat, a Stoa page (Today, pipeline, searches or accounts, companies, cash, market map, reports, activity, setup), and cards and maps drawn inside the conversation |
+| **Desktop app and Webapp** | A live pane beside the chat, a Stoa page (Today, Market map, Pipeline, Reports, Database, Activity, Cash, Setup), and records, maps, the day and reports drawn inside the conversation |
 | **Web dashboard tab** | Setup and status: the six set-up steps with how to do each from the dashboard, what the desk holds in totals, each pipeline and map, the month's paid work, the rules in force and your data |
 | **`/gtm`** | The board, today, cash, the brief, a map or one record, on every surface Hermes runs on (CLI, Telegram, Desktop…). In Slack, `!gtm`, where a record or a map arrives with its buttons |
 | **`hermes stoa`** | Status, board, brief, map, the ledger (`history`), autonomy, sample data, CSV import and export from a terminal |
@@ -73,6 +74,17 @@ stage of your playbook with the first known buyer as the contact, carries the ev
 activity log, and asks Hermes to confirm the buyer (or find one) and draft a first-touch note.
 The *Market watch* automation re-checks a map every week and adds at most five new companies.
 
+**What Add to pipeline does**, from the page, Slack or a chat alike:
+
+- **A company already in the pipeline is filled in, not added twice.** Stoa looks first for an open
+  record filed under that company, spelled loosely ("Acme" and "Acme, Inc." are one). Found, that
+  record takes the map's buyer and evidence, empty fields only, and the map shows the company as
+  in the pipeline. A record that only mentions the company, such as a candidate who works there,
+  is left alone.
+- **On a pipeline of deals the record is named for the company**, and the buyer goes on it as a
+  person (title, email, LinkedIn). The map never renames a record. On pipelines of roles and of
+  leads the record is the person.
+
 **The map on the page.** On the Stoa page the map is one picture you work on:
 
 - **Three views of the same companies.** *Segments* is the map. *Priority* puts a better fit further
@@ -107,7 +119,9 @@ The *Market watch* automation re-checks a map every week and adds at most five n
   scroll, so a company picked from the table opens where you are looking. On a narrow page it sits
   under the map and the page goes to it.
 
-![The map by priority, with one company open](desktop-market-priority.jpg)
+![The map by priority, with one company open](desktop-market-priority.png)
+
+![The map's own menu: switch, new, rename, delete](desktop-map-menu.png)
 
 **The research model.** **Research:** beside **Map facts** is the model Hermes researches maps
 with. Starting a map, **+ Grow**, **More like these**, a new requirement, a neighbouring segment,
@@ -116,6 +130,8 @@ own, **Stoa map research**, on that model. It starts on Hermes's default and doe
 model picked under the talk box. Pick any model Hermes can use; the pick is kept on that computer.
 **New research conversation**, at the foot of the same list, starts a fresh one when it has grown
 long. **Draft outreach** is writing, not research, and goes to the talk box's conversation.
+
+![The research model menu on the market map](desktop-map-model.png)
 
 **Map facts.** The **Map facts** button opens a window with the map by the numbers:
 
@@ -138,7 +154,7 @@ long. **Draft outreach** is writing, not research, and goes to the talk box's co
   is already running: the budget is checked each time Hermes goes to add or search, and a turn's
   cost is written when the turn ends.
 
-![Map facts: what is on the map, where it came from, what it has cost, and its limits](desktop-map-facts.jpg)
+![Map facts: what is on the map, where it came from, what it has cost, and its limits](desktop-map-facts.png)
 
 **A page to send.** **Download page** on the Market map tab saves the whole map as one
 self-contained web page, with the same working map at its head: the three views, a company opened by
@@ -149,7 +165,7 @@ to share** saves the same page without buyers' names or what is in your pipeline
 sending to a client. Asking Hermes does the same (`gtm_market(action="export")`), and writes the
 file to the plugin's `exports/` folder instead of your browser's downloads.
 
-![The copy to share, as a client sees it: the working map, with no buyers' names and nothing about your pipeline](page-market.jpg)
+![The copy to share, as a client sees it: the working map, with no buyers' names and nothing about your pipeline](page-market.png)
 
 ### Intake
 
@@ -201,10 +217,28 @@ Marcus, he wants 210 base, follow up Thursday." "We lost Lumen on price."* The a
 of those to the desk in the same turn; the bundled skill teaches it to treat the desk, not its
 memory, as the source of truth.
 
+**The funnel and the board.** On the Pipeline tab the large number over each stage is every record
+that got as far as that stage, those now further on or won included ("got this far"); the small one
+is what the column holds ("here now"); the percentages are the share that reached the next stage. A
+card on the board shows its contact (or company and group), the next step on two lines, and a row
+along its foot: when the step is due, how long the record has been in its stage, quiet, a draft
+waiting, how many people are on it, and the owner. A card overdue or due today has a coloured edge.
+Resting the pointer on a card opens a panel beside it with the stage, the next step, up to three
+people, the notes and the last three things logged; it takes no clicks and goes when the pointer
+does.
+
+![Resting on a card on the board](desktop-board.png)
+
 Every record carries one next step and a date. *"What needs me today?"* (or `/gtm today`) answers
 with the same list the Today tab shows. *"Done, I sent the references"* logs the step and sets
 the next one. *"Park Kestrel until the 20th"* snoozes it: a snoozed record is on neither the due
 list nor the quiet list, in the page, the morning brief or Slack, until its date.
+
+**A won record keeps its next step until delivery is through.** Where a playbook names two or more
+delivery stages (Onboarding → Live, say), a won record short of the last one still has a next step
+that shows and comes due like an open record's: on Today, in the brief, on its page and on the
+board. Winning it on its page asks for the first one, and Today lists wins in delivery with nothing
+planned. At the last delivery stage a win is closed.
 
 ### Approvals, autonomy and undo
 
@@ -217,12 +251,18 @@ In a chat you are there, so Hermes does what you ask. The rest is for when you a
   to a record. **Run it**: it may make any change. This is enforced in the plugin, not in the
   prompt: a change the setting does not allow is not made, it becomes a proposal.
 
-![What a scheduled job may do by itself](desktop-autonomy.jpg)
+![What a scheduled job may do by itself](desktop-autonomy.png)
 
 - **A proposal carries its case.** The record, what would change, one line of why, and up to four
   pieces of evidence: an email, a call, a message, with who and when and their words. You approve
   or decline each on Today (or apply a whole list at once). Approving is a person's: a scheduled
   job cannot apply or discard what is waiting.
+- **A suggestion that did not know a record was there cannot undo it.** When a sweep proposes a
+  "new" record that turns out to match one already on the desk, the match is held as a change to
+  that record, and its stage is left alone: it never reopens a record that is won or lost, and
+  never steps an open one back to the first stage. The review says so. A row that names its record
+  by id still moves it wherever it says. The same suggestion is not held twice while the first
+  waits.
 - **A no is remembered.** A declined proposal is kept for 90 days and the same one is left out
   if it comes again. It is the same one only while the record has not moved: once the stage or
   the value it would replace changes, it counts as new. **Forget them** on Setup clears the memory.
@@ -240,7 +280,7 @@ The **Reports** tab is the desk added up. Every figure on it is counted by the p
 pipeline's own file, so a report costs nothing to open, reads the same every time, and never
 depends on a model getting the sum right. Reports belong to a pipeline: each one has its own.
 
-![The Reports dashboard](desktop-reports.jpg)
+![The Reports dashboard](desktop-reports.png)
 
 **The dashboard** shows the reports you have pinned, each with one sentence on what its figures
 say. Seven are on it to begin with:
@@ -260,7 +300,7 @@ Two more are under **All reports**, ready to pin: **Who holds what** (open value
 **Against the … before** apply to every report that has a period; a report of what is open now
 has none.
 
-![One report, with the records behind a bar](desktop-report-open.jpg)
+![One report, with the records behind a bar](desktop-report-open.png)
 
 **Open** a report to see it large: press a bar and the records behind it are listed, each one a
 press away. **Table** shows the same rows as numbers, **Over time** the same records month by
@@ -288,6 +328,8 @@ remove one.
 
 What the figures rest on:
 
+- **A day is the day where the desk is.** Times are kept in UTC and counted by the local date of
+  the machine Hermes runs on, so what you close in the evening is in today's figures.
 - **When a record closed** is when it was moved to won or lost; **when it entered** is when it was
   added to the desk (for an import, the day of the import).
 - **How far a record got**: an open one, its stage; a won one, all the way; a lost one, the stage
@@ -305,6 +347,48 @@ What the figures rest on:
   list: it is saved on the record, which moves to its own bar.
 - **What Hermes did** counts proposals, which are what a scheduled job leaves for your approval.
   What you ask Hermes to do in a chat is done at once and is not a proposal.
+
+### The database
+
+The Pipeline tab shows work by stage. The **Database** tab is everything the desk keeps, as rows to
+look through. The rows are worked out from what the desk already holds; nothing new is stored but
+the views you save.
+
+![The Database tab: every deal as a row](desktop-database.png)
+
+| List | A row is | Columns include |
+|---|---|---|
+| **Accounts** | A company with a record, or a company on a market map | Status, open deals, open and won value, people, next step, due, last touch; for a mapped company its segment, fit, size, location, signal and map |
+| **Deals** | A record, open, won or lost | Company, status, stage, value, owner, next step, due, main contact, last touch, source, expected close, and the playbook's own fields |
+| **People** | A person, once, however many records they are on | Title, company, email, phone, role, the records they are on, last touch |
+
+- **Search and filter.** A filter is a column, a test and a value: is, is not, contains, is empty,
+  at least, at most, before, after, within the last or the next N days.
+- **Sort, group, columns.** Press a heading to sort. **Group** puts rows under a heading for each
+  value with a count and a sum. **Columns** chooses what each row shows.
+- **The boxes above the table** count the rows by stage, status or company, and filter when pressed.
+- **Views.** A set comes with it: for deals *Open*, *Due this week*, *No next step*, *Quiet for two
+  weeks*, *After the win*, *Closed lost*, *By stage*; for accounts *In the pipeline*, *Customers*,
+  *Nobody named yet*, *On a map, not in the pipeline*; for people *On open deals*, *No email yet*,
+  *By company*. **Save as a view** keeps your own, up to 40 a pipeline, and the page remembers
+  where you were.
+- **A cell is changed in place.** On a deal: owner, value, next step and its date, stage, delivery
+  stage, source, expected close, notes and the playbook's own fields. On a person: name, title,
+  email, phone and LinkedIn. On an account: website and notes. Each save goes through the route
+  the record's own page uses, so it is logged on the record and **Undo** is offered. A name opens
+  what it names; a pencil renames it. A cell worked out from other things is not editable.
+- **Rows are ticked** (Shift for a run) and one change is made to all of them: owner, stage, next
+  step, source, expected close, closed as lost. Each record is changed one at a time and logged;
+  one the change does not fit is skipped and named. Companies that are only on a map are added to
+  the pipeline the same way.
+- **Copy emails** and **Export CSV** take the ticked rows, or every row shown when none is.
+
+![Three deals ticked, and the bar that changes them all](desktop-database-bulk.png)
+
+![Accounts on a map and not yet in the pipeline](desktop-database-map.png)
+
+The database has no tool of its own: in a chat, Hermes reads and changes the same records with
+`gtm_pipeline`, `gtm_deal` and `gtm_contact`.
 
 ### Cash: invoices, delivery and the forecast
 
@@ -410,7 +494,7 @@ playbook is the first kind: name a map after the search, and its companies land 
 Pipeline tab lists them beside the board and the companies; press one for its records, its
 people and its terms. `gtm_group` is the tool; `gtm_contact(group=...)` keeps the people.
 
-![Searches: who each one is for, where it stands, and who is on the client's side](desktop-searches.jpg)
+![Searches: who each one is for, where it stands, and who is on the client's side](desktop-searches.png)
 
 ### Playbooks
 
@@ -478,7 +562,10 @@ lookup, for teams that do not want it at all.
 
 Stoa writes drafts and never sends. When the Google Workspace skill (or any Gmail tool) is
 connected to Hermes, the agent saves what it drafts as a Gmail draft addressed to the record's
-email, ready for you to read and send. Without it, drafts arrive in the chat.
+email, ready for you to read and send, and reads the draft back before telling you it is saved.
+Without Gmail, drafts arrive in the chat. If Hermes asks your approval to run something on the way,
+that prompt is yours to answer: the desk skill tells the agent to wait for it, and to stop if you
+say no.
 
 ### Email, calls and Slack, logged for you
 
@@ -539,6 +626,20 @@ touch. The setting is `files_keep_days`; 0 means never by itself.
 Only a file on Stoa's list is removed, and only while it is still the file Hermes saved: a plain
 file in one of those two folders, the same size and age. Your original is never touched.
 
+### The talk box and its model
+
+The box at the foot of the Stoa page keeps a conversation of its own, **Stoa desk**. Under it is
+the model that conversation runs on. Press it and Hermes's own model menu opens, the one the chat
+box uses: search, your favourites, a custom model by name, and how hard to think on each row. The
+pick is kept on that computer and goes to every conversation the talk box starts. Map research has
+a model of its own (above), and the two are independent.
+
+Changing the model of a long conversation makes Hermes re-read all of it at full price once, so
+Hermes asks first, and the page offers **Start a new conversation on it** instead. **New
+conversation** does the same at any time: Hermes re-reads the whole conversation at every step, so
+a long one costs more each time, and the desk itself keeps everything, so nothing is lost by
+starting again. The old conversation stays in the sidebar.
+
 ## Settings
 
 All optional. Set them in the Desktop app under **Settings → Plugins → Stoa**, or in
@@ -550,13 +651,15 @@ All optional. Set them in the Desktop app under **Settings → Plugins → Stoa*
 | `channels` | empty | Chat ids where the desk is available; empty means everywhere. Add `cron` to let scheduled jobs use it too. Button clicks are refused outside these chats as well |
 | `slack_users` | empty | Slack user ids (they start with `U`) who may press the buttons on any card, review or map. Empty means only the person a card was posted for can press its buttons |
 | `import_dir` | empty | A folder the agent may read CSV files from by path, besides the plugin's own `imports/` folder and the working directory |
-| `notes_dir` | empty | Folder of call notes to watch |
+| `notes_dir` | empty | Folders of call notes to read, up to eight, with a semicolon between them |
+| `notes_connections` | empty | Connectors of Hermes's own that hold call notes (for example `plaud`), for the agent to read on a notes sweep |
 | `notes_days` | `7` | How far back the notes inbox looks |
 | `files_keep_days` | `7` | Days before Stoa removes Hermes's copy of a file dropped in the talk box (0 = until you remove it under Setup) |
 | `pdl_monthly_cap` | `50` | Most paid lookups per calendar month (0 = no cap) |
 | `PDL_API_KEY` (secret) | empty | Turns on enrichment and buyer lookup |
 | `EXA_API_KEY` (secret) | empty | Lets the market map search for companies directly |
 | `GRANOLA_API_KEY` (secret) | empty | Adds Granola notes to the inbox |
+| `FIREFLIES_API_KEY` (secret) | empty | Adds Fireflies meeting summaries and action items to the inbox |
 
 One permission is worth granting. For a button click to start the agent's writing turn, Hermes
 needs to let the plugin queue a message:
