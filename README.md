@@ -147,7 +147,7 @@ are on).
 Search, filter, sort, group, and choose the columns. The boxes above the table count the rows by
 stage and narrow to one when pressed. A handful of views come with it (*Open*, *Due this week*,
 *No next step*, *Quiet for two weeks*, *After the win*, *Customers*); **Save as a view** keeps
-the way you are looking now as one of your own.
+the filters, sort and columns in front of you as a view of your own.
 
 ![The database: every deal as a row, with views, filters, grouping and a choice of columns](docs/desktop-database.png)
 

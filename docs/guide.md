@@ -248,7 +248,7 @@ and **People** (each person once, however many records they are on).
   to see only those.
 - **Keep a view.** A handful come with it (*Open*, *Due this week*, *No next step*, *Quiet for two
   weeks*, *After the win*, *Customers*, *On a map, not in the pipeline*). **Save as a view** keeps
-  the way you are looking now as one of your own.
+  the filters, sort and columns in front of you as a view of your own.
 - **Change a cell where it is.** Press an owner, a deal size, a next step and its date, a stage, a
   person's title or email, an account's website. Enter saves, Escape leaves it. Each change is
   logged on its record with **Undo** offered, as if made on the record's own page. A cell worked
