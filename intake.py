@@ -170,6 +170,12 @@ class Intake:
         declined = [row for row in plan if row["kind"] == "declined"]
         if declined:
             out["declined_before"] = len(declined)
+        matched = [row["matched"] for row in plan if row.get("matched")]
+        if matched:
+            out["already_on_the_desk"] = matched[:20]
+            out["matched_note"] = ("These rows did not name a record, and each turned out to be one already on the desk (closed ones "
+                                   "included: the board lists open records only). They are held as changes to that record, never as a "
+                                   "new one, and a closed record's stage is left alone. Do not tell the person it was not on the desk.")
         if ignored:
             out["kept_as_note"] = sorted(ignored)[:20]
             out["kept_note"] = "These columns have no place on the desk; each new record keeps them in its notes, in the list's words."
@@ -443,9 +449,20 @@ class Intake:
         labels = named + (("company", terms["company"]), ("grp", terms["group"].capitalize()), ("email", "Email"), ("phone", "Phone"), ("linkedin", "LinkedIn"),
                   ("owner", terms["owner"].capitalize()), ("next_step", "Next step"), ("next_due", "Due"), ("close_on", "Expected close"))
         changes = []
+        # On a pipeline of deals a person's address is theirs, kept on the person: where it is already there (or the
+        # row brings the person with it) the same address is not also written onto the deal.
+        theirs: set = set()
+        if playbook.shape == "deals":
+            carried = row.get("person") or {}
+            for person in self.store.people(record["id"]) + ([carried] if carried else []):
+                theirs.update(str(person.get(key) or "").strip().lower() for key in ("email", "phone"))
+                theirs.add(_link(str(person.get("linkedin") or "")))
+            theirs.discard("")
         for key, label in labels:
             new, old = _text(row.get(key)), str(record.get(key) or "")
             differs = _link(new) != _link(old) if key == "linkedin" else new.lower() != old.strip().lower()
+            if key in ("email", "phone", "linkedin") and (_link(new) if key == "linkedin" else new.lower()) in theirs:
+                continue
             if new and differs:
                 changes.append({"key": key, "field": label, "from": old, "to": new})
         if row.get("value") and abs(row["value"] - (record.get("value") or 0)) > 0.005:
@@ -456,7 +473,7 @@ class Intake:
             old = str((record.get("fields") or {}).get(key) or "")
             if new and new.lower() != old.strip().lower():
                 changes.append({"key": "fields." + key, "field": field_labels.get(key, key), "from": old, "to": new})
-        if row.get("stage") and row["stage"] != record["stage"]:
+        if row.get("stage") and row["stage"] != record["stage"] and self._may_move(record, row, playbook):
             changes.append({"key": "stage", "field": "Stage", "from": playbook.label(record["stage"]), "to": playbook.label(row["stage"])})
         person = row.get("person") or {}
         if person:
@@ -478,9 +495,24 @@ class Intake:
             changes.append({"key": "note", "field": "Note", "from": "", "to": _text(row.get("note"), 160)})
         return changes
 
+    @staticmethod
+    def _may_move(record: dict, row: dict, playbook) -> bool:
+        """Whether a row's stage is a move to make. A row that names its record by id says what it means. A row that
+        was only matched to a record by name or address was written without knowing the record was there: it does not
+        reopen one that is won or lost, and the first stage on it is where a new record would have started, not a
+        step back for one already further on."""
+        if row.get("record"):
+            return True
+        if record["status"] != "open":
+            return False
+        return row["stage"] != playbook.first_stage()
+
     def plan(self, rows: list, playbook, origin: str = "list") -> tuple:
         deals = self.store.list(status="all")
         declined = self.store.declined() if origin == "proposal" else {}
+        # what is already waiting for an answer: the same suggestion is not put in front of the person twice
+        asked = {row["hash"] for intake in self.store.intake_list("open", limit=40) if (intake.get("origin") or "list") == "proposal"
+                 for row in intake["rows"] if row.get("hash") and row.get("kind") in APPLICABLE and not row.get("done")} if origin == "proposal" else set()
         plan, ignored, seen = [], set(), {}
         for number, raw in enumerate(rows, start=1):
             row, warnings, extra = self._clean(raw, playbook)
@@ -513,6 +545,11 @@ class Intake:
                 entry["changes"] = self._changes(record, row, playbook)
                 entry["kind"] = "update" if entry["changes"] else "same"
                 entry["why"] = "" if entry["changes"] else "already on the desk, nothing new"
+                if not row.get("record"):        # matched, not named: say so, and what was left alone because of it
+                    where = playbook.label(record["stage"])
+                    entry["matched"] = {"record": record["id"], "name": record["name"], "status": record["status"], "stage": where}
+                    if row.get("stage") and row["stage"] != record["stage"] and not self._may_move(record, row, playbook):
+                        entry["warnings"] = entry["warnings"] + ["Already on the desk at %s: its stage is left as it is." % where]
             elif candidates:
                 entry.update(kind="unclear", why=why + ": " + ", ".join(
                     "%s (%s)" % (c["name"], c["grp"] or c["company"] or c["id"]) for c in candidates) + ". Say which, or pass its id as `record`.")
@@ -522,6 +559,10 @@ class Intake:
                 entry["hash"] = digest(entry)
                 if entry["hash"] in declined:       # asked before and turned down: the desk does not ask twice
                     entry.update(kind="declined", why="declined on %s; not proposed again" % declined[entry["hash"]][:10])
+                elif entry["hash"] in asked:
+                    entry.update(kind="same", why="already waiting for the person's answer")
+                else:
+                    asked.add(entry["hash"])
         return plan, ignored
 
     # -- reading a list back --------------------------------------------------------------------

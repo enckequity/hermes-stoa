@@ -1714,6 +1714,66 @@ class MoneyTests(unittest.TestCase):
         self.assertEqual([line["op"] for line in self.desk.store.ledger(made)], ["insert"])
 
 
+class MatchedProposalTests(unittest.TestCase):
+    """A proposal written without knowing the record was there: held as a change to it, and a careful one."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.desk = make_desk(self.tmp.name, playbook="b2b-sales")
+        add = lambda name, **more: self.desk.deal(dict({"action": "add", "name": name, "company": name, "group": name}, **more))["deal"]["id"]      # noqa: E731
+        self.snov = add("Snov.io", next_step="Follow up with Oryna", next_due="+4d")
+        self.desk.store.person_add(self.snov, "Oryna K", email="oryna@snov.example", title="PR Manager")
+        self.desk.deal({"action": "close", "deal": self.snov, "outcome": "won"})
+        self.exa = add("Exa")
+        self.desk.deal({"action": "move", "deal": self.exa, "stage": "discovery"})
+        self.cron = {"platform": "cron"}
+
+    def propose(self, *rows):
+        return self.desk.intake.run({"action": "propose", "kind": "proposal", "source": "Activity sweep", "rows": list(rows)}, self.cron)
+
+    def test_the_board_says_what_is_closed(self):
+        board = self.desk.pipeline({"view": "board"})
+        self.assertIn("Not on the board, but on the desk: Closed won (1): Snov.io.", board["board"])
+        self.assertEqual(board["closed"], {"Closed won": ["Snov.io"], "Closed lost": []})
+        self.assertIn("look it up with gtm_deal", board["closed_note"])
+
+    def test_a_row_that_did_not_know_the_record_does_not_reopen_it(self):
+        row = {"name": "Snov.io", "company": "Snov.io", "email": "oryna@snov.example", "stage": "lead", "next_step": "Follow up with partnerships",
+               "next_due": "+7d", "person": {"name": "Oryna K", "email": "oryna@snov.example"}, "why": "no Snov.io record exists",
+               "evidence": [{"kind": "email", "at": "2026-11-16", "who": "Snov.io", "text": "Welcome aboard", "ref": "m1"}]}
+        out = self.propose(row)
+        self.assertEqual(out["already_on_the_desk"], [{"record": self.snov, "name": "Snov.io", "status": "won", "stage": "Closed won"}])
+        self.assertIn("never as a new one", out["matched_note"])
+        held = self.desk.store.intake_get(out["id"])["rows"][0]
+        self.assertEqual((held["kind"], held["deal"], sorted(change["key"] for change in held["changes"])), ("update", self.snov, ["next_due", "next_step"]))
+        self.assertEqual(held["warnings"], ["Already on the desk at Closed won: its stage is left as it is."])      # not won back to a lead
+        again = self.propose(dict(row, why="worded another way"))                # the same suggestion, made twice
+        self.assertEqual((again["counts"]["update"], again["counts"]["same"]), (0, 1))
+        self.assertEqual(len(self.desk.intake.queue()), 1)
+        self.assertTrue(self.desk.intake.decide(out["id"], 1, "approve", actor="tester")["ok"])
+        after = self.desk.store.get(self.snov)
+        self.assertEqual((after["status"], after["stage"], after["email"], after["next_step"]), ("won", "won", "", "Follow up with partnerships"))
+
+    def test_an_open_record_is_not_stepped_back_but_a_named_one_moves(self):
+        out = self.propose({"name": "Exa", "company": "Exa", "stage": "lead", "next_step": "Send the deck"})
+        held = self.desk.store.intake_get(out["id"])["rows"][0]
+        self.assertEqual(([change["key"] for change in held["changes"]], held["warnings"]),
+                         (["next_step"], ["Already on the desk at Discovery: its stage is left as it is."]))
+        forward = self.propose({"name": "Exa", "company": "Exa", "stage": "proposal"})        # a later stage, by name: a move
+        self.assertEqual([change["key"] for change in self.desk.store.intake_get(forward["id"])["rows"][0]["changes"]], ["stage"])
+        named = self.propose({"record": self.snov, "stage": "negotiation"}, {"record": self.exa, "stage": "lead"})      # by id: it says what it means
+        rows = self.desk.store.intake_get(named["id"])["rows"]
+        self.assertEqual([[change["to"] for change in row["changes"]] for row in rows], [["Negotiation"], ["Lead"]])
+        self.assertNotIn("already_on_the_desk", named)
+
+    def test_where_the_record_is_the_person_its_address_is_still_its_own(self):
+        desk = make_desk(tempfile.mkdtemp(dir=self.tmp.name), playbook="recruiting")
+        one = desk.deal({"action": "add", "name": "Ingrid Solberg", "company": "Meridian"})["deal"]["id"]
+        out = desk.intake.run({"action": "propose", "kind": "proposal", "rows": [{"record": one, "email": "ingrid@meridian.example"}]}, self.cron)
+        self.assertEqual([change["key"] for change in desk.store.intake_get(out["id"])["rows"][0]["changes"]], ["email"])
+
+
 class DatabaseTests(unittest.TestCase):
     """Accounts, deals and people as rows, and the views kept of them."""
 

@@ -680,7 +680,7 @@ const CSS = `
 .stoa-cardfact[data-tone="warn"] { color: var(--ui-orange); }
 .stoa-cardfact[data-tone="good"] { color: var(--stoa-accent-text); }
 .stoa-boardwrap { position: relative; }
-.stoa-peek { position: absolute; z-index: 40; padding: 12px 14px 10px; border: 1px solid var(--ui-stroke-primary); border-radius: var(--stoa-r); background: var(--ui-chat-surface-background, var(--ui-bg-card)); box-shadow: 0 10px 34px rgba(0, 0, 0, .18); font-size: 12.5px; pointer-events: none; animation: stoa-peekin .14s ease both; }
+.stoa-peek { position: absolute; z-index: 40; padding: 12px 14px 10px; border: 1px solid var(--ui-stroke-primary); border-radius: var(--stoa-r); background: var(--stoa-page); box-shadow: 0 10px 34px rgba(0, 0, 0, .22); font-size: 12.5px; pointer-events: none; animation: stoa-peekin .14s ease both; }
 @keyframes stoa-peekin { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 .stoa-peekhead b { display: block; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
 .stoa-peekhead .stoa-sub { display: block; margin-top: 2px; font-family: var(--stoa-mono); font-size: 10.5px; }
@@ -970,7 +970,7 @@ const CSS = `
 .stoa-dbcheck { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12.5px; cursor: pointer; border-radius: var(--stoa-r); }
 .stoa-dbcheck:hover { background: var(--ui-row-hover-background); }
 .stoa-dbcheck input { accent-color: var(--stoa-accent); }
-.stoa-dbwrap { overflow: auto; max-height: max(360px, calc(100vh - 330px)); border: 1px solid var(--ui-stroke-secondary); border-radius: var(--stoa-r); background: var(--stoa-dbbg); --stoa-dbbg: var(--ui-chat-surface-background, var(--ui-bg-card)); }
+.stoa-dbwrap { overflow: auto; max-height: max(360px, calc(100vh - 330px)); border: 1px solid var(--ui-stroke-secondary); border-radius: var(--stoa-r); background: var(--stoa-dbbg); --stoa-dbbg: var(--stoa-page); }
 .stoa-db { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
 .stoa-db th { position: sticky; top: 0; z-index: 2; padding: 0; border-bottom: 1px solid var(--ui-stroke-primary); background: color-mix(in srgb, var(--ui-text-primary) 4%, var(--stoa-dbbg)); text-align: left; white-space: nowrap; font-weight: 400; }
 .stoa-db th button { display: flex; align-items: center; gap: 6px; width: 100%; padding: 9px 12px 8px; border: 0; background: transparent; color: var(--ui-text-tertiary); font-family: var(--stoa-mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; cursor: pointer; }
@@ -1002,7 +1002,7 @@ const CSS = `
 .stoa-dbbulk { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 0 10px; padding: 8px 10px; border: 1px solid var(--stoa-accent-line); border-radius: var(--stoa-r); background: var(--stoa-accent-soft); }
 .stoa-dbbulk > b { margin-right: 6px; font-family: var(--stoa-mono); font-size: 11.5px; }
 .stoa-dbbulkform { display: inline-flex; gap: 6px; align-items: center; }
-.stoa-dbbulkform .stoa-field { width: 230px; margin: 0; background: var(--stoa-dbbg, var(--ui-chat-surface-background)); }
+.stoa-dbbulkform .stoa-field { width: 230px; margin: 0; background: var(--stoa-page); }
 .stoa-db tr.stoa-dbgroup td { position: sticky; left: 0; padding: 8px 12px; border-bottom: 1px solid var(--ui-stroke-secondary); background: color-mix(in srgb, var(--ui-text-primary) 6%, var(--stoa-dbbg)); cursor: pointer; }
 .stoa-db tr.stoa-dbgroup td > span { display: inline-flex; align-items: center; gap: 10px; }
 .stoa-dbfoot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin: 8px 2px 0; }

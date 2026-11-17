@@ -708,6 +708,16 @@ class Desk:
         if view == "board":
             out["board"] = cards.board_text(playbook, deals)
             out["by_stage"] = self._by_stage(playbook, deals)
+            if status == "open":         # the board is what is still in play; say what else is on the desk, so its absence is not read as not there
+                closed = [d for d in self.store.list(status="all") if d["status"] != "open"]
+                if closed:
+                    won, lost = [d["name"] for d in closed if d["status"] == "won"], [d["name"] for d in closed if d["status"] == "lost"]
+                    out["closed"] = {playbook.won["label"]: won[:40], playbook.lost["label"]: lost[:40]}
+                    out["board"] += "\n\nNot on the board, but on the desk: %s." % "; ".join(
+                        "%s (%d): %s%s" % (label, len(names), ", ".join(names[:12]), " and %d more" % (len(names) - 12) if len(names) > 12 else "")
+                        for label, names in ((playbook.won["label"], won), (playbook.lost["label"], lost)) if names)
+                    out["closed_note"] = ("The board lists open %s only. Before saying something is not on the desk, or proposing it as "
+                                          "new, look it up with gtm_deal(action='get')." % playbook.terms["deals"])
         out["deals"] = [self.view(d, playbook, touches=touches) for d in deals[:limit]]
         if len(deals) > limit:
             out["truncated"] = len(deals) - limit

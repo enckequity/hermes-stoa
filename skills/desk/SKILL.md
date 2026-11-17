@@ -178,11 +178,16 @@ you, say so in one line and stop.
    ref="<the message, thread or event id>")`. Always pass `ref`: it is what makes running the
    sweep twice harmless. Summarise; never paste a whole email, and never log something you
    could not read.
+   The board lists open records only. A company that was won or lost is still on the desk:
+   before you treat anything as not on the desk, look it up by name with
+   `gtm_deal(action="get")`.
 4. Everything beyond logging is a **proposal**, not a change: a record that should move
    ("interview booked", "they signed", "not interested"), a new next step, a sender at a known
    company who should be on the record, someone new who looks like they belong on the desk.
    Collect them and call `gtm_intake(action="propose", kind="proposal", source="Activity sweep",
-   rows=[...])`. Each row names its `record` (or is a new one), says what would change (`stage`,
+   rows=[...])`. Each row names its `record` by id (leave it out only for something you have
+   looked up and not found: a row without it that turns out to match a record is held as a change
+   to that record, and the answer tells you so), says what would change (`stage`,
    `next_step` and `next_due`, `person: {name, email, title, role}`, `lost_reason` with a losing
    stage), and carries `why` (one line) and `evidence`: up to four items of `{kind, at, who,
    text, ref}`, with `text` their own words where you have them. The person sees each one on the
