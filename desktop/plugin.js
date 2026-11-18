@@ -77,7 +77,7 @@ function offerUndo(last) {
   lastTimer = setTimeout(() => { if ($last.get() === last) $last.set(null) }, 14000)
 }
 
-/** A record taken off the desk (its add was undone) comes back, log and all. */
+/** A record taken off the desk (its add was undone, or someone deleted it) comes back, log and all. */
 async function putBack(dealId, pipe) {
   try {
     const result = await rest('/deal/' + encodeURIComponent(dealId) + '/restore', { method: 'POST', body: {}, ...inPipe(pipe) })
@@ -1499,6 +1499,58 @@ const Style = () => h('style', null, CSS)
 const Chip = ({ tone, wrap, children }) => h('span', { className: 'stoa-chip', 'data-tone': tone || '', 'data-wrap': wrap ? '1' : '0' }, children)
 const Btn = ({ kind, children, ...props }) => h('button', { type: 'button', className: 'stoa-btn', 'data-kind': kind || '', ...props }, children)
 
+/** Delete, beside a record's Edit. Two presses. The record is taken off the desk, not destroyed: everything on it is
+ *  kept, and it is put back from the Activity tab or from Your data in Setup, where it can also be deleted for good. */
+function RemoveRecord({ deal, after }) {
+  const pipe = useContext(InPipe)
+  const [sure, setSure] = useState(false)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { if (!sure) return undefined; const timer = setTimeout(() => setSure(false), 6000); return () => clearTimeout(timer) }, [sure])
+  const remove = async () => {
+    setBusy(true)
+    try {
+      await rest('/deal/' + encodeURIComponent(deal.id) + '/remove', { method: 'POST', body: {}, ...inPipe(pipe) })
+      refresh()
+      host.notify({ kind: 'success', message: deal.name + ' was taken off the desk. Nothing on it was lost: put it back from the Activity tab, or from Your data in Setup.' })
+      if (after) after()
+    } catch (error) {
+      host.notifyError(error, 'Stoa could not take that off the desk')
+    }
+    setBusy(false)
+  }
+  if (!sure) return h(Btn, { kind: 'quiet', title: 'Take this record off the desk. It can be put back.', onClick: () => setSure(true) }, 'Delete')
+  return h('span', { className: 'stoa-sub', style: { display: 'inline-flex', alignItems: 'center', gap: 8 } }, 'Delete ' + deal.name + '?',
+    h(Btn, { kind: 'danger', disabled: busy, onClick: remove }, busy ? 'Deleting…' : 'Delete it'),
+    h(Btn, { kind: 'quiet', disabled: busy, onClick: () => setSure(false) }, 'Keep'))
+}
+
+/** In Setup, under Your data: the records taken off the desk, each to be put back or deleted for good. */
+function TakenOff() {
+  const query = useQuery({ queryKey: ['stoa', 'removed'], queryFn: () => rest('/removed'), staleTime: 3000 })
+  const [sure, setSure] = useState('')
+  useEffect(() => { if (!sure) return undefined; const timer = setTimeout(() => setSure(''), 5000); return () => clearTimeout(timer) }, [sure])
+  const rows = (query.data && query.data.records) || []
+  if (!rows.length) return null
+  const destroy = async row => {
+    if (sure !== row.id) return setSure(row.id)
+    try {
+      await rest('/deal/' + encodeURIComponent(row.id) + '/destroy', { method: 'POST', body: {} })
+      refresh()
+    } catch (error) {
+      host.notifyError(error, 'Stoa could not delete that')
+    }
+    setSure('')
+  }
+  return h('div', { style: { marginTop: 14 } },
+    h('div', { className: 'stoa-name' }, 'Taken off the desk'),
+    h('div', { className: 'stoa-sub', style: { marginBottom: 4 } }, 'Each is kept with everything on it until you delete it for good. Deleting for good cannot be undone.'),
+    rows.map(row => h('div', { key: row.id, className: 'stoa-row', style: { cursor: 'default', alignItems: 'center' } },
+      h('span', { className: 'stoa-grow' }, h('span', { className: 'stoa-name' }, row.name),
+        h('span', { className: 'stoa-sub' }, '  ' + [row.company && row.company !== row.name ? row.company : '', row.stage, 'taken off ' + ago(row.removed_at)].filter(Boolean).join(' · '))),
+      h(Btn, { kind: 'quiet', onClick: () => putBack(row.id) }, 'Put back'),
+      h(Btn, { kind: sure === row.id ? 'danger' : 'quiet', title: 'The record, its log and its people\'s links are destroyed', onClick: () => destroy(row) }, sure === row.id ? 'Delete for good?' : 'Delete for good'))))
+}
+
 function Fit({ value }) {
   const n = Math.max(0, Math.min(5, Number(value) || 0))
   return h('span', { className: 'stoa-fit', 'data-fit': n, title: 'Fit ' + n + ' of 5' }, '■'.repeat(n), h('s', null, '■'.repeat(5 - n)))
@@ -1985,7 +2037,8 @@ function Record({ id, state: shown, sessionId, close, onCompany, onGroup }) {
         'aria-label': 'Where the work stands', title: 'Where the work stands', onChange: event => run({ verb: 'update', delivery: event.target.value }) },
         deal.delivery_stages.map(stage => h('option', { key: stage.id, value: stage.id }, stage.label))) : null,
       !open ? h(Btn, { kind: deal.status === 'won' ? '' : 'primary', disabled: busy, onClick: () => run({ verb: 'reopen' }) }, 'Reopen') : null,
-      h(Btn, { kind: 'quiet', onClick: () => setEditing(!editing) }, editing ? 'Close editing' : 'Edit')),
+      h(Btn, { kind: 'quiet', onClick: () => setEditing(!editing) }, editing ? 'Close editing' : 'Edit'),
+      h(RemoveRecord, { deal, after: close })),
     finishing && active && deal.next_step ? h(NextStep, { deal, mode: 'done', close: () => setFinishing(false) }) : null,
     editing ? h(Edit, { key: deal.stage, deal, state, done: () => setEditing(false) }) : null,
     facts.length ? h('div', { className: 'stoa-facts' }, facts.map(pair =>
@@ -3385,6 +3438,7 @@ function Setup({ state, go }) {
         h('div', { className: 'stoa-btns' }, h(Btn, { disabled: busy, onClick: exportAll }, setup.tour ? 'Export the sample data as CSV' : 'Export everything as CSV'),
           setup.tour ? h(Btn, { kind: 'primary', disabled: busy, onClick: () => wait(tour('leave')) }, 'Leave the tour') : null),
         h(HandedFiles),
+        h(TakenOff),
         data.samples && !setup.tour ? h('div', { style: { marginTop: 10 } },
           h('div', { className: 'stoa-sub' }, plural(data.samples, 'sample record is', 'sample records are') + ' mixed into your own desk (an earlier version of Stoa put them there).'),
           h('div', { className: 'stoa-btns', style: { marginTop: 6 } }, h(Btn, { disabled: busy, onClick: () => wait(tour('tidy')) }, 'Remove them from my desk'))) : null),
@@ -4126,7 +4180,8 @@ function RecordPage({ id, state: shown, sessionId, back, backLabel, openRecord, 
           'aria-label': 'Where the work stands', title: 'Where the work stands', onChange: event => run({ verb: 'update', delivery: event.target.value }) },
         deal.delivery_stages.map(stage => h('option', { key: stage.id, value: stage.id }, stage.label))) : null,
         !open ? h(Btn, { disabled: busy, onClick: () => run({ verb: 'reopen' }) }, 'Reopen') : null,
-        open && deal.advance ? h(Btn, { kind: 'primary', disabled: busy, onClick: () => run({ verb: 'advance', extra: deal.stage }) }, deal.advance + '  →') : null)),
+        open && deal.advance ? h(Btn, { kind: 'primary', disabled: busy, onClick: () => run({ verb: 'advance', extra: deal.stage }) }, deal.advance + '  →') : null,
+        h(RemoveRecord, { deal, after: back }))),
     nextForm && active ? h('div', { className: 'stoa-box', style: { marginTop: 10 } }, h(NextStep, { deal, mode: nextForm === 'done' && deal.next_step ? 'done' : 'plan',
       lead: justWon ? pb.won.label + ', and now in ' + phase + '. What is the first ' + phase + ' step?' + (deal.next_step ? ' It replaces “' + deal.next_step + '”.' : '') : '',
       close: () => { setNextForm(''); setJustWon(false) } })) : null,
@@ -6633,7 +6688,8 @@ function TodayInChat({ attrs, sessionId }) {
       snooze(deal)],
     to_invoice: deal => [h(Btn, { key: 'open', kind: 'go', title: 'Open the record: its invoices are at the foot', onClick: () => setOpenId(deal.id) }, 'Add invoice'), snooze(deal)],
     quiet: deal => [h(Btn, { key: 'draft', kind: 'go', title: 'Hermes drafts a follow-up from the record and its log', onClick: () => draftFor(deal, true, here, pipe, where) }, 'Draft a nudge'), snooze(deal)],
-    new: deal => [h(Btn, { key: 'plan', kind: 'go', onClick: () => setForm({ id: deal.id, mode: 'plan' }) }, 'Plan the next step')]
+    new: deal => [h(Btn, { key: 'plan', kind: 'go', onClick: () => setForm({ id: deal.id, mode: 'plan' }) }, 'Plan the next step')],
+    unplanned: (deal, row) => [h(Btn, { key: 'plan', kind: 'go', onClick: () => setForm({ id: deal.id, mode: 'plan' }) }, 'Plan the ' + (row.delivery || 'next').toLowerCase() + ' step')]
   }
   moves.due_today = moves.overdue
   const lists = CHAT_DAY.map(key => ({ ...TODAY_LISTS.find(item => item.key === key), rows: day[key] || [] })).filter(list => list.rows.length)
@@ -6650,7 +6706,7 @@ function TodayInChat({ attrs, sessionId }) {
             deal.value ? h('span', { className: 'stoa-sub', style: { fontWeight: 400 } }, '  ' + money(deal.value, pb.currency)) : null),
           h('span', { className: 'stoa-sub stoa-clip', style: { display: 'block' } }, sub))),
       right ? h('span', { className: 'stoa-num', 'data-tone': list.tone }, right) : null,
-      h('span', { className: 'stoa-tacts' }, moves[list.key](deal, item)),
+      h('span', { className: 'stoa-tacts' }, (moves[list.key] || moves.new)(deal, item)),
       form && form.id === deal.id ? h(NextStep, { deal, mode: form.mode, close: () => setForm(null) }) : null,
       opened ? h('div', { className: 'stoa-chatrec' }, h(Record, { id: deal.id, state, sessionId: here, close: () => setOpenId('') })) : null)
   }

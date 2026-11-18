@@ -345,9 +345,37 @@ def undo(deal_id: str, body: Optional[dict] = Body(None)) -> dict:
             "last": None if result["removed"] else _last(d, deal_id)}
 
 
+@router.post("/deal/{deal_id}/remove")
+def remove(deal_id: str) -> dict:
+    """Take a record off the desk: the Delete on its page. It is archived, not destroyed, and can be put back."""
+    d = desk()
+    result = d.remove(deal_id, actor="dashboard")
+    if not result.get("ok"):
+        raise HTTPException(404, result.get("error") or "that record is not on the desk")
+    d.announce()
+    return result
+
+
+@router.get("/removed")
+def removed() -> dict:
+    """The records taken off the desk, to be put back or deleted for good."""
+    return {"ok": True, "records": desk().removed()}
+
+
+@router.post("/deal/{deal_id}/destroy")
+def destroy(deal_id: str) -> dict:
+    """Delete for good a record already taken off the desk. Nothing brings it back."""
+    d = desk()
+    result = d.destroy(deal_id, actor="dashboard")
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "that record cannot be deleted")
+    d.announce()
+    return result
+
+
 @router.post("/deal/{deal_id}/restore")
 def restore(deal_id: str) -> dict:
-    """Put back a record that was taken off the desk when its add was undone."""
+    """Put back a record that was taken off the desk: its add was undone, or a person took it off."""
     d = desk()
     result = d.restore(deal_id, actor="dashboard")
     if not result.get("ok"):

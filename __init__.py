@@ -93,8 +93,9 @@ ACROSS = ("today", "brief", "due", "stale")      # the questions about a day: as
 def _tool(fn, desk=None, quiet=False, name=""):
     """Tool handlers return JSON strings and never raise into the agent loop.
 
-    A desk with more than one pipeline: the call says which with ``pipeline`` (a name), or means the first. What
-    comes back names the pipeline it used, so the agent and the person can see where a change went.
+    A desk with more than one pipeline: the call says which with ``pipeline`` (a name). Left out, a call that names
+    a record is sent to the pipeline that record is in (``desk.aim``), and any other call means the first. What comes
+    back names the pipeline it used, so the agent and the person can see where a change went.
     """
     def handler(args: dict, **kwargs) -> str:
         try:
@@ -113,6 +114,14 @@ def _tool(fn, desk=None, quiet=False, name=""):
                     return json.dumps(dict(missing, error=missing["error"] + ". Nothing was changed."), ensure_ascii=False)
             several = listed if len(listed) > 1 else []
             names = {entry["id"]: entry["name"] for entry in several}
+            action = str(args.get("action") or "").lower()
+            if several and asked in (None, "") and args.get("deal") and not (name == "gtm_deal" and action in ("add", "restore")):
+                # The record is named and its pipeline is not: find which one it is in, before anything is done (desk.aim).
+                chosen, exact, clash = desk.aim(args.get("deal"), reopening=name == "gtm_deal" and action == "reopen")
+                if clash:
+                    return json.dumps(clash, ensure_ascii=False)
+                if exact:
+                    args["deal"] = exact
             with desk.on(chosen):
                 held = desk.guard(name, args, session)             # a scheduled job, and a change kept for a person
                 if held is not None:
@@ -127,19 +136,6 @@ def _tool(fn, desk=None, quiet=False, name=""):
                     out = fn(args)
             if several and isinstance(out, dict) and "across" not in out:
                 out.setdefault("pipeline", names.get(chosen or "main", ""))
-                wanted = str(args.get("deal") or "").strip()
-                if asked in (None, "") and wanted and out.get("ok") is False and "no record matches" in str(out.get("error")):
-                    there = []                                      # not in the first pipeline: say where it is, so nothing is guessed
-                    for entry in several:
-                        if entry["id"] != (chosen or "main"):
-                            with desk.on(entry["id"]):
-                                try:
-                                    there += [entry["name"]] if desk.store.find(wanted) else []
-                                except Exception:
-                                    there.append(entry["name"])     # several matches there: it is there
-                    if there:
-                        out["elsewhere"] = there
-                        out["error"] = "%s in %s. It is in: %s. Call again with `pipeline`." % (out["error"], out["pipeline"], ", ".join(there))
             result = json.dumps(out, ensure_ascii=False, default=str)
             if held is not None or not quiet:
                 desk.announce()

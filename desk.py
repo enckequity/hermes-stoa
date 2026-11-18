@@ -311,6 +311,43 @@ class Desk:
         finally:
             PIPELINE.reset(token)
 
+    def aim(self, ref: Any, reopening: bool = False) -> tuple:
+        """Which pipeline a record named without one is in: ``(pipeline id, record id, error)``.
+
+        A name alone used to mean the first pipeline, and the same company is often in two (a lead, and the deal it
+        became): a change could land on the wrong one, or a record in another pipeline could seem not to exist. So the
+        name is looked up in every pipeline before anything is done with it:
+          in one pipeline only            that pipeline (within it, ``store.find`` decides between records as always)
+          in several, one of them open    that record: a lead that was handed over does not compete with its deal
+          in several, otherwise           an error that lists them, each with its pipeline; nothing is done
+        ``("", "", None)`` when there is nothing to decide: one pipeline, a tour, or no match anywhere."""
+        ref = str(ref or "").strip()
+        listed = [] if self.tour() else self.pipelines()
+        if not ref or len(listed) < 2:
+            return "", "", None
+        found = []
+        for entry in listed:
+            with self.on(entry["id"]):
+                try:
+                    one = self.own_store.find(ref)
+                    hits = [one] if one else []
+                except st.Ambiguous as exc:
+                    hits = list(exc.matches)
+            if hits:
+                found.append((entry, hits))
+        if not found:
+            return "", "", None
+        if len(found) == 1:
+            return found[0][0]["id"], "", None
+        every = [(entry, deal) for entry, hits in found for deal in hits]
+        still_open = [(entry, deal) for entry, deal in every if deal["status"] == "open"]
+        if len(still_open) == 1 and not reopening:
+            return still_open[0][0]["id"], still_open[0][1]["id"], None
+        return "", "", {"ok": False, "error": "'%s' fits records in more than one pipeline, so nothing was done. Ask which is meant (or go by what the person has "
+                                              "open), then call again with that record's id and its `pipeline`." % ref[:80],
+                        "matches": [{"id": deal["id"], "name": deal["name"], "company": deal["company"], "stage": deal["stage"], "status": deal["status"],
+                                     "pipeline": entry["name"]} for entry, deal in every][:12]}
+
     def pipeline_pick(self, ref: Any) -> tuple:
         """``(id, error)`` for a pipeline by its name, a clear part of it, or its id."""
         listed, want = self.pipelines(), " ".join(str(ref or "").lower().split())
@@ -1389,8 +1426,35 @@ class Desk:
                                                                         shown(key, item["then"])))
         return out
 
+    def remove(self, ref: Any, actor: str = "") -> dict:
+        """Take a record off the desk because a person said so (a duplicate, a mistake, a test). Nothing on it is
+        lost: it is archived, and ``restore`` puts it back as it was."""
+        deal, error = self._resolve(ref)
+        if error:
+            return error
+        gone = self.store.take_off(deal["id"], actor=actor or self.actor())
+        if gone is None:
+            return {"ok": False, "error": "%s is not on the desk" % deal["name"]}
+        self._changed(deal)
+        return {"ok": True, "action": "remove", "id": gone["id"], "name": gone["name"]}
+
+    def removed(self) -> list:
+        """The records taken off the desk, the latest first: enough of each to tell it from the others."""
+        playbook = self.playbook()
+        return [{"id": deal["id"], "name": deal["name"], "company": deal["company"], "group": deal["grp"], "stage": playbook.label(deal["stage"]),
+                 "removed_at": deal.get("archived_at", "")} for deal in self.store.taken_off()]
+
+    def destroy(self, ref: Any, actor: str = "") -> dict:
+        """Delete for good a record that was already taken off the desk: the record, its log and its people's links.
+        There is no way back, so a record still on the desk is refused: it has to be taken off first."""
+        gone = self.store.get(str(ref or "").strip(), archived=True)
+        if gone is None:
+            return {"ok": False, "error": "only a record already taken off the desk can be deleted for good"}
+        self.store.delete(gone["id"], actor=actor or self.actor())
+        return {"ok": True, "action": "destroy", "id": gone["id"], "name": gone["name"]}
+
     def restore(self, ref: Any, actor: str = "") -> dict:
-        """Put back a record that was taken off the desk when its add was undone."""
+        """Put back a record that was taken off the desk: its add was undone, or a person took it off."""
         ref = str(ref or "").strip()
         if not ref:
             return {"ok": False, "error": "say which record: pass `deal` (its id or name)"}
@@ -1522,11 +1586,13 @@ class Desk:
                     return {"ok": False, "error": "unknown stage '%s'" % target,
                             "stages": playbook.stage_ids() + [playbook.won["id"], playbook.lost["id"]]}
                 row.update(stage=stage, lost_reason=str(args.get("reason") or ""))
+                row.update({key: args.get(key) for key in ("next_step", "next_due") if args.get(key) not in (None, "")})
             elif action == "close":
                 outcome = str(args.get("outcome") or "").lower()
                 if outcome not in ("won", "lost"):
                     return {"ok": False, "error": "close needs outcome: won or lost"}
                 row.update(stage=playbook.won["id"] if outcome == "won" else playbook.lost["id"], lost_reason=str(args.get("reason") or ""))
+                row.update({key: args.get(key) for key in ("next_step", "next_due") if args.get(key) not in (None, "")})
             elif action == "update":
                 row.update({key: args.get(key) for key in ("name", "company", "group", "email", "linkedin", "value", "owner",
                                                           "next_step", "next_due", "fields") if args.get(key) not in (None, "")})
@@ -1559,7 +1625,7 @@ class Desk:
         playbook = self.playbook()
         actor = actor or self.actor()
         args, error = _due(args)
-        if error and action in ("add", "update", "log", "done"):
+        if error and action in ("add", "update", "log", "done", "move", "close"):
             return error
         if action == "update" and args.get("delivery") is not None:       # where the work stands, once it is won
             deal, missing = self._resolve(args.get("deal"))
@@ -1611,7 +1677,7 @@ class Desk:
             moved = self._move(deal, stage, playbook, actor, str(args.get("reason") or ""))
             if moved is None:
                 return self._raced(deal["id"], playbook, action)
-            deal = moved
+            deal = self._then(moved, args, actor)
         elif action == "close":
             outcome = str(args.get("outcome") or "").lower()
             if outcome not in ("won", "lost"):
@@ -1620,7 +1686,7 @@ class Desk:
             moved = self._move(deal, stage, playbook, actor, str(args.get("reason") or ""))
             if moved is None:
                 return self._raced(deal["id"], playbook, action)
-            deal = moved
+            deal = self._then(moved, args, actor)
         elif action == "reopen":
             moved = self._reopen(deal, playbook, actor, str(args.get("stage") or ""))
             if moved is None:
@@ -1662,6 +1728,12 @@ class Desk:
                     "actions": ["get", "add", "update", "move", "close", "reopen", "log", "done", "snooze", "undo", "restore"]}
         self._changed(deal)
         return {"ok": True, "action": action, "deal": self.view(deal, playbook, activities=3)}
+
+    def _then(self, deal: dict, args: dict, actor: str) -> dict:
+        """A record that was just moved, with the next step that came in the same call set on it. "Move it to proposal
+        and set the next step" is one thing to the person who says it: it is one call, and one thing to take back."""
+        follow = {key: args.get(key) for key in ("next_step", "next_due") if args.get(key) is not None}
+        return self.store.update(deal["id"], actor=actor, **follow) if follow else deal
 
     def _add(self, args: dict, playbook: Playbook, actor: str) -> dict:
         name = str(args.get("name") or "").strip()
@@ -3201,6 +3273,10 @@ class Desk:
         if found is None and note.get("source") == "folder":
             mark = sources.note_print(note)
             found = self.store.note_handled([mark]) if mark else None
+        if found is None:
+            # A note is one thing, whichever pipeline it was filed in. Each pipeline keeps its own ledger, so the others
+            # are asked too: a note filed on a lead is not still waiting where the deals are, to be filed a second time.
+            return self._note_handled_elsewhere(note)
         if found and found["id"] != note["id"]:
             self.store.mark_note(note["id"], found["deal_id"])
             if note.get("source") == "folder" and not found["id"].startswith("same:"):
@@ -3217,6 +3293,45 @@ class Desk:
                 if note["id"] == note_id or note_id in (note.get("was") or []):
                     return note
         return None
+
+    def _elsewhere(self) -> list:
+        """The desk's other pipelines, as ``pipelines()`` lists them: every one but the one the call in hand is about.
+        None during a tour, which shows a single sample desk."""
+        if self.tour():
+            return []
+        here = self.current()["id"]
+        return [entry for entry in self.pipelines() if entry["id"] != here]
+
+    def _note_handled_elsewhere(self, note: dict) -> Optional[dict]:
+        """A note's mark in another pipeline's ledger, as ``{id, at, deal_id, pipeline, pipeline_name}``; None if no
+        pipeline has handled it. Nothing is written: the pipeline that filed it is the one that knows where it went."""
+        ids = [note["id"]] + list(note.get("was") or [])
+        mark = sources.note_print(note) if note.get("source") == "folder" else ""
+        for entry in self._elsewhere():
+            with self.on(entry["id"]):
+                found = self.own_store.note_handled(ids + ([mark] if mark else []))
+            if found:
+                return dict(found, pipeline=entry["id"], pipeline_name=entry["name"])
+        return None
+
+    def _note_seen_anywhere(self, note_id: str) -> bool:
+        if self.store.note_seen(note_id):
+            return True
+        for entry in self._elsewhere():
+            with self.on(entry["id"]):
+                if self.own_store.note_seen(note_id):
+                    return True
+        return False
+
+    def _filed_on(self, mark: dict, names: dict) -> str:
+        """Where a handled note went, in words: the record's name, with its pipeline when that is another one."""
+        if not mark["deal_id"]:
+            return "(skipped)"
+        if not mark.get("pipeline"):
+            return names.get(mark["deal_id"], "")
+        with self.on(mark["pipeline"]):
+            deal = self.own_store.get(mark["deal_id"]) or self.own_store.get(mark["deal_id"], archived=True) or {}
+        return "%s (%s)" % (deal.get("name", ""), mark["pipeline_name"]) if deal.get("name") else "(in %s)" % mark["pipeline_name"]
 
     def _mark_note(self, note_id: str, deal_id: str = "") -> None:
         """A note is filed or skipped. For a file, what it says is remembered too, so the same note under another name
@@ -3253,7 +3368,7 @@ class Desk:
                 names = {deal["id"]: deal["name"] for deal in self.store.list(status="all")}
                 out["handled"] = [{"id": n["id"], "title": n["title"], "when": n.get("when", ""), "source": n.get("source", ""),
                                    "handled_at": handled[n["id"]]["at"],
-                                   "filed_on": names.get(handled[n["id"]]["deal_id"], "") or ("" if handled[n["id"]]["deal_id"] else "(skipped)")}
+                                   "filed_on": self._filed_on(handled[n["id"]], names)}
                                   for n in notes if handled[n["id"]] is not None][:40]
             if problems:
                 out["problems"] = problems
@@ -3278,7 +3393,7 @@ class Desk:
             asked = [str(item).strip()[:200] for item in (asked if isinstance(asked, (list, tuple)) else [asked]) if str(item or "").strip()][:100]
             if not asked:
                 return {"ok": False, "error": "known needs `notes`: the ids to ask about, each '<connection>:<id>'"}
-            done = [note_id for note_id in asked if self.store.note_seen(note_id)]
+            done = [note_id for note_id in asked if self._note_seen_anywhere(note_id)]
             return {"ok": True, "new": [note_id for note_id in asked if note_id not in done], "already_handled": done}
         note_id = str(args.get("note") or "").strip()
         if not note_id:
@@ -3293,6 +3408,9 @@ class Desk:
             note = self._folder_note(note_id) if note_id.startswith("file:") else None
             ids = [note_id] + ([note["id"]] + list(note.get("was") or []) + [sources.note_print(note)] if note else [])
             cleared = self.store.unmark_notes(ids)
+            for entry in self._elsewhere():         # it waits again on the whole desk, wherever it had been handled
+                with self.on(entry["id"]):
+                    cleared += self.own_store.unmark_notes(ids)
             return {"ok": bool(cleared), "reopened": note_id if cleared else "",
                     **({"note": "It is waiting in the inbox again. What was filed from it before is still on its record: add only what is new, or file it on the right record."}
                        if cleared else {"error": "that note was not marked as filed or skipped; list the inbox with include_filed=true for the ids"})}
@@ -3831,25 +3949,24 @@ class Desk:
                 book = self.library.load_or_default(entry["playbook"])
                 lines.append("%s (%s, grouped by %s)" % (entry["name"], book.terms["deals"], book.terms["group"]))
             text = ("## Stoa GTM desk\n"
-                    "You keep this team's pipelines with the gtm_* tools; the desk is the source of truth, so read it before "
-                    "answering and write to it when something changes. It has %d pipelines: %s. Every gtm tool takes "
-                    "`pipeline` (a name); left out, it means the first, and each answer names the pipeline it used: say "
-                    "it. Ask when it is unclear which one is meant. Look a name up with gtm_deal(action=\"get\") before "
-                    "saying it cannot be found. For how to run the desk, load the skill stoa:desk; to map a market, "
-                    "stoa:market-map. A change to the desk stays on the desk: do not also write it to another system "
-                    "unless asked.")
+                    "You keep this team's pipelines with the gtm_* tools; the desk is the source of truth: read it before "
+                    "answering, write to it when something changes. It has %d pipelines: %s. A record named in `deal` is "
+                    "found in whichever has it; one in two comes back with both: ask, never pick. Else `pipeline` (a name) "
+                    "says which, or the first is meant. Say the pipeline an answer names. To change a record, name it and "
+                    "change it: no get first, and the answer is the record as it stands. Load the skill stoa:desk for more "
+                    "than routine changes; stoa:market-map to map a market. A desk change stays on the desk unless asked.")
             full = text % (len(several), "; ".join(lines))
             if len(full) > 900:                     # many pipelines, or long names: their names alone, cut to fit
                 room = max(8, (900 - len(text % (len(several), ""))) // len(several) - 2)
                 full = text % (len(several), "; ".join(entry["name"][:room] for entry in several))
             return full
         return ("## Stoa GTM desk\n"
-                "You keep this team's pipeline with the gtm_* tools; the desk is the source of truth, so read it "
-                "before answering pipeline questions and write to it when something changes. When someone names a "
-                "person, company or record, look it up with gtm_deal(action=\"get\") before saying it cannot be "
-                "found, whatever else you can search; to show one, use gtm_card. %s "
+                "You keep this team's pipeline with the gtm_* tools; the desk is the source of truth: read it before "
+                "answering, write to it when something changes. To change a record, name it in `deal` and change it: no "
+                "get first, and the answer is the record as it stands. Look a name up with gtm_deal(action=\"get\") "
+                "before saying it cannot be found; to show one, use gtm_card. %s "
                 "Say \"%s\" and \"%s\", not \"deal\" or \"group\", unless those are the words. "
-                "For how to run the desk, load the skill stoa:desk. To map a market or find new leads, load stoa:market-map.%s"
+                "Load the skill stoa:desk for more than routine changes (lists, invoices, notes, sweeps); stoa:market-map to map a market.%s"
                 % (playbook.describe(), playbook.terms["deal"], playbook.terms["group"],
                    " Sample data is on show (a tour): everything on the desk is made up. Say so when you report from it, "
                    "and copy none of it into another system."

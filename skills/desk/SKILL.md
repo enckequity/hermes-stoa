@@ -217,6 +217,10 @@ you, say so in one line and stop.
   changed later; the answer says what, so tell the person and let them choose. Undoing an add takes
   the record off the desk without destroying it: `gtm_deal(action="restore", deal="<name>")` puts
   it back.
+- **Deleting.** A person deletes a record with Delete on its page. That too takes it off the desk
+  without destroying it, and `restore` puts it back; only they can delete it for good, from Your
+  data in Setup. You cannot delete a record: asked to, say where the button is, or close the
+  record as lost if it should simply be retired.
 
 ## Money: invoices, delivery and the forecast
 
@@ -293,12 +297,16 @@ A desk can hold several pipelines side by side, each with its own records and it
 the team's own sales beside the work it does for clients, say. When there is more than one, your
 instructions list them by name.
 
-- Every `gtm_*` tool takes `pipeline` (a name, or a clear part of it). Left out, it means the
-  first. Every answer carries `pipeline`: when you report a change, say which pipeline it went to.
-- If the person does not say which and it is not plain from what they are talking about, ask.
-  Never add something to the first pipeline because it is the default.
-- A record you look for in the wrong pipeline comes back with `elsewhere`: call again with that
-  pipeline. Do not add it afresh.
+- Every `gtm_*` tool takes `pipeline` (a name, or a clear part of it). Every answer carries
+  `pipeline`: when you report a change, say which pipeline it went to.
+- A call that names a record in `deal` and no pipeline is sent to the pipeline that record is in.
+  You do not need to know which. When the name is in more than one (a lead, and the client it
+  became), the one still open is meant; when more than one is open, nothing is done and the answer
+  lists them as `matches`, each with its pipeline: ask the person which, then call again with that
+  record's id and its `pipeline`. Never pick one yourself.
+- Any other call with no pipeline (a new record, the board) means the first. If the person does
+  not say which and it is not plain from what they are talking about, ask. Never add something to
+  the first pipeline because it is the default.
 - "What needs me today?" with no pipeline named comes back as `across`: one answer per pipeline.
   Report each under its name, most pressing first within it.
 - "Add a pipeline for my own deals" → `gtm_playbook(action="add_pipeline", pipeline_name="My

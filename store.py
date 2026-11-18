@@ -800,8 +800,9 @@ class Store:
         return self.get(deal_id)
 
     def delete(self, deal_id: str, actor: str = "") -> bool:
-        """Destroy a record and what hangs off it. Only clearing out sample data does this: everything
-        a person or the agent does takes a record off the desk by archiving it, which can be put right."""
+        """Destroy a record and what hangs off it. Clearing out sample data does this, and a person deleting for good
+        a record already taken off the desk. Everything else takes a record off the desk by archiving it, which can
+        be put right."""
         with self._conn() as conn:
             row = conn.execute("SELECT * FROM deals WHERE id = ?", (deal_id,)).fetchone()
             if row is None:
@@ -815,8 +816,29 @@ class Store:
             conn.execute("DELETE FROM meta WHERE k IN (?, ?)", ("pending:" + deal_id, "handoff:" + deal_id))
         return True
 
+    def take_off(self, deal_id: str, actor: str = "") -> Optional[dict]:
+        """Take a record off the desk at a person's word. It is archived with everything on it, as a record is when
+        its add is undone: every list and count leaves it out, and ``restore`` puts it back. Returns the record as it
+        was, or None if it is not on the desk."""
+        stamp = now()
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM deals WHERE id = ? AND archived_at = ''", (deal_id,)).fetchone()
+            if row is None:
+                return None
+            conn.execute("UPDATE deals SET archived_at = ?, updated_at = ? WHERE id = ?", (stamp, stamp, deal_id))
+            # On the ledger as "remove", which is not a change to take back with undo: putting it back is ``restore``.
+            self._entry(conn, self._op(), "deal", deal_id, deal_id, "remove", {"archived_at": ""}, {"archived_at": stamp}, actor, "Taken off the desk", at=stamp)
+            conn.execute("INSERT INTO activities (deal_id, at, kind, actor, text) VALUES (?,?,?,?,?)", (deal_id, stamp, "updated", actor, "Taken off the desk"))
+        return self._deal(row)
+
+    def taken_off(self, limit: int = 200) -> list:
+        """The records taken off the desk and not destroyed, the latest first."""
+        with self._conn() as conn:
+            rows = conn.execute("SELECT * FROM deals WHERE archived_at != '' ORDER BY archived_at DESC LIMIT ?", (limit,)).fetchall()
+        return [self._deal(row) for row in rows]
+
     def restore(self, deal_id: str, actor: str = "") -> Optional[dict]:
-        """Put back a record that was taken off the desk (its add was undone)."""
+        """Put back a record that was taken off the desk (its add was undone, or a person took it off)."""
         stamp = now()
         with self._conn() as conn:
             row = conn.execute("SELECT archived_at FROM deals WHERE id = ? AND archived_at != ''", (deal_id,)).fetchone()

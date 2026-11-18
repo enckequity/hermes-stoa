@@ -3,6 +3,7 @@ import asyncio
 import datetime as dt
 import importlib.util
 import json
+import re
 import sqlite3
 import sys
 import tempfile
@@ -3424,16 +3425,154 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("several", self.call("gtm_pipeline", pipeline="practice")["error"])      # now it could be either: it asks
         self.assertFalse(self.call("gtm_deal", action="add", name="X", pipeline="Somewhere else")["ok"])
 
-    def test_a_record_looked_for_in_the_wrong_pipeline_says_where_it_is(self):
+    def test_a_record_named_without_its_pipeline_is_found_where_it_is(self):
         self.second()
         self.call("gtm_deal", action="add", name="Visa retainer", company="Visa", pipeline="My practice")
-        out = self.call("gtm_deal", action="get", deal="Visa retainer")           # no pipeline said: the first
-        self.assertFalse(out["ok"])
-        self.assertEqual(out["elsewhere"], ["My practice"])
-        self.assertIn("It is in: My practice", out["error"])
+        out = self.call("gtm_deal", action="get", deal="Visa retainer")           # no pipeline said, and only one has it
+        self.assertEqual((out["ok"], out["pipeline"], out["deal"]["name"]), (True, "My practice", "Visa retainer"))
+        stepped = self.call("gtm_deal", action="update", deal="Visa", next_step="Send the SOW", next_due="friday")       # a part of its name, and a change
+        self.assertEqual((stepped["ok"], stepped["pipeline"], stepped["deal"]["next_step"]), (True, "My practice", "Send the SOW"))
         self.assertTrue(self.call("gtm_deal", action="get", deal="Visa retainer", pipeline="My practice")["ok"])
         nowhere = self.call("gtm_deal", action="get", deal="Nobody At All")
-        self.assertNotIn("elsewhere", nowhere)
+        self.assertEqual((nowhere["ok"], nowhere["pipeline"]), (False, self.desk.pipelines()[0]["name"]))
+        self.assertIn("no record matches", nowhere["error"])
+
+    def test_a_name_that_is_in_two_pipelines_never_lands_on_one_by_chance(self):
+        self.second()
+        first = self.desk.pipelines()[0]["name"]
+        self.assertTrue(self.call("gtm_deal", action="add", name="Ravenglass Rail", company="Ravenglass Rail")["ok"])
+        self.assertTrue(self.call("gtm_deal", action="add", name="Ravenglass Rail", company="Ravenglass Rail", pipeline="My practice")["ok"])
+        for args in ({"action": "update", "deal": "Ravenglass Rail", "next_step": "Call the buyer"}, {"action": "move", "deal": "Ravenglass", "stage": "next"},
+                     {"action": "get", "deal": "Ravenglass Rail"}):
+            clash = self.call("gtm_deal", **args)
+            self.assertFalse(clash["ok"], args)
+            self.assertIn("more than one pipeline", clash["error"])
+            self.assertEqual(sorted(match["pipeline"] for match in clash["matches"]), sorted([first, "My practice"]))
+        stages = {}
+        for name in (first, "My practice"):                                        # nothing was changed in either
+            got = self.call("gtm_deal", action="get", deal="Ravenglass Rail", pipeline=name)["deal"]
+            self.assertNotIn("next_step", got)
+            stages[name] = got["stage"]
+        self.assertEqual(stages[first], self.desk.playbook().stage_ids()[0])
+        told = self.call("gtm_deal", action="update", deal="Ravenglass Rail", next_step="Call the buyer", pipeline="My practice")      # told which, it does as told
+        self.assertEqual((told["ok"], told["pipeline"]), (True, "My practice"))
+        # Once one of them is closed, the name means the one still open: a lead that became a deal does not compete with it.
+        closed = self.call("gtm_deal", action="close", deal="Ravenglass Rail", outcome="won", pipeline="My practice")
+        self.assertTrue(closed["ok"], closed)
+        aimed = self.call("gtm_deal", action="update", deal="Ravenglass Rail", next_step="Send the contract")
+        self.assertEqual((aimed["ok"], aimed["pipeline"], aimed["deal"]["next_step"]), (True, first, "Send the contract"))
+        self.assertEqual(self.call("gtm_deal", action="get", deal="Ravenglass Rail", pipeline="My practice")["deal"]["next_step"], "Call the buyer")
+        # To reopen one, both are candidates again: it is asked.
+        self.assertFalse(self.call("gtm_deal", action="reopen", deal="Ravenglass Rail")["ok"])
+        # Adding is never aimed: a new record goes where it is told, or to the first.
+        self.assertEqual(self.call("gtm_deal", action="add", name="Ravenglass Rail Freight", company="Ravenglass Rail Freight")["pipeline"], first)
+
+    def test_a_move_can_set_the_next_step_in_the_same_call(self):
+        self.assertTrue(self.call("gtm_deal", action="add", name="Marlpit Foods", company="Marlpit Foods")["ok"])
+        before = self.call("gtm_deal", action="get", deal="Marlpit Foods")["deal"]["stage"]
+        moved = self.call("gtm_deal", action="move", deal="Marlpit", stage="next", next_step="Send samples", next_due="friday")
+        self.assertTrue(moved["ok"], moved)
+        self.assertNotEqual(moved["deal"]["stage"], before)
+        self.assertEqual(moved["deal"]["next_step"], "Send samples")
+        self.assertRegex(moved["deal"]["next_due"], r"^\d{4}-\d\d-\d\d$")
+        # One thing was asked for, so one undo takes both back.
+        back = self.call("gtm_deal", action="undo", deal="Marlpit Foods")
+        self.assertTrue(back["ok"], back)
+        again = self.call("gtm_deal", action="get", deal="Marlpit Foods")["deal"]
+        self.assertEqual((again["stage"], again.get("next_step", "")), (before, ""))
+        # A date that cannot be read stops the move too: nothing is half done.
+        bad = self.call("gtm_deal", action="move", deal="Marlpit Foods", stage="next", next_step="Call", next_due="the day after never")
+        self.assertFalse(bad["ok"])
+        self.assertEqual(self.call("gtm_deal", action="get", deal="Marlpit Foods")["deal"]["stage"], before)
+        # Closing takes one as well: won, and what comes first after the win.
+        won = self.call("gtm_deal", action="close", deal="Marlpit Foods", outcome="won", next_step="Kick-off call", next_due="+3d")
+        self.assertEqual((won["ok"], won["deal"]["next_step"]), (True, "Kick-off call"))
+
+    def test_a_note_filed_in_one_pipeline_is_not_waiting_in_another(self):
+        notes = Path(self.tmp.name) / "notes"
+        notes.mkdir()
+        (notes / "2026-11-10 ana.md").write_text("# Call with Ana\n\nAna at Wexcombe Freight wants pricing by Thursday.\n")
+        self.ctx.settings["notes_dir"] = str(notes)
+        self.second()
+        first = self.desk.pipelines()[0]["name"]
+        self.assertTrue(self.call("gtm_deal", action="add", name="Wexcombe Freight", company="Wexcombe Freight", pipeline="My practice")["ok"])
+        waiting = lambda **args: [note["id"] for note in self.call("gtm_notes", action="inbox", days=3650, **args)["notes"]]        # noqa: E731
+        note = waiting()[0]
+        self.assertEqual(waiting(pipeline="My practice"), [note])
+        filed = self.call("gtm_notes", action="file", note=note, deal="Wexcombe Freight", summary="Ana wants pricing by Thursday.", next_step="Send pricing")
+        self.assertEqual((filed["ok"], filed["pipeline"]), (True, "My practice"))          # the record is only there: it went there
+        self.assertEqual(waiting(pipeline="My practice"), [])
+        self.assertEqual(waiting(), [])                                                # nor is it waiting where it was never filed
+        handled = self.call("gtm_notes", action="inbox", days=3650, include_filed=True, pipeline=first)["handled"]
+        self.assertEqual([(row["id"], row["filed_on"]) for row in handled], [(note, "Wexcombe Freight (My practice)")])
+        self.assertEqual(self.call("gtm_notes", action="known", notes=[note, "plaud:abc"]), {"ok": True, "new": ["plaud:abc"], "already_handled": [note], "pipeline": first})
+        # Put back from either pipeline, it waits again in both.
+        self.assertTrue(self.call("gtm_notes", action="reopen", note=note, pipeline=first)["ok"])
+        self.assertEqual((waiting(), waiting(pipeline="My practice")), ([note], [note]))
+        # Skipped in one: gone from the other.
+        self.assertTrue(self.call("gtm_notes", action="skip", note=note)["ok"])
+        self.assertEqual(waiting(pipeline="My practice"), [])
+
+    def test_a_person_deletes_a_record_puts_it_back_or_deletes_it_for_good(self):
+        made = self.call("gtm_deal", action="add", name="Thornbury Glass", company="Thornbury Glass", note="Met at the fair.")
+        deal = made["deal"]["id"]
+        gone = self.desk.remove(deal, actor="dashboard")
+        self.assertEqual((gone["ok"], gone["name"]), (True, "Thornbury Glass"))
+        self.assertFalse(self.call("gtm_deal", action="get", deal="Thornbury Glass")["ok"])            # off every list
+        self.assertEqual([d for d in self.desk.store.list(status="all") if d["id"] == deal], [])
+        self.assertFalse(self.desk.remove(deal)["ok"])                                                # not twice
+        self.assertEqual([(row["id"], row["name"]) for row in self.desk.removed()], [(deal, "Thornbury Glass")])
+        self.assertEqual(self.desk.store.stats()["archived"] if hasattr(self.desk.store, "stats") else 1, 1)
+        back = self.call("gtm_deal", action="restore", deal="Thornbury Glass")                        # the agent can put it back
+        self.assertTrue(back["ok"], back)
+        log = json.dumps(self.call("gtm_deal", action="get", deal=deal))
+        for piece in ("Met at the fair.", "Taken off the desk", "Put back on the desk"):                # nothing on it was lost
+            self.assertIn(piece, log)
+        self.assertEqual(self.desk.removed(), [])
+        # Its removal is not something "undo" takes back or trips over: the last real change still is.
+        self.call("gtm_deal", action="update", deal=deal, next_step="Send samples")
+        self.desk.remove(deal)
+        self.desk.restore(deal)
+        undone = self.call("gtm_deal", action="undo", deal=deal)
+        self.assertTrue(undone["ok"], undone)
+        self.assertNotIn("next_step", self.call("gtm_deal", action="get", deal=deal)["deal"])
+        # For good: only a record already off the desk, and then it is nowhere.
+        self.assertFalse(self.desk.destroy(deal)["ok"])
+        self.desk.remove(deal)
+        self.assertTrue(self.desk.destroy(deal)["ok"])
+        self.assertEqual(self.desk.removed(), [])
+        self.assertFalse(self.call("gtm_deal", action="restore", deal="Thornbury Glass")["ok"])
+        # The agent has no way to delete one, and is told so.
+        from stoa import schemas as described
+        self.assertNotIn("remove", described.GTM_DEAL["parameters"]["properties"]["action"]["enum"])
+        self.assertIn("you cannot delete one yourself", described.GTM_DEAL["description"])
+        page = (ROOT / "desktop" / "plugin.js").read_text()
+        self.assertEqual(page.count("h(RemoveRecord, { deal, after: "), 2)                             # on the record's card and on its full page
+        self.assertIn("h(TakenOff),", page)
+
+    def test_the_agent_is_told_the_everyday_way_within_its_limit(self):
+        section, limit = self.ctx.sections["stoa.desk"]
+        text = section({"platform": "cli"})
+        self.assertIn("name it in `deal` and change it: no get first, and the answer is the record as it stands", text)
+        self.assertLessEqual(len(text), limit)
+        self.second()
+        text = section({"platform": "cli"})
+        self.assertIn("found in whichever has it; one in two comes back with both: ask, never pick", text)
+        self.assertLessEqual(len(text), limit)
+        from stoa import schemas as described
+        for piece in ("there is no need to get it first", "pass next_step and next_due in the same call", "comes back with the candidates: ask which"):
+            self.assertIn(piece, described.GTM_DEAL["description"])
+
+    def test_the_chat_today_card_has_buttons_for_every_list_it_shows(self):
+        # A list with no buttons threw, and the whole card drew nothing (a won record with no next step did it).
+        page = (ROOT / "desktop" / "plugin.js").read_text()
+        lists = re.search(r"const CHAT_DAY = \[([^\]]+)\]", page).group(1).replace("'", "").replace(" ", "").split(",")
+        card = page[page.index("function TodayInChat("):]
+        card = card[:card.index("const lists = CHAT_DAY.map(")]
+        moves = card[card.index("const moves = {"):]
+        for key in lists:
+            self.assertTrue(re.search(r"\b%s: " % key, moves) or "moves.%s = " % key in moves, "the chat Today card has no buttons for the list '%s'" % key)
+        self.assertIn("(moves[list.key] || moves.new)(deal, item)", page)             # and a list added later cannot take the card down
 
     def test_the_day_is_answered_for_every_pipeline_at_once(self):
         self.second()

@@ -209,8 +209,16 @@ It is per profile, it survives plugin updates, and you can open it with any SQLi
 - **Money in whole cents.** Amounts are stored as integers and added up as integers, so a
   pipeline total is exact. (The old decimal column is still written beside it, so an older
   version of the plugin can read the same file.)
-- **Nothing a person does destroys a record.** Taking back an add takes the record off the
-  desk and keeps it; *"bring Ada back"* (`gtm_deal(action="restore")`) returns it with its log.
+- **Nothing destroys a record by accident.** Taking back an add, or pressing **Delete** on a
+  record's page, takes the record off the desk and keeps it, with everything on it; *"bring Ada
+  back"* (`gtm_deal(action="restore")`), **Put back** on the Activity tab, or **Your data** in
+  Setup returns it with its log. Only **Delete for good**, in Your data, destroys one, and only
+  a record already taken off the desk. The agent cannot delete a record at all.
+- **A record is found wherever it is.** On a desk with several pipelines, a record named without
+  its pipeline is looked up in all of them: the call goes to the one that has it, to the one
+  still open when a lead and the deal it became share a name, and nowhere when two are open (the
+  answer lists both, to be asked about). A note filed or skipped in one pipeline is done with on
+  the whole desk, so it is not filed twice.
 
 Talk to it in plain language. *"Add Dana from Kestrel to the Northwind search." "I spoke to
 Marcus, he wants 210 base, follow up Thursday." "We lost Lumen on price."* The agent writes each
