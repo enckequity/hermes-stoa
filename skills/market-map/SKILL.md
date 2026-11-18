@@ -55,8 +55,12 @@ Aim for 5 to 10 companies per segment on a first pass. Twenty checked ones beat 
 - `signal_date`: the day that happened, as `YYYY-MM-DD` (`YYYY-MM` if you only know the month). The
   page puts a fresh reason to call above a stale one, so a date matters. Leave it out if the source
   does not give one. Never guess.
-- `uses`: what it uses today for the job you do. A vendor's name, "Spreadsheets", "In-house
-  tool". This is how the map shows who you are up against.
+- `uses`: the tool or vendor it uses today for the job you do, by name alone and in a few words:
+  "Cvent", "Spreadsheets", "In-house tool". The map groups companies by it to show who you are up
+  against, and prints it on the page a client is sent, so it is never a note, a bracket or a
+  guess. If no source confirms it, leave it out and tell the person what you found in your reply.
+  Do not put it in `why` or anywhere else on the map: every line about a company is printed. The
+  desk does not save a `uses` that reads like a note. Send "unknown" to clear one saved earlier.
 - `also`: a second segment it could just as well sit in. These are the bridges between segments.
 - `people`: likely buyers you came across, each with name and title.
 - `source`, `size` ("220 people") and `location` ("City, State"). Leave blank what you could not find.

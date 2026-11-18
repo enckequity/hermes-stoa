@@ -4594,6 +4594,42 @@ class MapOnThePageTests(unittest.TestCase):
         whole = self.desk.markets.add({"market": mid, "companies": [{"company": "Full Freight", "why": "Checked again."}]})
         self.assertNotIn("still_missing", whole)
 
+    def test_what_a_company_uses_today_is_a_name_and_never_a_note(self):
+        """`uses` groups the map and is printed on the page a client is sent. A note sent as `uses` is not saved (the
+        company is, and the agent is told why); a plain name is; and 'unknown' clears one saved earlier."""
+        from stoa import market as m
+        for text, verdict in (("Cvent", "keep"), ("Spreadsheets", "keep"), ("In-house tool", "keep"), ("Cvent / Swoogo", "keep"), ("", "none"), (None, "none"),
+                              ("Unknown", "clear"), ("not known yet", "clear"), ("N/A", "clear"),
+                              ("Converve (event site; may be only the appointment/matchmaking tool)", "refuse"), ("Online registration (platform not identified)", "refuse"),
+                              ("Probably Cvent", "refuse"), ("Cvent?", "refuse"), ("Novi AMS runs its site, event registration tool not confirmed", "refuse"),
+                              ("A registration system the association built for itself years ago", "refuse")):
+            self.assertEqual(m.uses_name(text)[1], verdict, text)
+        mid = self.market["id"]
+        uses = lambda company: next(r for r in self.desk.markets.targets(mid) if r["company"] == company)["detail"].get("uses", "")      # noqa: E731
+        out = self.desk.markets.add({"market": mid, "companies": [
+            {"company": "Named Events", "segment": "Digital-first", "uses": "Cvent"},
+            {"company": "Noted Events", "segment": "Digital-first", "why": "Runs two trade shows a year.", "uses": "MemberClicks (link on the trade show page; not confirmed)"}]})
+        self.assertEqual(sorted(out["added"]), ["Named Events", "Noted Events"])                    # the company is saved either way
+        self.assertEqual((uses("Named Events"), uses("Noted Events")), ("Cvent", ""))
+        why = next(r for r in self.desk.markets.targets(mid) if r["company"] == "Noted Events")["why"]
+        self.assertEqual(why, "Runs two trade shows a year.")                                       # the note went nowhere on the map
+        self.assertIn("Noted Events", out["uses_not_saved"])
+        self.assertNotIn("Named Events", out["uses_not_saved"])
+        for said in ("alone and in a few words", "prints it on the page a client is sent", "'unknown' to clear", "tell the person what you found in your reply", "Do not save it anywhere on the map"):
+            self.assertIn(said, out["uses_not_saved"])
+        self.assertIn("1 without what it uses today", out["still_missing"])
+        # A note does not replace a name already there; a name does; 'unknown' clears it.
+        again = self.desk.markets.add({"market": mid, "companies": [{"company": "Named Events", "uses": "Cvent (may have moved to Swoogo)"}]})
+        self.assertIn("Named Events", again["uses_not_saved"])
+        self.assertEqual(uses("Named Events"), "Cvent")
+        self.assertNotIn("uses_not_saved", self.desk.markets.add({"market": mid, "companies": [{"company": "Named Events", "uses": "Swoogo"}]}))
+        self.assertEqual(uses("Named Events"), "Swoogo")
+        self.assertNotIn("uses_not_saved", self.desk.markets.add({"market": mid, "companies": [{"company": "Named Events", "uses": "unknown"}]}))
+        self.assertEqual(uses("Named Events"), "")
+        holds = [h["name"] for h in self.desk.markets.summary(mid)["holds"]]
+        self.assertFalse([name for name in holds if "(" in name or "not confirmed" in name], holds)
+        self.assertIn("No notes, brackets or guesses", json.dumps(schemas.GTM_MARKET if hasattr(schemas, "GTM_MARKET") else [getattr(schemas, n) for n in dir(schemas) if n.isupper()], default=str))
+
     def test_paid_lookups_and_searches_are_counted_per_map_and_stop_at_its_limit(self):
         calls = []
 

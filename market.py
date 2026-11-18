@@ -47,6 +47,32 @@ def dots(fit: int) -> str:
     return "●" * fit + "○" * (5 - fit)
 
 
+# `uses` is the name of what a company uses today, and nothing else. The map groups companies by it ("who holds this
+# market"), slices its "Held by" view by it, and prints it on the page a client is sent. A note saved there ("Cvent
+# (not confirmed)", "Online registration, platform not identified") groups with nothing and is printed as it stands.
+USES_MOST, USES_WORDS = 40, 5
+_NOT_KNOWN = {"unknown", "not known", "not known yet", "none", "n/a", "na", "tbd", "-", "—", "?", "not sure", "unclear", "unconfirmed", "not identified",
+              "not confirmed", "not found", "nothing", "no tool"}
+_UNSURE = re.compile(r"\b(not (?:yet )?(?:confirmed|identified|known|clear|sure|verified|disclosed|stated|found|named)|unconfirmed|unidentified|unknown|unclear|uncertain|unverified"
+                     r"|may ?be|might be|possibly|probably|presumably|likely|appears?|seems?|tbd)\b|\?", re.I)
+USES_HELP = ("`uses` is the name of the tool or vendor a company uses today, alone and in a few words ('Cvent', 'Spreadsheets', 'In-house tool'): the map groups "
+             "companies by it and prints it on the page a client is sent. Send the name alone where a source confirms it. Where none does, leave `uses` out "
+             "(send 'unknown' to clear one saved earlier) and tell the person what you found in your reply. Do not save it anywhere on the map: `why` is the "
+             "reason the company fits, and it is printed too.")
+
+
+def uses_name(value: Any) -> tuple:
+    """What to do with a `uses` an agent sent: ``(name, 'keep' | 'clear' | 'refuse' | 'none')``."""
+    text = _clean(value, 200)
+    if not text:
+        return "", "none"
+    if text.lower().strip(" .") in _NOT_KNOWN:
+        return "", "clear"
+    if len(text) > USES_MOST or len(text.split()) > USES_WORDS or any(mark in text for mark in "(;:") or _UNSURE.search(text):
+        return "", "refuse"
+    return text, "keep"
+
+
 def _clean(value: Any, limit: int = 400) -> str:
     """Tidy text from a tool argument. Anything that is not text or a number (``false``, a list) counts as blank."""
     if isinstance(value, bool) or not isinstance(value, (str, int, float)) or not value:
@@ -323,7 +349,7 @@ class Markets:
                  "uses": has(lambda r: r["detail"].get("uses"))}
         gaps = [(total - on_it["checked"], "checked against the requirements", "check it against the map's requirements, with the evidence"),
                 (total - on_it["sourced"], "a source link", "give the page the evidence came from"),
-                (total - on_it["uses"], "what it uses today", "say what it uses today for the job we do"),
+                (total - on_it["uses"], "what it uses today", "name the tool it uses today for the job we do, where a source says"),
                 (total - on_it["sized"], "its headcount", "give its headcount"),
                 (on_it["signals"] - on_it["dated"], "the date of its signal", "give the date its signal happened"),
                 (total - on_it["buyers"], "a buyer named", "")]
@@ -399,6 +425,7 @@ class Markets:
         known = {c["key"]: c["key"] for c in current}
         known.update({_key(c["label"]): c["key"] for c in current})
         added, updated, problems = [], [], []
+        unnamed = []       # companies whose `uses` was a note, not a name: saved without it
         stamp = st.now()
         stop = self._over_budget(market)
         cap = self._limits(market)["companies"]
@@ -423,9 +450,15 @@ class Markets:
                 if row is None and room is not None:
                     room -= 1
                 detail = _unpack_target(dict(row))["detail"] if row else {}
-                for key in ("uses", "also"):
-                    if _clean(raw.get(key), 80):
-                        detail[key] = _clean(raw.get(key), 80)
+                name, verdict = uses_name(raw.get("uses"))
+                if verdict == "keep":
+                    detail["uses"] = name
+                elif verdict == "clear":
+                    detail.pop("uses", None)
+                elif verdict == "refuse":
+                    unnamed.append(company)             # everything else about the company is saved; what was there stays
+                if _clean(raw.get("also"), 80):
+                    detail["also"] = _clean(raw.get("also"), 80)
                 if values["signal"] and row and values["signal"] != row["signal"]:
                     detail.pop("signal_date", None)                # a new signal does not keep the old one's date
                 if signal_day(raw.get("signal_date")):
@@ -471,6 +504,8 @@ class Markets:
                "total": len(self.targets(market["id"]))}
         if problems:
             out["problems"] = problems[:20]
+        if unnamed:
+            out["uses_not_saved"] = "Saved, but without `uses`, for: %s. %s" % (", ".join(unnamed[:20]), USES_HELP)
         # What the map still does not know about the companies just recorded. Said once, so it can be filled in while the
         # sources are to hand; never a reason to guess.
         touched = set(added) | set(updated)

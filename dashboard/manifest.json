@@ -3,7 +3,7 @@
   "label": "Stoa",
   "description": "Setup and status for the Stoa desk: what is set up, how to set up the rest, and what the desk holds.",
   "icon": "Settings",
-  "version": "0.27.0",
+  "version": "0.27.1",
   "tab": {
     "path": "/stoa",
     "position": "after:sessions"
