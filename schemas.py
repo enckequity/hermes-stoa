@@ -181,7 +181,15 @@ GTM_MARKET = {
         "buyers at one company through People Data Labs; each person returned costs a credit), track (turn companies "
         "into pipeline records), dismiss, post (put the map in Slack with an Add to pipeline button on each company), "
         "and export (write the map as one self-contained web page). Use it when the user asks who to sell to, wants "
-        "leads in an industry, or wants to see or share a market."
+        "leads in an industry, or wants to see or share a market. "
+        "ON A RECRUITING PIPELINE a map is a CANDIDATE MAP for one role, and every row is one PERSON, not a company (define and show "
+        "answer `rows`: 'people'). The fields keep their names, so write them this way: `company` = the candidate's full name; "
+        "`size` = their current title; `uses` = the company they work at now, by its name alone; `location` = where they are based; "
+        "`segment` = their pool; `fit` and `why` = how well that person fits the role and the evidence; `requirements` = the role's "
+        "needs checked for that person; `signal` and `signal_date` = why they would be open to a move now; `source` = the page you "
+        "found them on. No `people`, `domain` or headcount. The brief is the role. Only people a source shows: never invent a person, "
+        "a title or an employer. Tracking one makes that person a candidate in the search the map feeds (`search`). A map whose `rows` "
+        "is 'companies' is the older kind, of companies with people named under them: add to it in its own way."
     ),
     "parameters": {
         "type": "object",
@@ -189,7 +197,10 @@ GTM_MARKET = {
             "action": {"type": "string", "enum": ["define", "list", "add", "show", "reading", "search", "people", "track",
                                                   "dismiss", "post", "export"]},
             "market": {"type": "string", "description": "The market's name or id. May be omitted when there is only one."},
-            "name": {"type": "string", "description": "define: the market's name, e.g. 'Commercial solar installers, US Southwest'."},
+            "name": {"type": "string", "description": "define: the market's name, e.g. 'Commercial solar installers, US Southwest'. A candidate map is named after the role."},
+            "search": {"type": "string", "description": "define, on a recruiting pipeline: the search (by name) this candidate map is for, when the person named one. Its candidates join that search when tracked. Left out, they join a search named after the map."},
+            "rows": {"type": "string", "enum": ["people", "companies"],
+                     "description": "define, on a recruiting pipeline, and only when the person asks for it: 'companies' for a map of the companies where such people work (with people named under each), not of candidates. A new map holds people unless told."},
             "brief": {"type": "string", "description": "define: two or three sentences on who the team sells to and what makes a company a fit."},
             "segments": {"type": "array", "description": "define: 3 to 6 segments, each {name, description}.",
                          "items": {"type": "object", "properties": {"name": {"type": "string"}, "description": {"type": "string"}}}},
@@ -407,7 +418,8 @@ GTM_GROUP = {
             "client": {"type": "string", "description": "set: the company this group is for (the one that pays)."},
             "status": {"type": "string", "enum": ["open", "on hold", "done", "closed"],
                        "description": "set: where it stands. done: filled or delivered. closed: stopped without that."},
-            "value": {"type": "number", "description": "set: what one record in it is worth (a search's fee). New records in the group take it unless they bring their own."},
+            "value": {"type": "number", "description": "set: what one record in it is worth (a search's fee). New records in the group take it unless they bring their own. Not on a contract recruiting pipeline, which keeps no fees."},
+            "openings": {"type": "integer", "description": "set, on a contingent recruiting pipeline: how many seats this search is hiring for (1 unless said). What is in play counts its fee once for each seat still to fill."},
             "note": {"type": "string", "description": "set: the notes kept on it (replaces what is there)."},
             "fields": {"type": "object", "description": "set: the playbook's facts for a group, by key or label (for a search: fee type, fee %, target base…). An empty value clears one."},
             "new": {"type": "boolean", "description": "set: open a group with exactly this name even though the name is part of another's."},

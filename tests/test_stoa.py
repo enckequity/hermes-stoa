@@ -4638,6 +4638,39 @@ class DashboardApiTests(unittest.TestCase):
             with self.assertRaises(HTTPException):
                 call()
 
+    def test_the_page_is_told_how_a_recruiting_pipeline_is_paid_and_what_a_map_holds(self):
+        from fastapi import HTTPException
+        state = self.api.state()
+        self.assertEqual(state["billing"]["type"], "contingent")
+        self.assertEqual(state["totals"]["open_value"], 130000.0)                          # each search once: 45k + 55k + 30k
+        market = state["markets"][0]
+        self.assertEqual((market["rows"], market["numbers"]["rows"], market["search"]), ("companies", "companies", ""))    # the fixture's map is of companies
+        # A person turns it into a candidate map, points it at a search, and turns it back.
+        self.assertEqual(self.api.market_rows(market["id"], {"rows": "people"})["rows"], "people")
+        again = self.api.state()["markets"][0]
+        self.assertEqual((again["rows"], again["search"]), ("people", market["name"]))
+        self.assertEqual(self.api.market_search(market["id"], {"search": "staff backend · northwind"})["search"], "Staff Backend · Northwind")
+        with self.assertRaises(HTTPException):
+            self.api.market_search(market["id"], {"search": "Nothing called this"})
+        with self.assertRaises(HTTPException):
+            self.api.market_rows(market["id"], {"rows": "goats"})
+        self.api.market_rows(market["id"], {"rows": "companies"})
+        # Openings on a search, and what is then in play.
+        self.assertEqual(self.api.group_openings({"name": "Staff Backend · Northwind", "openings": 2})["openings"], 2)
+        self.assertEqual(self.api.state()["totals"]["open_value"], 172000.0)                # its two largest fees, 45k + 42k, with the others' 55k and 30k
+        with self.assertRaises(HTTPException):
+            self.api.group_openings({"name": "Staff Backend · Northwind", "openings": 0})
+        # Contract: no fee anywhere on the pipeline's side is the page's doing; the terms and the month are here.
+        saved = self.api.pipeline_billing({"type": "contract", "client": "Northwind", "rate": 85, "hours_week": 20})
+        self.assertEqual((saved["type"], saved["client"], saved["rate"]), ("contract", "Northwind", 85))
+        state = self.api.state()
+        self.assertTrue(state["billing"]["month"]["amount"] > 0 and state["billing"]["type"] == "contract")
+        with self.assertRaises(HTTPException):
+            self.api.pipeline_billing({"type": "contract", "client": "", "rate": 85, "hours_week": 20})
+        across = self.api.production()
+        self.assertEqual((len(across["pipelines"]), across["pipelines"][0]["billing"], across["pipelines"][0]["this_month"]), (1, "contract", state["billing"]["month"]["amount"]))
+        self.assertEqual(self.api.pipeline_billing({"type": "contingent", "fee_pct": 20})["fee_pct"], 20)
+
     def test_add_and_market_actions(self):
         added = self.api.add_deal({"name": "Ada Park", "company": "Orbit", "stage": "contacted"})
         self.assertEqual(self.desk.store.get(added["deal"]["id"])["stage"], "contacted")

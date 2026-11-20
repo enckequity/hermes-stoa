@@ -218,6 +218,7 @@ def state() -> dict:
             "updated": (summary["market"].get("updated_at") or "")[:10],
             "requirements": summary["market"]["requirements"], "reading": summary["market"]["reading"],
             "implications": summary["market"]["implications"], "numbers": summary["numbers"],
+            "rows": summary.get("rows", ""), "search": summary.get("search", ""),      # on a recruiting pipeline: what the rows are, and the search a candidate map feeds
             "segments": [{"name": seg["segment"], "description": seg["description"], "count": seg["count"], "share": seg["share"],
                           "avg_fit": seg["avg_fit"], "companies": seg["companies"]} for seg in summary["segments"]],
             "rates": summary["requirements"], "holds": summary["holds"], "holds_of": summary["holds_of"],
@@ -272,9 +273,10 @@ def state() -> dict:
         "intakes": d.intake.waiting(),
         "activity": activity,
         "flow": d.flow(deals, playbook),
-        "totals": {"open": len(open_deals), "open_value": _mod("store").total(open_deals),
+        "billing": d.billing(),       # how a recruiting pipeline is paid for: {} on any other
+        "totals": {"open": len(open_deals), "open_value": d.sum(open_deals),
                    "won": len([x for x in deals if x["status"] == "won"]),
-                   "won_value": _mod("store").total(x for x in deals if x["status"] == "won"),
+                   "won_value": d.sum(x for x in deals if x["status"] == "won"),
                    "lost": len([x for x in deals if x["status"] == "lost"]),
                    "mapped": sum(m["counts"]["mapped"] for m in markets),
                    "tracked": sum(m["counts"]["tracked"] for m in markets),
@@ -988,6 +990,57 @@ def market_facts(market_id: str) -> dict:
     if not result.get("ok"):
         raise HTTPException(404, result.get("error") or "no such market map")
     return result
+
+
+@router.post("/market/{market_id}/rows")
+def market_rows(market_id: str, body: dict = Body(...)) -> dict:
+    """A person saying what the dots on a recruiting map are: candidates ('people') or companies. Nothing on the map changes."""
+    d = desk()
+    result = d.markets.set_rows(market_id, str((body or {}).get("rows") or ""))
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "could not do that")
+    d.announce()
+    return result
+
+
+@router.post("/market/{market_id}/search")
+def market_search(market_id: str, body: dict = Body(...)) -> dict:
+    """Which search a candidate map's candidates join; an empty name is the search named after the map."""
+    d = desk()
+    result = d.markets.set_search(market_id, (body or {}).get("search"))
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "could not do that")
+    d.announce()
+    return result
+
+
+@router.post("/pipeline/billing")
+def pipeline_billing(body: dict = Body(...)) -> dict:
+    """How the recruiting pipeline the page is showing is paid for: contingent (a fee for each placement) or contract
+    (one company, by the hour, billed each month: its rate and hours are saved as that client's billing terms)."""
+    d = desk()
+    result = d.set_billing(body or {}, actor="dashboard")
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "could not do that")
+    d.announce()
+    return result
+
+
+@router.post("/group/openings")
+def group_openings(body: dict = Body(...)) -> dict:
+    """How many seats a search is hiring for."""
+    d = desk()
+    result = d.set_openings((body or {}).get("name"), (body or {}).get("openings"), actor="dashboard")
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "could not do that")
+    d.announce()
+    return result
+
+
+@router.get("/production")
+def production() -> dict:
+    """The money side of every pipeline at once: a contract's month of hours beside the others' fees."""
+    return desk().production()
 
 
 @router.post("/market/{market_id}/limits")

@@ -14,6 +14,38 @@ holds the market, where segments meet, and who to call first.
 
 The loop: **define → research → add → read → first calls → track → outreach.**
 
+## On a recruiting pipeline: a candidate map
+
+There a map is for one role, and **every row is one candidate, a person**. `define` and `show` say so:
+`rows` is `people`. The fields keep their names, so write them this way:
+
+| Field | On a candidate map |
+| --- | --- |
+| `company` | the candidate's full name, one row each |
+| `size` | their current title |
+| `uses` | the company they work at now, by its name alone |
+| `location` | where they are based |
+| `segment` | their pool: a group that would get a different pitch |
+| `fit`, `why` | how well that person fits the role, and the evidence |
+| `requirements` | what the role needs, checked for that person |
+| `signal`, `signal_date` | why they would be open to a move now (a layoff where they work, a leader leaving, a long stretch in one seat) |
+| `source` | the page you found them on |
+
+Leave `people`, `domain` and headcount out. The brief is the role: its level, where it is based, the pay
+if it is known, what someone must have done to fit. Name the map after the role. If the person named a
+search it is for, pass `search` to `define`: the map's candidates then join that search when they are
+tracked, with its client. Only people a source shows. Never invent a person, a title or an employer.
+If the person gives you names and says to use only those, add only those.
+
+Tracking a candidate makes that person a record in the search, with their employer and title and a
+first approach as what is next. Speak of candidates and of approaching them, not of buyers or selling.
+
+A map whose `rows` is `companies` is the older kind, of companies with people named under each. Leave
+it as it is and add to it in its own way; only the person changes which kind a map is.
+
+The rest of this guide is written for a map of companies. Its steps hold for candidates too, with a
+person where it says a company.
+
 ## 1. Define the market
 
 If the user has not said, ask in one message:

@@ -930,6 +930,13 @@ class Desk:
         limit = _int(args.get("limit") or 60, 60, 1, 500)
         out = {"ok": True, "view": view, "playbook": playbook.name, "count": len(deals),
                "open_value": self.sum(d for d in deals if d["status"] == "open")}
+        kind = self.billing_kind()
+        if kind == BILL_CONTRACT:
+            out["billing"] = {"type": kind, "note": "Contract work, paid by the hour and billed each month: no %s here carries a fee. Speak of %s and where they stand, "
+                                                    "not of money in play." % (playbook.terms["deal"], playbook.terms["deals"])}
+        elif kind:
+            out["billing"] = {"type": kind, "note": "Contingent: a fee for each placement. What is in play counts each %s's fee once for each seat still to fill, "
+                                                    "not once for every %s in it." % (playbook.terms["group"], playbook.terms["deal"])}
         if view == "board":
             out["board"] = cards.board_text(playbook, deals, total=self.sum)
             out["by_stage"] = self._by_stage(playbook, deals)
@@ -3287,8 +3294,13 @@ class Desk:
                                        note=args.get("note"), fields=fields)
             except ValueError as exc:
                 return {"ok": False, "error": str(exc)}
+            seats = None
+            if args.get(OPENINGS) not in (None, ""):
+                seats = self.set_openings(name, args.get(OPENINGS), actor=actor)
             out = self.group_view(name)
             out.update(action="set", created=created)
+            if seats is not None:
+                out[OPENINGS if seats.get("ok") else "openings_not_set"] = seats.get(OPENINGS) if seats.get("ok") else seats.get("error")
             if ignored:
                 out["ignored"] = ignored
                 out["note"] = "Not kept: %s. On a %s this playbook keeps: %s." % (
