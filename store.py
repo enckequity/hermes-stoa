@@ -248,7 +248,7 @@ CONTACT = ("name", "email", "title", "linkedin", "phone", "note")       # what a
 TRACKED = ("name", "company", "grp", "email", "linkedin", "value_cents", "owner", "next_step", "next_due", "source",
            "stage", "status", "lost_reason", "snoozed_until", "stage_at", "close_on", "delivery", "notes", "phone")
 # Put back by an undo only if nothing has touched them since; a difference there never stops the undo.
-SOFT = ("stage_at", "snoozed_until", "lost_reason", "fields._prev_stage", "delivery")
+SOFT = ("stage_at", "snoozed_until", "lost_reason", "fields._prev_stage", "fields._no_fee", "delivery")
 INVOICE = ("number", "amount_cents", "paid_cents", "status", "issued_on", "due_on", "paid_on", "note", "period")
 INVOICE_STATUS = ("draft", "sent", "paid", "void")
 UNDOABLE = "('insert', 'update', 'archive')"
@@ -561,6 +561,7 @@ class Store:
     # file: what a record carried from before stays there, unseen, until it is cleared in so many words.
     no_fees = False
     NO_FEE = "_no_fee"              # the mark, kept with a record's own facts as ``_prev_stage`` is
+    OWN = ("_no_fee", "_prev_stage")        # what the ledger keeps there for itself, and only it writes
 
     def keeps_fee(self, deal: dict) -> bool:
         """Whether this record's amount is kept and shown."""
@@ -741,7 +742,7 @@ class Store:
         name = (name or "").strip()
         if not name:
             raise ValueError("a name is required")
-        fields = dict(values.pop("fields", None) or {})
+        fields = {key: value for key, value in (values.pop("fields", None) or {}).items() if key not in self.OWN}        # the ledger's own marks are not a caller's to write
         base = slugify(name + ("-" + values["grp"] if values.get("grp") else ""))
         stamp, batch = now(), self._op()
         with self._conn() as conn:
@@ -770,6 +771,8 @@ class Store:
         deal = self.get(deal_id)
         if deal is None:
             raise KeyError(deal_id)
+        if fields:                          # the ledger's own marks on a record are not a caller's to set or clear
+            fields = {key: value for key, value in fields.items() if key not in self.OWN}
         clearing = bool(values.pop("_clearing", False))
         if clearing:                        # the amount in the file is what is taken away, and what the ledger says was there
             with self._conn() as conn:

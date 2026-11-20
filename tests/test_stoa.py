@@ -1388,16 +1388,25 @@ class RecruitingBillingTests(unittest.TestCase):
         # A list of past placements brought onto contract work: each keeps the fee it earned; an open row gets none.
         listed = Path(self.tmp.name) / "past.csv"
         listed.write_text("name,group,stage,value\nPast Placement,Old Search,%s,25000\nOpen Row,Old Search,%s,25000\n" % (won["label"], first), encoding="utf-8")
-        self.assertEqual(self.desk.import_csv(listed)["added"], 2)
+        self.assertEqual(self.desk.import_csv(listed, history=True)["added"], 2)          # as `hermes stoa import` does, typed by a person
         rows = {d["name"]: (d["status"], d["value"]) for d in self.desk.store.list(status="all")}
         self.assertEqual((rows["Past Placement"], rows["Open Row"]), (("won", 25000), ("open", 0)))
-        # The same through a list dropped on the page; an agent's proposal that someone was placed is about now, and brings none.
-        new_row = lambda name: {"kind": "new", "name": name, "stage": won["id"], "row": {"grp": "Old Search", "value": 25000}}      # noqa: E731
-        from_list = self.desk.intake._write(new_row("From A List"), self.desk.playbook(), "tester", "a list", history=True)
-        proposed = self.desk.intake._write(new_row("Proposed Today"), self.desk.playbook(), "agent", "a proposal")
-        self.assertEqual(((from_list["status"], from_list["value"]), (proposed["status"], proposed["value"], proposed["fields"].get("_no_fee"))),
-                         (("won", 25000), ("won", 0, "1")))
+        # The agent's own import, and a row approved from a list or a proposal, are about now: a placement brings no fee.
+        listed.write_text("name,group,stage,value\nImported By The Agent,Old Search,%s,40000\n" % won["label"], encoding="utf-8")
+        self.assertEqual(self.desk.import_csv(listed)["added"], 1)
+        new_row = {"kind": "new", "name": "Proposed Today", "stage": won["id"], "row": {"grp": "Old Search", "value": 25000}}
+        proposed = self.desk.intake._write(new_row, self.desk.playbook(), "agent", "a proposal")
+        by_agent = next(d for d in self.desk.store.list(status="all") if d["name"] == "Imported By The Agent")
+        self.assertEqual([(d["status"], d["value"], d["fields"].get("_no_fee")) for d in (by_agent, proposed)], [("won", 0, "1")] * 2)
         self.assertEqual(self.desk.billing()["fees_kept"], 0)
+        # The mark is the ledger's own: nobody sets or clears it by naming it, on a record or on a new one.
+        self.desk.deal({"action": "update", "deal": proposed["id"], "fields": {"_no_fee": ""}})
+        self.desk.store.update(proposed["id"], actor="agent", fields={"_no_fee": "", "_prev_stage": "offer"})
+        self.assertEqual(self.desk.store.get(proposed["id"])["fields"].get("_no_fee"), "1")
+        self.assertIn("fee_not_kept", self.desk.deal({"action": "update", "deal": proposed["id"], "value": 99999}))
+        self.desk.deal({"action": "update", "deal": invoiced["id"], "fields": {"_no_fee": "1"}})
+        self.assertEqual(value(invoiced), 30000)
+        self.assertNotIn("_no_fee", self.desk.store.add("Marked From Outside", first, actor="agent", fields={"_no_fee": "1", "title": "CFO"})["fields"])
         # Made contingent, a person may give that placement a fee after all: the mark goes with it.
         self.desk.set_billing({"type": "contingent"})
         given = self.desk.deal({"action": "update", "deal": proposed["id"], "value": 18000})["deal"]
@@ -1409,6 +1418,7 @@ class RecruitingBillingTests(unittest.TestCase):
         self.desk.set_billing({"type": "contract", "client": "Halden Group", "rate": 85, "hours_week": 20})
         out = self.desk.deal({"action": "update", "deal": "Dana Reyes", "value": 5})
         self.assertFalse(out["ok"])
+        self.assertNotIn("fee_not_kept", out)                                            # nothing was saved: it does not say something was
         self.assertEqual(len(out.get("matches") or []), 2)
 
     def test_contract_work_through_undo_proposals_and_many_readers(self):

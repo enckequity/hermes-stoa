@@ -817,11 +817,10 @@ class Intake:
                 continue
         return out
 
-    def _write(self, row: dict, playbook, actor: str, label: str, history: bool = False) -> Optional[dict]:
-        """Write one approved row. Everything it changes is one action, so it can be taken back as one. ``history``: the
-        row is from a list a person sent, which may hold past placements; an agent's proposal is about now."""
+    def _write(self, row: dict, playbook, actor: str, label: str) -> Optional[dict]:
+        """Write one approved row. Everything it changes is one action, so it can be taken back as one."""
         with self.store.operation():
-            return self._add(row, playbook, actor, label, history) if row["kind"] == "new" else self._update(row, playbook, actor, label)
+            return self._add(row, playbook, actor, label) if row["kind"] == "new" else self._update(row, playbook, actor, label)
 
     def _remember(self, intake: dict, row: dict) -> None:
         """A proposal was turned down: do not make it again. (A row left out of a list someone sent is just left out.)"""
@@ -871,7 +870,7 @@ class Intake:
                 self._remember(intake, row)
                 continue
             try:
-                deal = self._write(row, playbook, actor, label, history=(intake.get("origin") or "list") != "proposal")
+                deal = self._write(row, playbook, actor, label)
             except Exception as exc:        # one row that cannot be written is reported; the rest still land
                 problems.append("row %d (%s): %s" % (row["n"], row["name"], exc))
                 row["done"] = "left"
@@ -907,8 +906,7 @@ class Intake:
         try:
             if row is not None and verb == "approve":
                 try:
-                    deal = self._write(row, self.desk.playbook(), actor, ("intake: " + intake["source"])[:60],
-                                       history=(intake.get("origin") or "list") != "proposal")
+                    deal = self._write(row, self.desk.playbook(), actor, ("intake: " + intake["source"])[:60])
                 except Exception as exc:
                     deal, problems = None, ["row %d (%s): %s" % (row["n"], row["name"], exc)]
                 row["applied"], row["done"] = deal is not None, "applied" if deal is not None else "left"
@@ -930,7 +928,7 @@ class Intake:
         self.desk.announce()
         return out
 
-    def _add(self, row: dict, playbook, actor: str, label: str, history: bool = False) -> Optional[dict]:
+    def _add(self, row: dict, playbook, actor: str, label: str) -> Optional[dict]:
         values = row["row"]
         group = values.get("grp") or ""
         if self._group_is_company(playbook):      # an account or a client is a company: on a new record either fills the other
@@ -948,11 +946,10 @@ class Intake:
                               close_on=values.get("close_on") or "", notes=self._kept_notes(values),
                               source=values.get("source") or label, fields=values.get("fields") or None)
         if closing:
-            # A list's placed row is a past placement, which keeps the fee it earned even on contract work. An agent's
-            # proposal that someone was placed is about now: on contract work that placement brings none.
-            deal = self.desk._move(deal, stage, playbook, actor, values.get("lost_reason") or "", earned=history) or deal
-            if history and playbook.status_of(stage) == "won" and values.get("value") and self.store.no_fees:
-                self.store.update(deal["id"], actor=actor, value=values.get("value"))
+            # On contract work a row that places someone brings no fee, whether it is a new record or one already here,
+            # a list or a proposal: nothing tells a list of past placements from the agent's own rows. Past placements
+            # with their fees come in at the terminal (``hermes stoa import``), or while the pipeline is contingent.
+            deal = self.desk._move(deal, stage, playbook, actor, values.get("lost_reason") or "") or deal
         if values.get("person"):
             self.store.person_add(deal["id"], actor=actor, **values["person"])
         if _text(values.get("note")):

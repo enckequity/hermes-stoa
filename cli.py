@@ -175,7 +175,7 @@ def _run(desk, args, command) -> None:
         print("Wrote %d records to %s" % (result["rows"], result["path"]) if result.get("ok") else result.get("error"))
     elif command == "import":
         path, refused = desk.csv_path(args.path, trusted=True)        # typed by a person at a terminal: any folder, CSV only
-        result = refused or desk.import_csv(path, dry_run=args.dry_run)
+        result = refused or desk.import_csv(path, dry_run=args.dry_run, history=True)
         if result.get("ok"):
             print("%s %d records, skipped %d already on the desk."
                   % ("Would add" if args.dry_run else "Added", result["added"], result["skipped_existing"]))

@@ -1584,7 +1584,7 @@ class Desk:
                 args, dropped = {key: value for key, value in args.items() if key != "value"}, True      # contract work: no candidate carries a fee
         with self.store.operation():
             out = self._deal(args, actor)
-        if dropped and isinstance(out, dict):
+        if dropped and isinstance(out, dict) and out.get("ok"):
             out["fee_not_kept"] = ("This pipeline is contract work, paid by the hour and billed each month, so no fee is kept on a %s. "
                                    "Everything else was saved." % self.playbook().terms["deal"])
         return out
@@ -4082,7 +4082,7 @@ class Desk:
             out["truncated"] = len(deals) - limit
         return out
 
-    def import_csv(self, path: Path, dry_run: bool = False) -> dict:
+    def import_csv(self, path: Path, dry_run: bool = False, history: bool = False) -> dict:
         """``hermes stoa import``: a CSV typed in at a terminal, added straight away (no review). Headers are read the
         way a dropped list's are ("Client Name", "Contact email", "First name"), and what has no place is kept in notes."""
         if not path.is_file():
@@ -4118,8 +4118,11 @@ class Desk:
                                           source=row.get("source", "") or "import", notes=self.intake._kept_notes(row),
                                           fields=row.get("fields") or None)
                     if status != "open":
-                        self._move(deal, stage, playbook, "import", row.get("lost_reason", ""), earned=True)
-                    if status == "won" and row.get("value") and self.store.no_fees:
+                        # ``history``: typed in at a terminal by a person, a list of past records, whose placements keep
+                        # the fee they earned even on contract work. The agent's own import is about now, like any other
+                        # way it places someone: on contract work that placement brings no fee.
+                        self._move(deal, stage, playbook, "import", row.get("lost_reason", ""), earned=history)
+                    if history and status == "won" and row.get("value") and self.store.no_fees:
                         self.store.update(deal["id"], actor="import", value=row.get("value"))      # history: a fee that was earned
                     if row.get("note"):
                         self.store.log(deal["id"], "note", str(row["note"])[:4000], actor="import")
