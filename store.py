@@ -550,6 +550,23 @@ class Store:
     def _conn(self) -> "Store._Session":
         return Store._Session(self)
 
+    # A pipeline of contract work (a recruiter paid by the hour) keeps and shows no fee. The desk says so here, and the
+    # ledger itself then leaves amounts out: nothing read from it carries one (a record, a search), and nothing written to
+    # it sets one, whichever way it comes in (by hand, the agent, an import, a proposal). What was on a record before the
+    # pipeline became contract work stays in the file, untouched and unseen, and is back if it is made contingent again.
+    no_fees = False
+
+    def stamp(self) -> int:
+        """A number that grows with every change written here: what a figure kept for a moment is checked against."""
+        with self._conn() as conn:
+            return int(conn.execute("SELECT MAX(seq) FROM ledger").fetchone()[0] or 0)
+
+    def fees_kept(self) -> int:
+        """How many records and groups have an amount in the file, whatever ``no_fees`` says."""
+        with self._conn() as conn:
+            return int(conn.execute("SELECT (SELECT COUNT(*) FROM deals WHERE value_cents > 0 AND archived_at = '') "
+                                    "+ (SELECT COUNT(*) FROM grps WHERE value_cents > 0)").fetchone()[0])
+
     # -- actions: what one click or one tool call wrote, so it can be taken back together ---------
     @contextmanager
     def operation(self):
@@ -637,7 +654,8 @@ class Store:
 
     # -- deals ----------------------------------------------------------------------------------
     @staticmethod
-    def _deal(row) -> dict:
+    def _raw_deal(row) -> dict:
+        """A record as the file has it (what the ledger's own snapshots are made from)."""
         deal = dict(row)
         try:
             deal["fields"] = json.loads(deal.get("fields") or "{}")
@@ -645,6 +663,13 @@ class Store:
             deal["fields"] = {}
         deal["value_cents"] = int(deal.get("value_cents") or 0)
         deal["value"] = deal["value_cents"] / 100         # the amount, read from the cents
+        return deal
+
+    def _deal(self, row) -> dict:
+        """A record as it is handed out: without its amount where the pipeline keeps none."""
+        deal = self._raw_deal(row)
+        if self.no_fees:
+            deal["value_cents"], deal["value"] = 0, 0.0
         return deal
 
     def get(self, deal_id: str, archived: bool = False) -> Optional[dict]:
@@ -696,7 +721,7 @@ class Store:
                 suffix = "-%d" % n
                 deal_id = base[:ID_MAX - len(suffix)] + suffix
             row = {k: values.get(k, "") for k in EDITABLE if k not in ("name", "value")}
-            cents = to_cents(values.get("value"))
+            cents = 0 if self.no_fees else to_cents(values.get("value"))
             conn.execute(
                 "INSERT INTO deals (id, name, company, grp, email, linkedin, stage, value, value_cents, owner, next_step, next_due, "
                 "source, fields, created_at, updated_at, stage_at, close_on, notes, phone) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -714,6 +739,8 @@ class Store:
         deal = self.get(deal_id)
         if deal is None:
             raise KeyError(deal_id)
+        if self.no_fees:
+            values.pop("value", None)       # no fee is kept here; what the file has is left as it is
         sets, params, changed, before, after = [], [], [], {}, {}
         for key in EDITABLE:
             if key in values and values[key] is not None:
@@ -838,7 +865,7 @@ class Store:
             row = conn.execute("SELECT * FROM deals WHERE id = ?", (deal_id,)).fetchone()
             if row is None:
                 return False
-            self._entry(conn, self._op(), "deal", deal_id, deal_id, "delete", before=flat(self._deal(row)), actor=actor, summary="Removed")
+            self._entry(conn, self._op(), "deal", deal_id, deal_id, "delete", before=flat(self._raw_deal(row)), actor=actor, summary="Removed")
             conn.execute("DELETE FROM deals WHERE id = ?", (deal_id,))
             conn.execute("DELETE FROM activities WHERE deal_id = ?", (deal_id,))
             conn.execute("DELETE FROM deal_contacts WHERE deal_id = ?", (deal_id,))
@@ -982,7 +1009,7 @@ class Store:
         """The thing a ledger entry is about, as it is now, in the ledger's own terms."""
         if entry["entity"] == "deal":
             row = conn.execute("SELECT * FROM deals WHERE id = ? AND archived_at = ''", (entry["entity_id"],)).fetchone()
-            return flat(Store._deal(row)) if row else None
+            return flat(Store._raw_deal(row)) if row else None
         table = {"contact": "contacts", "link": "deal_contacts", "invoice": "invoices"}.get(entry["entity"])
         if table is None:
             return None
@@ -1426,14 +1453,14 @@ class Store:
     # -- groups: a search, an account, a client engagement. Records name their group in `grp`; what is known
     #    about the group itself (who the client is, where it stands, its terms, the people on the client's side)
     #    is kept here under the same name, however it is typed. A group nobody has said anything about has no row.
-    @staticmethod
-    def _grp(row) -> dict:
+    def _grp(self, row) -> dict:
         group = dict(row)
         try:
             group["fields"] = json.loads(group.get("fields") or "{}")
         except ValueError:
             group["fields"] = {}
-        group["value"] = int(group.pop("value_cents") or 0) / 100
+        group["value"] = 0.0 if self.no_fees else int(group.pop("value_cents") or 0) / 100
+        group.pop("value_cents", None)
         return group
 
     def grp_get(self, name: Any) -> Optional[dict]:
@@ -1462,7 +1489,7 @@ class Store:
             if status not in GROUP_STATUS:
                 raise ValueError("status is one of: %s" % ", ".join(GROUP_STATUS))
             clean["status"] = status
-        if values.get("value") is not None:
+        if values.get("value") is not None and not self.no_fees:
             clean["value_cents"] = max(0, to_cents(values["value"]))
         if values.get("note") is not None:
             clean["note"] = str(values["note"]).strip()[:4000]

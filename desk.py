@@ -228,6 +228,7 @@ class Desk:
         the last fourteen kept): the first time it is opened that day, so the copy is the desk as yesterday left it."""
         name, day = self.own_file(), st.today()
         store = self._store_at(name)
+        store.no_fees = self._contract_kept()       # contract work keeps and shows no fee, whichever way one comes in
         if self._copied.get(name) != day:
             self._copied[name] = day
             try:
@@ -433,6 +434,16 @@ class Desk:
         kept = (entry if entry else self._pipes()).get("billing")
         return kept if isinstance(kept, dict) else {}
 
+    def _contract_kept(self) -> bool:
+        """Whether the pipeline in hand is written down as contract work and is still a recruiting one. On the path of
+        every read: for any other pipeline it costs one look at what is already kept in memory."""
+        if self._billing_kept().get("type") != BILL_CONTRACT:
+            return False
+        try:
+            return self.own_playbook().shape == "roles"
+        except Exception:
+            return False
+
     def billing_kind(self) -> str:
         """"contract" or "contingent" for the pipeline in hand if its playbook is recruiting; "" for any other."""
         if self.playbook().shape != "roles":
@@ -449,7 +460,10 @@ class Desk:
         if not kind:
             return {}
         kept = self._billing_kept()
-        out = {"type": kind, "client": str(kept.get("client") or ""), "fee_pct": kept.get("fee_pct") or 0, "rate": 0, "hours_week": 0, "fixed": bool(self.tour())}
+        out = {"type": kind, "client": str(kept.get("client") or ""), "fee_pct": kept.get("fee_pct") or 0, "rate": 0, "hours_week": 0, "fixed": bool(self.tour()),
+               # fees still in the file (unseen on contract work, and there to clear), and invoices on records here
+               # (a placement from before the pipeline was contract work is still billed and paid on its record)
+               "fees_kept": self.store.fees_kept(), "record_invoices": len([i for i in self.store.invoices() if not str(i.get("deal_id") or "").startswith("client:")])}
         if out["client"]:
             terms = self.terms_of(out["client"])
             if terms.get("kind") == "hourly":
@@ -498,13 +512,18 @@ class Desk:
             if not saved.get("ok"):
                 return {"ok": False, "error": saved.get("error") or "the hourly terms could not be saved"}
             if args.get("clear_fees"):
-                with self.store.operation():
-                    for deal in self.store.list(status="all"):
-                        if deal.get("value_cents"):
-                            self.store.update(deal["id"], actor=actor, value=0)
-                    for group in self.store.grps():
-                        if group.get("value_cents"):
-                            self.store.grp_put(group["name"], actor=actor, value=0)
+                store = self.store
+                unseen, store.no_fees = store.no_fees, False        # the amounts themselves, to take them away
+                try:
+                    with store.operation():
+                        for deal in store.list(status="all"):
+                            if deal.get("value_cents"):
+                                store.update(deal["id"], actor=actor, value=0)
+                        for group in store.grps():
+                            if group.get("value"):
+                                store.grp_put(group["name"], actor=actor, value=0)
+                finally:
+                    store.no_fees = unseen
             new = {"type": BILL_CONTRACT, "client": self._client_name(client), "fee_pct": was.get("fee_pct") or 0}
         else:
             try:
@@ -528,16 +547,18 @@ class Desk:
     def seats(self) -> dict:
         """The seats still to fill in each search of the pipeline in hand, wherever that is not one: its openings (kept
         with the search's own facts; one unless said) less those already placed in it, and none for a search marked
-        done or closed. Kept for a moment: everything added up for one page asks."""
-        here = PIPELINE.get() or MAIN
+        done or closed. Everything added up for one page asks, so the answer is kept until something is written to
+        the pipeline's ledger (a placement, a search marked done, its openings changed)."""
+        here, store = PIPELINE.get() or MAIN, self.store
+        stamp = store.stamp()
         kept = getattr(self, "_seats_seen", {}).get(here)
-        if kept and time.time() - kept[1] < 0.5 and kept[2] is self.store:
+        if kept and kept[1] == stamp and kept[2] is store:
             return kept[0]
         placed: dict = {}
-        for deal in self.store.list(status="all"):
+        for deal in store.list(status="all"):
             if deal["status"] == "won" and st.group_key(deal.get("grp")):
                 placed[st.group_key(deal["grp"])] = placed.get(st.group_key(deal["grp"]), 0) + 1
-        rows = {row["key"]: row for row in self.store.grps()}
+        rows = {row["key"]: row for row in store.grps()}
         out = {}
         for key in set(rows) | set(placed):
             row = rows.get(key) or {}
@@ -546,21 +567,21 @@ class Desk:
                 out[key] = left
         if not hasattr(self, "_seats_seen"):
             self._seats_seen = {}
-        self._seats_seen[here] = (out, time.time(), self.store)
+        self._seats_seen[here] = (out, stamp, store)
         return out
 
     @staticmethod
     def openings_of(group: dict) -> int:
         try:
             return max(1, min(MOST_OPENINGS, int(float((group.get("fields") or {}).get(OPENINGS) or 1))))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):      # "many", "1e999": one seat, as for a search nobody said anything about
             return 1
 
     def set_openings(self, group: Any, openings: Any, actor: str = "") -> dict:
         """How many seats a search is hiring for. Counts toward what is in play on a contingent pipeline."""
         try:
             count = int(float(openings))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return {"ok": False, "error": "openings is a whole number, such as 2"}
         if not 1 <= count <= MOST_OPENINGS:
             return {"ok": False, "error": "openings is between 1 and %d" % MOST_OPENINGS}
@@ -2606,7 +2627,7 @@ class Desk:
             if (org.get("terms") or "{}") != "{}" and st.org_key(org["name"]) not in out:
                 out[st.org_key(org["name"])] = {"name": org["name"], "key": st.org_key(org["name"]), "groups": [], "open": 0,
                                                  "open_value": 0.0, "won": 0, "last_touch": ""}
-        by_group = {}
+        by_group, opened = {}, {}
         for key, entry in out.items():
             for group in entry["groups"]:
                 by_group[st.group_key(group["name"])] = key
@@ -2617,10 +2638,12 @@ class Desk:
             entry = out[owner]
             if deal["status"] == "open":
                 entry["open"] += 1
-                entry["open_value"] += deal["value"]
+                opened.setdefault(owner, []).append(deal)
             elif deal["status"] == "won":
                 entry["won"] += 1
             entry["last_touch"] = max(entry["last_touch"], touches.get(deal["id"], ""))
+        for owner, mine in opened.items():          # added up as the pipeline adds up: a recruiting search's fee once, not for every candidate
+            out[owner]["open_value"] = self.sum(mine)
         rows = []
         for entry in out.values():
             billing = self.client_billing(entry["name"])
@@ -2757,13 +2780,15 @@ class Desk:
                 if deal["status"] == "open" and playbook.position(deal["stage"]) >= 0:
                     searches.setdefault(st.group_key(deal.get("grp")) or "\x00" + deal["id"], []).append(deal)
             for key, mine in searches.items():
-                fee = max(int(deal.get("value_cents") or 0) for deal in mine)
                 openings = min(len(mine), max(0, seats.get(key, 1)))
                 if not openings:
                     continue
+                # The fees its openings would bring are its largest, as in what is in play (``store.once``); how many of
+                # them are expected is worked out at their average.
+                top = sum(sorted((int(deal.get("value_cents") or 0) for deal in mine), reverse=True)[:openings])
                 bucket = buckets[min((when(deal) for deal in mine), key=order.index)]
-                bucket["cents"] += fee * openings
-                bucket["weighted"] += fee * st.filled([odds["by_stage"].get(deal["stage"], 0) / 100 for deal in mine], openings)
+                bucket["cents"] += top
+                bucket["weighted"] += top / openings * st.filled([odds["by_stage"].get(deal["stage"], 0) / 100 for deal in mine], openings)
         forecast = [{"key": b["key"], "label": b["label"], "count": b["count"], "value": b["cents"] / 100, "weighted": round(b["weighted"] / 100, 2)}
                     for b in buckets.values()]
         lane = []
@@ -3299,6 +3324,9 @@ class Desk:
                 seats = self.set_openings(name, args.get(OPENINGS), actor=actor)
             out = self.group_view(name)
             out.update(action="set", created=created)
+            if args.get("value") not in (None, "", 0, "0") and self.billing_kind() == BILL_CONTRACT:
+                out["fee_not_kept"] = ("This pipeline is contract work, paid by the hour and billed each month, so no fee is kept on a %s or the %s in it."
+                                       % (self.playbook().terms["group"], self.playbook().terms["deals"]))
             if seats is not None:
                 out[OPENINGS if seats.get("ok") else "openings_not_set"] = seats.get(OPENINGS) if seats.get("ok") else seats.get("error")
             if ignored:
