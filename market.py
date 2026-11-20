@@ -944,8 +944,10 @@ class Markets:
                     fields["title"] = target["size"]
                 note = " ".join(b for b in (target["why"], "Signal: %s." % target["signal"] if target["signal"] else "",
                                             "Works at %s." % employer if employer else "", "Source: %s" % target["source"] if target["source"] else "") if b)
+                # The fee they would bring is their search's, as for a candidate added by hand; none on contract work.
+                fee = None if self.desk.billing_kind() == "contract" else (self.store.grp_get(group) or {}).get("value") or None
                 deal = self.store.add(
-                    target["company"], playbook.first_stage(), actor=actor, company=employer, grp=group,
+                    target["company"], playbook.first_stage(), actor=actor, company=employer, grp=group, value=fee,
                     linkedin=target["source"] if "linkedin.com/" in (target["source"] or "") else "",
                     owner=str(args.get("owner") or ""), source="market map: %s" % owner_market["name"], next_step="First approach", fields=fields)
                 if note:

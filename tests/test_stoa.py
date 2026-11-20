@@ -1119,7 +1119,7 @@ class CandidateMapTests(unittest.TestCase):
         self.assertFalse(self.markets.define({"name": "Another", "rows": "goats"})["ok"])
 
     def test_a_candidate_joins_the_search_the_map_feeds(self):
-        self.desk.group({"action": "set", "group": "Head of Events", "new": True, "client": "Columbus Trade Association"})
+        self.desk.group({"action": "set", "group": "Head of Events", "new": True, "client": "Columbus Trade Association", "value": 36000})
         # A map for that search, named something else: it is told the search, and says it.
         made = self.markets.define({"name": "Head of Events, 40-person trade association, Columbus OH", "segments": ["Association event leads", "Trade show operators"], "search": "head of events"})
         self.assertEqual(made["search"], "Head of Events")
@@ -1129,6 +1129,7 @@ class CandidateMapTests(unittest.TestCase):
         self.assertEqual((record["name"], record["company"], record["grp"], record["next_step"]),
                          ("Dana Whitcombe", "PCBC (California Building Industry Association)", "Head of Events", "First approach"))
         self.assertEqual((record["fields"]["title"], record["linkedin"]), ("Director of Events", "https://www.linkedin.com/in/dana-whitcombe"))
+        self.assertEqual((record["value"], self.desk.sum(self.desk.store.list(status="open"))), (36000, 36000))    # the search's fee, in play once
         groups = {group["name"]: group for group in self.desk.groups()}
         self.assertEqual((groups["Head of Events"]["client"], groups["Head of Events"]["open"]), ("Columbus Trade Association", 1))
         self.assertNotIn(made["market"]["name"], groups)                                  # one search for the role, not two
@@ -1137,6 +1138,12 @@ class CandidateMapTests(unittest.TestCase):
         self.assertEqual(self.markets.set_search(made["market"]["id"], "")["search"], made["market"]["name"])
         again = self.markets.track({"market": made["market"]["id"], "targets": ["Luis Ortega"]}, actor="tester")
         self.assertEqual(self.desk.store.get(again["added_to_pipeline"][0]["deal"])["grp"], made["market"]["name"])
+        self.assertEqual(self.desk.store.get(again["added_to_pipeline"][0]["deal"])["value"], 0)       # a search with no fee yet gives none
+        # On contract work a candidate from the map carries no fee, whatever the search was given before.
+        self.assertTrue(self.desk.set_billing({"type": "contract", "client": "Columbus Trade Association", "rate": 85, "hours_week": 20})["ok"])
+        self.markets.set_search(made["market"]["id"], "Head of Events")
+        third = self.markets.track({"market": made["market"]["id"], "targets": ["Priya Nand"]}, actor="tester")
+        self.assertEqual(self.desk.store.get(third["added_to_pipeline"][0]["deal"])["value"], 0)
         self.assertFalse(self.markets.define({"name": "A third", "search": "Nothing called this"})["ok"])
 
     def test_a_map_of_companies_on_a_recruiting_desk_is_as_it_was(self):
