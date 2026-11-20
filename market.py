@@ -61,16 +61,42 @@ USES_HELP = ("`uses` is the name of the tool or vendor a company uses today, alo
              "reason the company fits, and it is printed too.")
 
 
-def uses_name(value: Any) -> tuple:
-    """What to do with a `uses` an agent sent: ``(name, 'keep' | 'clear' | 'refuse' | 'none')``."""
+EMPLOYER_MOST, EMPLOYER_WORDS = 90, 12       # a company's name can be long and carry brackets; a tool's cannot
+
+
+def uses_name(value: Any, employer: bool = False) -> tuple:
+    """What to do with a `uses` an agent sent: ``(name, 'keep' | 'clear' | 'refuse' | 'none')``. ``employer``: on a
+    candidate map `uses` is where the person works, so a longer name, with brackets, is still a name ("PCBC (California
+    Building Industry Association)"). A note or a guess is refused either way."""
     text = _clean(value, 200)
     if not text:
         return "", "none"
     if text.lower().strip(" .") in _NOT_KNOWN:
         return "", "clear"
+    if employer:
+        if len(text) > EMPLOYER_MOST or len(text.split()) > EMPLOYER_WORDS or ";" in text or _UNSURE.search(text):
+            return "", "refuse"
+        return text, "keep"
     if len(text) > USES_MOST or len(text.split()) > USES_WORDS or any(mark in text for mark in "(;:") or _UNSURE.search(text):
         return "", "refuse"
     return text, "keep"
+
+
+# What a map's rows are, on a recruiting playbook (shape "roles"). It is WRITTEN ON THE MAP when the map is made, and
+# never worked out from what is on it: one stray headcount must not turn a map of people into a map of companies.
+#   people       each row is one candidate: `company` holds their name, `size` their title, `uses` where they work now,
+#                and the fit, the evidence, the requirements and the signal are that person's own.
+#   companies    each row is a company where such people work, with people named under it (how recruiting maps were
+#                before; a map with nothing written is this kind).
+# A map on any other playbook has no kind: its rows are companies to sell to.
+ROWS, PEOPLE, COMPANIES = "rows", "people", "companies"
+SEARCH = "search"                   # on a candidate map: the search (group) its candidates join; nothing = the one named after the map
+PEOPLE_NEXT = ("Find candidates for each pool, then gtm_market(action='add') with one row for each PERSON: `company` = their full name, `size` = their "
+               "current title, `uses` = the company they work at now, with their own fit, evidence, requirements and reason to move.")
+PEOPLE_HELP = ("This is a candidate map: every row is one person. `company` is the candidate's full name, `size` their current title, `uses` the company they "
+               "work at now (its name alone), `location` where they are based, `segment` their pool, `fit` and `why` how well that person fits the role and the "
+               "evidence, `requirements` the role's needs checked for that person, `signal` and `signal_date` why they would be open to a move now, `source` the "
+               "page they were found on. No `people`, `domain` or headcount.")
 
 
 def _clean(value: Any, limit: int = 400) -> str:
@@ -386,12 +412,28 @@ class Markets:
             if label and _key(label) not in seen:
                 seen.add(_key(label))
                 criteria.append({"key": _key(label), "label": label})
+        recruiting = self.recruiting()
+        rows = str(args.get(ROWS) or "").strip().lower()
+        if rows and (not recruiting or rows not in (PEOPLE, COMPANIES)):
+            return {"ok": False, "error": "`rows` is 'people' or 'companies', and only on a recruiting pipeline. Nothing was changed."}
+        search = ""
+        if _clean(args.get(SEARCH), 200):
+            if not recruiting:
+                return {"ok": False, "error": "`search` is for a candidate map on a recruiting pipeline. Nothing was changed."}
+            search = self._search_named(args.get(SEARCH))
+            if not search:
+                return {"ok": False, "error": "there is no %s called '%s'. Nothing was changed." % (self.desk.playbook().terms["group"], _clean(args.get(SEARCH), 80)),
+                        "%s" % self.desk.playbook().terms.get("groups", "groups"): [group["name"] for group in self.desk.groups()][:40]}
         stamp = st.now()
         with self.store._conn() as conn:
             if existing:
                 detail = dict(existing["detail"])
                 if criteria:
                     detail["criteria"] = criteria[:MAX_CRITERIA]
+                if rows:
+                    detail[ROWS] = rows
+                if search:
+                    detail[SEARCH] = search
                 conn.execute("UPDATE markets SET brief = ?, segments = ?, detail = ?, updated_at = ? WHERE id = ?",
                              (str(args.get("brief") or existing["brief"])[:1200],
                               json.dumps(segments or existing["segments"]), json.dumps(detail), stamp, existing["id"]))
@@ -401,15 +443,84 @@ class Markets:
                 while conn.execute("SELECT 1 FROM markets WHERE id = ?", (market_id,)).fetchone():
                     n += 1
                     market_id = st.slugify(name)[:st.ID_MAX - 3] + "-%d" % n
+                made = {"criteria": criteria[:MAX_CRITERIA]}
+                if recruiting:                  # written once, as the map is made: a new map on a recruiting pipeline holds candidates
+                    made[ROWS] = rows or PEOPLE
+                if search:
+                    made[SEARCH] = search
                 conn.execute("INSERT INTO markets (id, name, brief, segments, detail, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
-                             (market_id, name[:120], str(args.get("brief") or "")[:1200], json.dumps(segments),
-                              json.dumps({"criteria": criteria[:MAX_CRITERIA]}), stamp, stamp))
+                             (market_id, name[:120], str(args.get("brief") or "")[:1200], json.dumps(segments), json.dumps(made), stamp, stamp))
         market = self._market(market_id)
         self._refresh(market_id)
-        return {"ok": True, "market": {"id": market["id"], "name": market["name"], "brief": market["brief"],
-                                       "segments": market["segments"], "requirements": [c["label"] for c in market["detail"].get("criteria", [])]},
-                "updated": bool(existing),
-                "next": "Research companies for each segment, then gtm_market(action='add') with the evidence for each."}
+        out = {"ok": True, "market": {"id": market["id"], "name": market["name"], "brief": market["brief"],
+                                      "segments": market["segments"], "requirements": [c["label"] for c in market["detail"].get("criteria", [])]},
+               "updated": bool(existing),
+               "next": "Research companies for each segment, then gtm_market(action='add') with the evidence for each."}
+        kind = self.rows_of(market)
+        if kind:
+            out[ROWS] = kind
+            out["market"][ROWS] = kind
+        if kind == PEOPLE:
+            out["next"] = PEOPLE_NEXT
+            out[SEARCH] = self.search_of(market)
+        return out
+
+    # -- what a map's rows are, and the search a candidate map feeds ---------------------------------------------
+    def recruiting(self) -> bool:
+        return self.desk.playbook().shape == "roles"
+
+    def rows_of(self, market: Optional[dict]) -> str:
+        """'people' or 'companies' for a map on a recruiting playbook, as written on the map; '' on any other."""
+        if market is None or not self.recruiting():
+            return ""
+        return PEOPLE if (market.get("detail") or {}).get(ROWS) == PEOPLE else COMPANIES
+
+    def search_of(self, market: dict) -> str:
+        """The search a candidate map's candidates join when they are added to the pipeline: the one written on the
+        map, else the one named after the map (which the first one added opens, if it is not there)."""
+        return str((market.get("detail") or {}).get(SEARCH) or "") or market["name"]
+
+    def _search_named(self, name: Any) -> str:
+        wanted = st.group_key(_clean(name, 200))
+        return next((group["name"] for group in self.desk.groups() if st.group_key(group["name"]) == wanted), "") if wanted else ""
+
+    def _write(self, market: dict, **facts: Any) -> None:
+        detail = dict(market["detail"])
+        for key, value in facts.items():
+            if value in (None, ""):
+                detail.pop(key, None)
+            else:
+                detail[key] = value
+        with self.store._conn() as conn:
+            conn.execute("UPDATE markets SET detail = ? WHERE id = ?", (json.dumps(detail), market["id"]))
+        self._refresh(market["id"])
+
+    def set_rows(self, ref: Any, rows: Any) -> dict:
+        """A person saying what the dots on a recruiting map are. Nothing on the map changes, only how it is read."""
+        market = self._market(ref)
+        if market is None:
+            return self._missing(ref)
+        if not self.recruiting():
+            return {"ok": False, "error": "only a map on a recruiting pipeline can hold candidates"}
+        if rows not in (PEOPLE, COMPANIES):
+            return {"ok": False, "error": "a map's rows are 'people' or 'companies'"}
+        self._write(market, **{ROWS: rows})
+        return {"ok": True, "market": market["id"], "name": market["name"], ROWS: rows}
+
+    def set_search(self, ref: Any, search: Any) -> dict:
+        """A person saying which search a candidate map's candidates join. '' is the one named after the map."""
+        market = self._market(ref)
+        if market is None:
+            return self._missing(ref)
+        if self.rows_of(market) != PEOPLE:
+            return {"ok": False, "error": "only a candidate map feeds a search"}
+        name = ""
+        if _clean(search, 200):
+            name = self._search_named(search)
+            if not name:
+                return {"ok": False, "error": "there is no %s called '%s'" % (self.desk.playbook().terms["group"], _clean(search, 80))}
+        self._write(market, **{SEARCH: name})
+        return {"ok": True, "market": market["id"], "name": market["name"], SEARCH: self.search_of(self._market(market["id"]))}
 
     def list_action(self, args: dict) -> dict:
         return {"ok": True, "markets": self.list_markets()}
@@ -425,6 +536,7 @@ class Markets:
         known = {c["key"]: c["key"] for c in current}
         known.update({_key(c["label"]): c["key"] for c in current})
         added, updated, problems = [], [], []
+        people_map = self.rows_of(market) == PEOPLE         # each row is a candidate: `uses` is their employer, and they have no headcount
         unnamed = []       # companies whose `uses` was a note, not a name: saved without it
         stamp = st.now()
         stop = self._over_budget(market)
@@ -450,7 +562,7 @@ class Markets:
                 if row is None and room is not None:
                     room -= 1
                 detail = _unpack_target(dict(row))["detail"] if row else {}
-                name, verdict = uses_name(raw.get("uses"))
+                name, verdict = uses_name(raw.get("uses"), employer=people_map)
                 if verdict == "keep":
                     detail["uses"] = name
                 elif verdict == "clear":
@@ -505,16 +617,25 @@ class Markets:
         if problems:
             out["problems"] = problems[:20]
         if unnamed:
-            out["uses_not_saved"] = "Saved, but without `uses`, for: %s. %s" % (", ".join(unnamed[:20]), USES_HELP)
+            out["uses_not_saved"] = "Saved, but without `uses`, for: %s. %s" % (
+                ", ".join(unnamed[:20]), "On a candidate map `uses` is the company the person works at now, by its name alone. Where no source "
+                "says where they work, leave it out and say so in your reply." if people_map else USES_HELP)
+        if people_map:
+            out[ROWS] = PEOPLE
         # What the map still does not know about the companies just recorded. Said once, so it can be filled in while the
         # sources are to hand; never a reason to guess.
         touched = set(added) | set(updated)
         mine = [r for r in self.targets(market["id"]) if r["company"] in touched]
-        short = [(len([r for r in mine if not r["detail"].get("uses")]), "what it uses today for this job (`uses`)"),
-                 (len([r for r in mine if not headcount(r["size"])]), "its headcount (`size`)"),
-                 (len([r for r in mine if r["signal"] and not r["detail"].get("signal_date")]), "the date of its signal (`signal_date`)")]
+        if people_map:              # what is asked of a person: where they work, their title, the date of what would move them
+            short = [(len([r for r in mine if not r["detail"].get("uses")]), "where they work now (`uses`)"),
+                     (len([r for r in mine if not r["size"]]), "their current title (`size`)"),
+                     (len([r for r in mine if r["signal"] and not r["detail"].get("signal_date")]), "the date of their signal (`signal_date`)")]
+        else:
+            short = [(len([r for r in mine if not r["detail"].get("uses")]), "what it uses today for this job (`uses`)"),
+                     (len([r for r in mine if not headcount(r["size"])]), "its headcount (`size`)"),
+                     (len([r for r in mine if r["signal"] and not r["detail"].get("signal_date")]), "the date of its signal (`signal_date`)")]
         if any(count for count, _ in short):
-            out["still_missing"] = ("Of the companies just recorded: " + "; ".join("%d without %s" % item for item in short if item[0])
+            out["still_missing"] = ("Of the %s just recorded: " % ("candidates" if people_map else "companies") + "; ".join("%d without %s" % item for item in short if item[0])
                                     + ". Add these where a source says so; leave them out where none does. Never guess.")
         if held:
             out["not_added"] = held[:60]
@@ -660,6 +781,15 @@ class Markets:
             "bridges": bridges,
             "first_calls": calls,
         }
+        kind = self.rows_of(market)
+        if kind:                    # on a recruiting pipeline only; the page is handed a map's numbers whole, so it goes there too
+            out[ROWS] = kind
+            out["market"][ROWS] = kind
+            out["numbers"][ROWS] = kind
+        if kind == PEOPLE:
+            out[SEARCH] = self.search_of(market)
+            out["market"][SEARCH] = out[SEARCH]
+            out["reading_rows"] = PEOPLE_HELP
         if text:
             out["map"] = map_text(market, rows, requirements, holds, bridges, calls)
         if with_rows:
@@ -782,7 +912,9 @@ class Markets:
             # Where it goes: the group asked for; else what the playbook says; else, for a playbook that does not say,
             # a guess from its word for a group (an "account" is the company itself, a "search" is the map).
             rule = playbook.map_group or ("company" if playbook.terms["group"].lower() in ACCOUNT_WORDS else "map")
-            group = self.desk._group_spelling(_clean(args.get("group"), 200) or (target["company"] if rule == "company" else owner_market["name"]))
+            person_row = self.rows_of(owner_market if owner_market.get("id") else None) == PEOPLE      # the row is a candidate, not a company
+            group = self.desk._group_spelling(_clean(args.get("group"), 200) or (self.search_of(owner_market) if person_row
+                                                                               else target["company"] if rule == "company" else owner_market["name"]))
             keys = {f["key"] for f in playbook.fields}
             found = {k: v for k, v in (("title", person.get("title", "") if contact else ""),
                                        ("location", target["location"]), ("company_size", target["size"]),
@@ -802,6 +934,25 @@ class Markets:
                                  (open_one["id"], st.now(), target["id"]))
                 made.append({"company": target["company"], "deal": open_one["id"], "market_id": target["market_id"],
                              "contact": contact, "group": open_one["grp"], "existing": True})
+                continue
+            if person_row:
+                # A candidate from a candidate map: the record is that person, by their own name; where they work is the
+                # record's company, their title is on it, and what is next is the first approach, not a contact to find.
+                employer = target["detail"].get("uses", "")
+                fields = dict(found)
+                if target["size"] and "title" in keys:
+                    fields["title"] = target["size"]
+                note = " ".join(b for b in (target["why"], "Signal: %s." % target["signal"] if target["signal"] else "",
+                                            "Works at %s." % employer if employer else "", "Source: %s" % target["source"] if target["source"] else "") if b)
+                deal = self.store.add(
+                    target["company"], playbook.first_stage(), actor=actor, company=employer, grp=group,
+                    linkedin=target["source"] if "linkedin.com/" in (target["source"] or "") else "",
+                    owner=str(args.get("owner") or ""), source="market map: %s" % owner_market["name"], next_step="First approach", fields=fields)
+                if note:
+                    self.store.log(deal["id"], "note", "From the %s map. %s" % (owner_market["name"], note), actor=actor)
+                with self.store._conn() as conn:
+                    conn.execute("UPDATE targets SET status = 'tracked', deal_id = ?, updated_at = ? WHERE id = ?", (deal["id"], st.now(), target["id"]))
+                made.append({"company": target["company"], "deal": deal["id"], "market_id": target["market_id"], "contact": "", "group": group, "candidate": True})
                 continue
             own = contact and not as_deal      # the record is that person
             deal = self.store.add(
@@ -823,7 +974,7 @@ class Markets:
             self._refresh(market_id)
         out = {"ok": bool(made or already),
                "added_to_pipeline": [{k: v for k, v in (("company", m["company"]), ("deal", m["deal"]), ("contact", m["contact"]),
-                                                         ("group", m["group"]), ("existing_record", m.get("existing"))) if v}
+                                                         ("group", m["group"]), ("existing_record", m.get("existing")), ("candidate", m.get("candidate"))) if v}
                                      for m in made]}
         if any(m.get("existing") for m in made):
             out["note"] = ("Where a company already had an open record (existing_record), no second one was made: the map's "
@@ -1077,6 +1228,13 @@ class Markets:
             return {"deal": None, "market_id": target["market_id"], "notice": "%s is already in the pipeline." % target["company"]}
         made = result["added_to_pipeline"][0]
         deal = self.store.get(made["deal"])
+        if made.get("candidate"):
+            followup = ("[Stoa desk] %s added the candidate %s to the pipeline from the candidate map, in the %s %s. The record is already "
+                        "created (id %s), so do not add it again.\n\nYour task: reply here with one line on why they fit the role, from the "
+                        "evidence on the map, and a first approach of under 90 words that leads with that evidence and with their reason to "
+                        "move if the map has one. Do not send anything." % (actor or "Someone", target["company"], self.desk.playbook().terms["group"],
+                                                                         deal["grp"] or "pipeline", deal["id"]))
+            return {"deal": deal, "market_id": target["market_id"], "followup": followup, "notice": "", "existing": False}
         if made.get("contact"):
             task = ("The map already names %s as the likely buyer, and they are on the record. Check that against the record and "
                     "its log, then reply here with one line on why they are the right person and a first-touch note of under 90 "

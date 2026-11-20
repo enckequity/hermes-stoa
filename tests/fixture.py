@@ -108,7 +108,8 @@ def load_market(desk) -> int:
     markets = desk.markets
     if markets._market(MARKET["name"]) is not None:
         return 0
-    markets.define(dict(MARKET))
+    # This map is of companies. On a recruiting desk a new map holds candidates unless it says otherwise.
+    markets.define(dict(MARKET, **({"rows": "companies"} if desk.playbook().shape == "roles" else {})))
     added = len(markets.add({"market": MARKET["name"], "companies": COMPANIES})["added"])
     markets.reading(dict(READING, market=MARKET["name"]))
     return added

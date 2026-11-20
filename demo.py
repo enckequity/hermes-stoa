@@ -100,87 +100,81 @@ RECRUITING = [
      {"title": "Head of Growth", "location": "New York, NY"}, "Mid-launch. Open to talking in the spring."),
 ]
 
-# A talent map: where the candidates for one search work now. Adding a company puts its named person
-# on the desk as a sourced candidate in that search.
+# A candidate map for one search: each row is a person who could fill the role, with their own fit, the role's needs
+# checked for them, and what would make them open to a move now. Adding one puts them on the desk as a sourced
+# candidate in that search. (Rows are kept in a map's company fields: `company` is the person, `size` their title,
+# `uses` where they work now.)
+TALENT_NEEDS = ["Has built or run a ledger or payment rails", "Go or Rust in production", "Staff level or above", "Has led a rebuild or a team"]
 TALENT_MARKET = {
     "name": "Staff Backend · Northwind",
-    "brief": "Fictional sample map. Where the staff backend engineers Northwind wants are working now: companies that "
-             "run their own payment rails or ledgers at scale.",
-    "segments": [{"name": "Payments infrastructure", "description": "Processors, gateways and ledgers"},
-                 {"name": "Banking platforms", "description": "Banking-as-a-service and core banking"},
-                 {"name": "Marketplaces", "description": "Marketplaces that built their own payments"}],
-    "requirements": ["Runs its own ledger or payment rails", "Go or Rust in production", "Engineering team of 50 to 400",
-                     "Recent reorganisation or layoffs"],
+    "brief": "Fictional sample map. Candidates for Northwind's staff backend role: engineers who have built or run a ledger or "
+             "payment rails at scale, in Go or Rust. Staff level or above, anywhere in the US.",
+    "segments": [{"name": "Payments infrastructure", "description": "Engineers at processors, gateways and ledgers"},
+                 {"name": "Banking platforms", "description": "Engineers at banking-as-a-service and core banking companies"},
+                 {"name": "Marketplaces", "description": "Engineers at marketplaces that built their own payments"}],
+    "requirements": TALENT_NEEDS,
 }
+
+
+def _candidate(name, title, employer, site, where, pool, fit, why, reason, shows, also=""):
+    row = {"company": name, "size": title, "uses": employer, "location": where, "segment": pool, "fit": fit, "why": why,
+           "source": "https://%s/team" % site, "requirements": dict(zip(TALENT_NEEDS, shows))}
+    if reason:
+        row.update(signal=reason[0], signal_days=reason[1])
+    if also:
+        row["also"] = also
+    return row
+
+
 TALENT_COMPANIES = [
-    {"company": "Ironbridge Payments", "website": "ironbridge.example", "segment": "Payments infrastructure", "fit": 5,
-     "size": "310 people", "location": "Chicago, IL", "why": "Rebuilt its ledger in Go last year and has just cut a platform team.",
-     "signal": "Reorganised in the last quarter", "signal_days": 70,
-     "requirements": {"Runs its own ledger or payment rails": "Engineering blog: 'our double-entry ledger'", "Go or Rust in production": "Go, per its job ads",
-                      "Engineering team of 50 to 400": "About 180 engineers", "Recent reorganisation or layoffs": "Platform team folded into payments in September"},
-     "people": [{"name": "Samira Costa", "title": "Staff Software Engineer", "why": "Led the ledger rebuild"},
-                {"name": "Jude Okafor", "title": "Senior Backend Engineer"}]},
-    {"company": "Quayside Pay", "website": "quayside.example", "segment": "Payments infrastructure", "fit": 4,
-     "size": "140 people", "location": "Austin, TX", "why": "Small team running card and bank rails end to end.",
-     "requirements": {"Runs its own ledger or payment rails": "Direct card and bank integrations", "Go or Rust in production": "Rust in the settlement service",
-                      "Engineering team of 50 to 400": "About 70 engineers", "Recent reorganisation or layoffs": ""},
-     "people": [{"name": "Anders Holm", "title": "Principal Engineer", "why": "Owns settlement"}]},
-    {"company": "Farrow Ledger", "website": "farrowledger.example", "segment": "Payments infrastructure", "fit": 4,
-     "size": "90 people", "location": "Remote", "why": "Ledger-as-a-service: every engineer has built what Northwind needs.",
-     "signal": "Missed its last funding round", "also": "Banking platforms", "signal_days": 33,
-     "requirements": {"Runs its own ledger or payment rails": "The ledger is the product", "Go or Rust in production": "Go",
-                      "Engineering team of 50 to 400": "About 55 engineers", "Recent reorganisation or layoffs": "Flat round, hiring frozen"},
-     "people": [{"name": "Lena Fischer", "title": "Staff Engineer"}]},
-    {"company": "Copperline", "website": "copperline.example", "segment": "Payments infrastructure", "fit": 2,
-     "size": "1,900 people", "location": "San Francisco, CA", "why": "Deep bench, but well paid and hard to move.",
-     "requirements": {"Runs its own ledger or payment rails": "Yes, at very large scale", "Go or Rust in production": "",
-                      "Engineering team of 50 to 400": "", "Recent reorganisation or layoffs": ""}},
-    {"company": "Lodestar Bank Platform", "website": "lodestar.example", "segment": "Banking platforms", "fit": 5,
-     "size": "260 people", "location": "New York, NY", "why": "Laid off a fifth of engineering in October; its core is written in Go.",
-     "signal": "Layoffs in October", "signal_days": 21,
-     "requirements": {"Runs its own ledger or payment rails": "Core banking ledger", "Go or Rust in production": "Go",
-                      "Engineering team of 50 to 400": "About 150 engineers", "Recent reorganisation or layoffs": "A fifth of engineering let go"},
-     "people": [{"name": "Marisol Vega", "title": "Staff Backend Engineer", "why": "Posted that she is looking"},
-                {"name": "Theo Marsh", "title": "Senior Software Engineer"}]},
-    {"company": "Tidemark", "website": "tidemark.example", "segment": "Banking platforms", "fit": 3,
-     "size": "420 people", "location": "Charlotte, NC", "why": "Good engineers, mostly on the JVM.",
-     "requirements": {"Runs its own ledger or payment rails": "Card issuing platform", "Go or Rust in production": "",
-                      "Engineering team of 50 to 400": "About 210 engineers", "Recent reorganisation or layoffs": ""},
-     "people": [{"name": "Priscilla Dunn", "title": "Principal Engineer"}]},
-    {"company": "Anchorage BaaS", "website": "anchoragebaas.example", "segment": "Banking platforms", "fit": 4,
-     "size": "120 people", "location": "Salt Lake City, UT", "why": "Sponsor-bank trouble has engineers taking calls.",
-     "signal": "Lost a bank partner", "signal_days": 12,
-     "requirements": {"Runs its own ledger or payment rails": "Program ledger for its fintech clients", "Go or Rust in production": "Go and some Rust",
-                      "Engineering team of 50 to 400": "About 60 engineers", "Recent reorganisation or layoffs": "Partner bank exit announced"},
-     "people": [{"name": "Ravi Menon", "title": "Senior Staff Engineer"}]},
-    {"company": "Haven Homeshare", "website": "havenhomeshare.example", "segment": "Marketplaces", "fit": 3,
-     "size": "800 people", "location": "Seattle, WA", "why": "Built host payouts in-house; the payments group is about forty people.",
-     "also": "Payments infrastructure",
-     "requirements": {"Runs its own ledger or payment rails": "In-house payouts ledger", "Go or Rust in production": "Go in payments",
-                      "Engineering team of 50 to 400": "", "Recent reorganisation or layoffs": ""},
-     "people": [{"name": "Elena Petrou", "title": "Staff Engineer, Payments"}]},
-    {"company": "Stallholder", "website": "stallholder.example", "segment": "Marketplaces", "fit": 4,
-     "size": "230 people", "location": "Portland, OR", "why": "Moved off a processor to its own rails this year.",
-     "signal": "New payments platform launched", "signal_days": 40,
-     "requirements": {"Runs its own ledger or payment rails": "Migrated to its own rails in the spring", "Go or Rust in production": "Rust",
-                      "Engineering team of 50 to 400": "About 110 engineers", "Recent reorganisation or layoffs": ""},
-     "people": [{"name": "Callie Nguyen", "title": "Senior Backend Engineer", "why": "Led the migration"}]},
-    {"company": "Rally Rides", "website": "rallyrides.example", "segment": "Marketplaces", "fit": 2,
-     "size": "640 people", "location": "Los Angeles, CA", "why": "Payments run through a processor; little ledger work in-house.",
-     "requirements": {"Runs its own ledger or payment rails": "", "Go or Rust in production": "Go",
-                      "Engineering team of 50 to 400": "", "Recent reorganisation or layoffs": "Closed two city teams"}},
+    _candidate("Marisol Vega", "Staff Backend Engineer", "Lodestar Bank Platform", "lodestar.example", "New York, NY", "Banking platforms", 5,
+               "Owns Lodestar's core banking ledger service, written in Go.", ("Posted that she is looking after October's layoffs", 21),
+               ("Core banking ledger", "Go", "Staff Backend Engineer", "Leads the ledger service team of six")),
+    _candidate("Samira Costa", "Staff Software Engineer", "Ironbridge Payments", "ironbridge.example", "Chicago, IL", "Payments infrastructure", 5,
+               "Led the rebuild of Ironbridge's double-entry ledger in Go.", ("Her platform team was folded into payments in September", 70),
+               ("Engineering blog: 'our double-entry ledger'", "Go, per the rebuild write-up", "Staff Software Engineer", "Led the ledger rebuild")),
+    _candidate("Ravi Menon", "Senior Staff Engineer", "Anchorage BaaS", "anchoragebaas.example", "Salt Lake City, UT", "Banking platforms", 4,
+               "Runs the program ledger for Anchorage's fintech clients, in Go and some Rust.", ("Anchorage lost a bank partner", 12),
+               ("Program ledger for its fintech clients", "Go and some Rust", "Senior Staff Engineer", "")),
+    _candidate("Anders Holm", "Principal Engineer", "Quayside Pay", "quayside.example", "Austin, TX", "Payments infrastructure", 4,
+               "Owns settlement on card and bank rails, written in Rust.", None,
+               ("Direct card and bank integrations", "Rust in the settlement service", "Principal Engineer", "")),
+    _candidate("Lena Fischer", "Staff Engineer", "Farrow Ledger", "farrowledger.example", "Remote", "Payments infrastructure", 4,
+               "Three years building a ledger that is sold as a service.", ("Farrow missed its last funding round and froze hiring", 33),
+               ("The ledger is the product", "Go", "Staff Engineer", ""), "Banking platforms"),
+    _candidate("Callie Nguyen", "Senior Backend Engineer", "Stallholder", "stallholder.example", "Portland, OR", "Marketplaces", 4,
+               "Led the move off a processor onto Stallholder's own rails, in Rust.", ("The migration she led shipped; her project is done", 40),
+               ("Migrated to its own rails in the spring", "Rust", "", "Led the migration")),
+    _candidate("Elena Petrou", "Staff Engineer, Payments", "Haven Homeshare", "havenhomeshare.example", "Seattle, WA", "Marketplaces", 3,
+               "Built host payouts and their ledger in-house, in Go.", None,
+               ("In-house payouts ledger", "Go in payments", "Staff Engineer, Payments", ""), "Payments infrastructure"),
+    _candidate("Jude Okafor", "Senior Backend Engineer", "Ironbridge Payments", "ironbridge.example", "Chicago, IL", "Payments infrastructure", 3,
+               "Worked on the ledger rebuild under Samira Costa.", ("His platform team was folded into payments in September", 70),
+               ("Worked on the ledger rebuild", "Go", "", "")),
+    _candidate("Theo Marsh", "Senior Software Engineer", "Lodestar Bank Platform", "lodestar.example", "New York, NY", "Banking platforms", 3,
+               "Four years on the Go services around Lodestar's core ledger.", ("Layoffs at Lodestar in October", 21),
+               ("", "Go", "", "")),
+    _candidate("Priscilla Dunn", "Principal Engineer", "Tidemark", "tidemark.example", "Charlotte, NC", "Banking platforms", 2,
+               "Deep card-issuing experience, but all of it on the JVM.", None,
+               ("Card issuing platform", "", "Principal Engineer", "")),
+    _candidate("Owen Castell", "Staff Engineer", "Copperline", "copperline.example", "San Francisco, CA", "Payments infrastructure", 2,
+               "A strong ledger background at very large scale. Well paid, and has turned down two approaches.", None,
+               ("Yes, at very large scale", "", "Staff Engineer", "")),
+    _candidate("Dara Whitlock", "Senior Engineer", "Rally Rides", "rallyrides.example", "Los Angeles, CA", "Marketplaces", 2,
+               "Go in production, but payments at Rally run through a processor.", ("Rally closed two city teams", 50),
+               ("", "Go", "", "")),
 ]
 TALENT_READING = {
-    "reading": "The people Northwind wants are concentrated in a handful of smaller payments and banking companies, and three of "
-               "the best pools have just been shaken loose: a reorganisation, a round of layoffs, and a lost bank partner.\n"
-               "The large names have the depth but not the movement. Their engineers are well paid and nobody is leaving.",
-    "implications": ["Start where something has just changed: Lodestar, Ironbridge and Anchorage.",
-                     "Lead with the ledger work. It is the one thing all the strong pools have in common.",
-                     "Leave Copperline and Rally Rides until the first pass is done."],
-    "first_calls": [{"target": "Lodestar Bank Platform", "why": "A fifth of engineering let go last month, and the core is in Go."},
-                    {"target": "Ironbridge Payments", "why": "The team that rebuilt the ledger was just reorganised."},
-                    {"target": "Anchorage BaaS", "why": "A lost bank partner has senior engineers taking calls."},
-                    {"target": "Stallholder", "why": "They have just finished exactly the migration Northwind is starting."}],
+    "reading": "The strongest candidates for Northwind are staff engineers who have built a ledger themselves, and three of the best "
+               "have just been shaken loose: layoffs at Lodestar, a reorganisation at Ironbridge, and a lost bank partner at Anchorage.\n"
+               "The candidates at the large names have the depth but no reason to move. They are well paid and settled.",
+    "implications": ["Start with the people something has just changed for: Marisol Vega, Samira Costa and Ravi Menon.",
+                     "Lead with the ledger. Northwind is offering the chance to own one end to end.",
+                     "The senior engineers one level down are worth a second pass if the staff shortlist runs dry."],
+    "first_calls": [{"target": "Marisol Vega", "why": "Has said in public that she is looking, and runs exactly this kind of ledger."},
+                    {"target": "Samira Costa", "why": "Led the rebuild Northwind wants to do, and her team was just reorganised."},
+                    {"target": "Ravi Menon", "why": "Senior staff on a program ledger, at a company that has just lost its bank partner."},
+                    {"target": "Lena Fischer", "why": "Builds a ledger for a living, at a company that has frozen hiring."}],
 }
 
 # -- a B2B SaaS company selling a fraud prevention tool ------------------------------------------

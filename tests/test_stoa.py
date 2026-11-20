@@ -1043,6 +1043,106 @@ class MarketTests(unittest.TestCase):
         self.assertEqual((self.desk.store.count(), self.market({"action": "list"})["markets"]), (0, []))
 
 
+class CandidateMapTests(unittest.TestCase):
+    """On a recruiting playbook a map's rows are candidates: one person to a row, kept in the map's company fields."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.desk = make_desk(self.tmp.name)                     # the recruiting playbook
+        self.markets = self.desk.markets
+
+    def people(self, market="Head of Events"):
+        return self.markets.add({"market": market, "companies": [
+            {"company": "Dana Whitcombe", "size": "Director of Events", "uses": "PCBC (California Building Industry Association)", "location": "Sacramento, CA",
+             "segment": "Trade show operators", "fit": 5, "why": "Ran a 10,000-person show for six years.", "signal": "Her show's dates are not announced",
+             "signal_date": "2026-10-01", "source": "https://www.linkedin.com/in/dana-whitcombe"},
+            {"company": "Luis Ortega", "size": "Events Manager", "uses": "Ohio Health Care Association", "segment": "Association event leads", "fit": 4, "why": "Runs a 3,200-person convention."},
+            {"company": "Priya Nand", "size": "Meetings Lead", "uses": "probably somewhere in Dayton (not confirmed)", "segment": "Association event leads", "fit": 3, "why": "Listed on a conference page."}]})
+
+    def test_a_new_map_holds_candidates_and_says_so(self):
+        made = self.markets.define({"name": "Head of Events", "brief": "A Head of Events.", "segments": ["Association event leads", "Trade show operators"]})
+        self.assertEqual((made["rows"], made["market"]["rows"], made["search"]), ("people", "people", "Head of Events"))
+        self.assertIn("one row for each PERSON", made["next"])
+        added = self.people()
+        self.assertEqual((sorted(added["added"]), added["rows"]), (["Dana Whitcombe", "Luis Ortega", "Priya Nand"], "people"))
+        rows = {row["company"]: row for row in self.markets.targets("head-of-events")}
+        self.assertEqual(rows["Dana Whitcombe"]["detail"]["uses"], "PCBC (California Building Industry Association)")      # an employer's name is kept whole
+        self.assertNotIn("uses", rows["Priya Nand"]["detail"])                                                                # a guess still is not
+        self.assertIn("Priya Nand", added["uses_not_saved"])
+        self.assertIn("the company the person works at now", added["uses_not_saved"])
+        self.assertNotIn("headcount", added.get("still_missing", ""))                                                         # a person has none to be missing
+        summary = self.markets.summary("head-of-events")
+        self.assertEqual((summary["rows"], summary["numbers"]["rows"], summary["market"]["rows"]), ("people", "people", "people"))
+        self.assertIn("every row is one person", summary["reading_rows"])
+
+    def test_what_a_map_is_is_written_on_it_not_worked_out(self):
+        self.markets.define({"name": "Head of Events", "segments": ["Association event leads", "Trade show operators"]})
+        self.people()
+        # A headcount and people named under one row change nothing about the map.
+        self.markets.add({"market": "Head of Events", "companies": [{"company": "Luis Ortega", "headcount": 1200, "people": [{"name": "Someone Else", "title": "Assistant"}]}]})
+        self.assertEqual(self.markets.summary("head-of-events")["rows"], "people")
+        # Only a person changes it, and nothing on the map changes with it.
+        count = len(self.markets.targets("head-of-events"))
+        self.assertEqual(self.markets.set_rows("Head of Events", "companies")["rows"], "companies")
+        self.assertEqual(self.markets.summary("head-of-events")["rows"], "companies")
+        self.assertNotIn("search", self.markets.summary("head-of-events"))
+        self.assertFalse(self.markets.set_rows("Head of Events", "goats")["ok"])
+        self.assertTrue(self.markets.set_rows("Head of Events", "people")["ok"])
+        self.assertEqual(len(self.markets.targets("head-of-events")), count)
+        # A recruiting map with nothing written (one made before this) is a map of companies, whatever is on it.
+        with self.desk.store._conn() as conn:
+            conn.execute("UPDATE markets SET detail = ? WHERE id = 'head-of-events'", (json.dumps({"criteria": []}),))
+        self.assertEqual(self.markets.summary("head-of-events")["rows"], "companies")
+        # Defining it again does not turn it into something else; saying so does.
+        self.markets.define({"name": "Head of Events", "brief": "Changed."})
+        self.assertEqual(self.markets.summary("head-of-events")["rows"], "companies")
+        self.assertEqual(self.markets.define({"name": "Head of Events", "rows": "people"})["rows"], "people")
+        self.assertFalse(self.markets.define({"name": "Another", "rows": "goats"})["ok"])
+
+    def test_a_candidate_joins_the_search_the_map_feeds(self):
+        self.desk.group({"action": "set", "group": "Head of Events", "new": True, "client": "Columbus Trade Association"})
+        # A map for that search, named something else: it is told the search, and says it.
+        made = self.markets.define({"name": "Head of Events, 40-person trade association, Columbus OH", "segments": ["Association event leads", "Trade show operators"], "search": "head of events"})
+        self.assertEqual(made["search"], "Head of Events")
+        self.people(made["market"]["name"])
+        done = self.markets.track({"market": made["market"]["id"], "targets": ["Dana Whitcombe"]}, actor="tester")
+        record = self.desk.store.get(done["added_to_pipeline"][0]["deal"])
+        self.assertEqual((record["name"], record["company"], record["grp"], record["next_step"]),
+                         ("Dana Whitcombe", "PCBC (California Building Industry Association)", "Head of Events", "First approach"))
+        self.assertEqual((record["fields"]["title"], record["linkedin"]), ("Director of Events", "https://www.linkedin.com/in/dana-whitcombe"))
+        groups = {group["name"]: group for group in self.desk.groups()}
+        self.assertEqual((groups["Head of Events"]["client"], groups["Head of Events"]["open"]), ("Columbus Trade Association", 1))
+        self.assertNotIn(made["market"]["name"], groups)                                  # one search for the role, not two
+        # Pointed back at the search named after the map; a search that is not there is refused.
+        self.assertFalse(self.markets.set_search(made["market"]["id"], "Nothing called this")["ok"])
+        self.assertEqual(self.markets.set_search(made["market"]["id"], "")["search"], made["market"]["name"])
+        again = self.markets.track({"market": made["market"]["id"], "targets": ["Luis Ortega"]}, actor="tester")
+        self.assertEqual(self.desk.store.get(again["added_to_pipeline"][0]["deal"])["grp"], made["market"]["name"])
+        self.assertFalse(self.markets.define({"name": "A third", "search": "Nothing called this"})["ok"])
+
+    def test_a_map_of_companies_on_a_recruiting_desk_is_as_it_was(self):
+        made = self.markets.define({"name": "Where they work", "segments": ["Payments"], "rows": "companies"})
+        self.assertEqual(made["rows"], "companies")
+        self.assertNotIn("PERSON", made["next"])
+        added = self.markets.add({"market": "Where they work", "companies": [{"company": "Ironbridge Payments", "segment": "Payments", "fit": 4, "why": "Rebuilt its ledger.",
+                                                                              "uses": "PCBC (California Building Industry Association)", "people": [{"name": "Samira Costa", "title": "Staff Engineer"}]}]})
+        self.assertIn("Ironbridge Payments", added["uses_not_saved"])                      # `uses` is a tool's name here, as before
+        done = self.markets.track({"market": "Where they work", "targets": ["Ironbridge Payments"]}, actor="tester")
+        record = self.desk.store.get(done["added_to_pipeline"][0]["deal"])
+        self.assertEqual((record["name"], record["company"], record["grp"]), ("Samira Costa", "Ironbridge Payments", "Where they work"))
+
+    def test_a_sales_map_has_no_kind(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        desk = make_desk(tmp.name, playbook="b2b-sales")
+        made = desk.markets.define({"name": "Fintechs", "segments": ["Payments"]})
+        self.assertNotIn("rows", made)
+        self.assertNotIn("rows", desk.markets.summary("fintechs")["numbers"])
+        self.assertFalse(desk.markets.define({"name": "Fintechs", "rows": "people"})["ok"])
+        self.assertFalse(desk.markets.set_rows("Fintechs", "people")["ok"])
+
+
 class SampleDataTests(unittest.TestCase):
     """The two worked examples people see: a recruiting agency and a company selling a fraud prevention tool."""
 
@@ -1092,10 +1192,17 @@ class SampleDataTests(unittest.TestCase):
         Path(self.tmp.name, "recruiting").mkdir()
         desk = self.desk("recruiting")
         demo.load(desk)
-        made = desk.markets.click_track(desk.markets.target("Lodestar Bank Platform")["id"], "maya")["deal"]
+        clicked = desk.markets.click_track(desk.markets.target("Marisol Vega")["id"], "maya")
+        made = clicked["deal"]
         self.assertEqual((made["name"], made["company"], made["grp"], made["stage"]),
                          ("Marisol Vega", "Lodestar Bank Platform", "Staff Backend · Northwind", "sourced"))
+        self.assertEqual((made["next_step"], made["fields"]["title"]), ("First approach", "Staff Backend Engineer"))
         self.assertIn(made["id"], [d["id"] for d in desk.store.list(grp="Staff Backend · Northwind")])
+        self.assertIn("added the candidate Marisol Vega", clicked["followup"])            # what the agent is then asked is about a candidate,
+        self.assertNotIn("buyer", clicked["followup"])                                    # not about finding a buyer at one
+        sample = desk.markets.summary(desk.markets.list_markets()[0]["id"], text=False)
+        self.assertEqual((sample["rows"], sample["numbers"]["rows"], sample["search"]), ("people", "people", "Staff Backend · Northwind"))
+        self.assertFalse(any(row["detail"].get("people") or row["detail"].get("headcount") for row in desk.markets.targets(sample["market"]["id"])))
 
     def test_clear_takes_all_of_it_away_and_nothing_else(self):
         Path(self.tmp.name, "b2b-sales").mkdir()
