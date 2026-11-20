@@ -544,6 +544,269 @@ async function takeFile(file) {
 }
 
 // -- look ------------------------------------------------------------------------------------------
+// -- recruiting: candidates on the map, searches, and how a pipeline is paid for ----------------------------------
+// On a recruiting playbook (shape "roles") a market map is a map for one role and each row on it is a CANDIDATE: a
+// person, with their own fit, their own checks against the role and their own reason to move. Rows are kept in a
+// map's company fields: `company` is the person, `size` their title, `uses` where they work now. What a map's rows
+// are is written on the map and comes with it as `rows` ("people" or "companies"); it is never worked out from what
+// is on the map. A recruiting map of companies (the older kind, people named under each) is read as that.
+const MAP_COMPANIES = { people: false, thing: 'company', things: 'companies', thingCap: 'Company', find: 'Find a company', gone: 'Hermes does not propose a dismissed company again.' }
+const MAP_SALES = { ...MAP_COMPANIES, recruiting: false, reason: 'a reason to call', inPipe: ' in the pipeline' }
+const MAP_ROLES = {
+  ...MAP_COMPANIES, recruiting: true, reason: 'a reason to move', inPipe: ' already candidates',
+  lens: { seg: 'Pools', pri: 'Priority', held: 'Works with' },
+  how: { seg: 'Each ring is a pool of talent that would get a different pitch. The best fit sits in the middle.',
+    pri: 'Further right is a better fit; higher up is a fresher reason to move. The top right is who to approach first.',
+    held: 'Grouped by what each company’s people work with today.' },
+  suggestAsk: here => 'Suggest two neighbouring pools of talent for' + here + ': who is in them, and why they would be worth mapping for this role. Do not add anything yet; I will say which.'
+}
+const CANDIDATE_ROW = 'Every row on this map is one candidate: `company` = their full name, `size` = their current title, `uses` = the company they work at now by name alone, '
+  + '`location`, `segment` = their pool, `fit` 1 to 5 for the role, `why` = the evidence, `requirements` checked for that person, `signal` and `signal_date` = why they would move now, '
+  + 'and `source` = the public page you found them on. No `people`, `domain` or headcount. Only people a source shows.'
+const MAP_PEOPLE = {
+  ...MAP_ROLES, people: true, thing: 'candidate', things: 'candidates', thingCap: 'Candidate', find: 'Find a candidate', gone: 'Hermes does not propose a dismissed candidate again.',
+  inPipe: ' in your pipeline',
+  lens: { seg: 'Pools', pri: 'Priority', held: 'Employer' },
+  how: { seg: 'Each dot is a candidate, and each ring a pool that would get a different pitch. The best fit sits in the middle.',
+    pri: 'Each dot is a candidate. Further right is a better fit; higher up is a fresher reason to move. The top right is who to approach first.',
+    held: 'Each dot is a candidate, grouped by where they work now.' },
+  // What the buttons on a candidate ask for. The page's own requests speak of companies and their buyers.
+  draftAsk: (here, names) => (names.length === 1
+    ? 'Draft a first approach to ' + names[0] + ', a candidate on' + here + ', about the role. Lead with why they in particular fit it, from the evidence on the map, and with their reason to move if the map has one. Show me the draft. Do not send anything.'
+    : 'Draft a first approach about the role to each of these candidates on' + here + ', each leading with why that person fits and their own reason to move: ' + names.join(', ') + '. Show me the drafts. Do not send anything.'),
+  moreAsk: (here, room, names) => 'Find up to ' + room + ' more ' + (room === 'one' ? 'candidate' : 'candidates') + ' like ' + names + ' for' + here + '. ' + CANDIDATE_ROW
+    + ' Keep to what the role needs and check each person against it with the evidence. Add them to the map, then tell me who you added and why.',
+  growAsk: (here, room, pool) => 'Find up to ' + room + ' more ' + (room === 'one' ? 'candidate' : 'candidates') + ' for the “' + pool + '” pool of' + here + '. ' + CANDIDATE_ROW
+    + ' Keep to what the role needs and check each person against it with the evidence. Add them to the map, then tell me who you added and why.',
+  requireAsk: (here, text) => 'Add this to what the role needs on' + here + ' and check every candidate on it against it, with the evidence: ' + text
+}
+/** What a map's rows are, as it says itself: 'people', 'companies', or '' on a pipeline that is not recruiting. */
+const rowsOf = market => String((market && (market.rows || (market.numbers && market.numbers.rows))) || '')
+const mapWords = (shape, market) => (shape !== 'roles' ? MAP_SALES : rowsOf(market) === 'people' ? MAP_PEOPLE : MAP_ROLES)
+
+/** What Hermes is asked for when a new map is started on a recruiting pipeline: the candidates for the role described.
+    `search`: the search the map is for, if the person chose one. `web` false: only the people named in the request. */
+const roleMapAsk = (said, search, web) => 'Map the candidates for a role I am recruiting for, and keep it on the desk as a map of its own: ' + said
+  + (search ? ' It is for my search “' + search + '”: pass search="' + search.replace(/"/g, '') + '" to gtm_market(action="define") so its candidates join that search, name the map after it, and save the role'
+    : ' Name the map after the role, and save the role')
+  + ' and who fits it as the map\'s brief, written so the hiring manager could read it. Set the requirements from what the role needs: '
+  + 'what someone must have done, the level, the place, and anything that rules a person out. Split the candidates into pools that would each get a different pitch. '
+  + (web === false ? 'Put on the map ONLY the people I have named above, from what I have said about them: do not search the web, and do not add anyone else. '
+    : 'Then find real people who could fill it, from public sources. ') + CANDIDATE_ROW + ' '
+  + (web === false ? 'Give `source` as "my notes", and use only what I have told you about each person. ' : 'Never invent a person, a title or an employer. ') + 'Tell me when it is on the desk.'
+
+// How the pipeline the page is showing is paid for, as the desk's state last said (a recruiting pipeline is
+// "contingent", a fee for each placement, or "contract", by the hour and billed each month; any other has none).
+const $paidHow = atom({})                   // by pipeline id
+const pipeKey = pipe => (pipe === '' || pipe === null || pipe === undefined || pipe === 'main' ? 'main' : String(pipe))
+const billingNow = () => $paidHow.get()[pipeKey($pipe.get())] || {}
+/** On a contract pipeline no fee is shown or asked for anywhere but the money tab. */
+const noFees = () => billingNow().type === 'contract'
+const FEE_FACTS = ['fee_type', 'fee_pct', 'target_base', 'rate', 'hours', 'openings']        // what the recruiting playbook keeps on a search about money
+const groupName = text => String(text || '').trim().toLowerCase().replace(/\s+/g, ' ')
+/** How many seats a search is hiring for, and how many it still has to fill (none once it is done or closed). */
+const openingsOf = group => Math.max(1, Math.round(Number(((group || {}).fields || {}).openings) || 1))
+const seatsLeft = group => (group.status === 'done' || group.status === 'closed' ? 0 : Math.max(0, openingsOf(group) - (group.won || 0)))
+const SEATS = {}                            // by pipeline: the seats left in each search, wherever that is not one
+/** What a list of open records has in play. On a contingent recruiting pipeline a search's fee counts once for each
+    seat still to fill, however many candidates are in it (the desk adds its own totals up the same way: `store.once`).
+    This is for the sums the page makes itself: the board's columns and Today's stages. */
+function inPlay(deals) {
+  const list = deals || []
+  if (billingNow().type !== 'contingent') return list.reduce((sum, deal) => sum + (deal.value || 0), 0)
+  const fees = new Map(), seats = SEATS[pipeKey($pipe.get())] || {}
+  let alone = 0
+  for (const deal of list) {
+    const search = groupName(deal.group)
+    if (!search) alone += deal.value || 0
+    else fees.set(search, (fees.get(search) || []).concat([deal.value || 0]))
+  }
+  for (const [search, mine] of fees) alone += mine.sort((a, b) => b - a).slice(0, search in seats ? seats[search] : 1).reduce((sum, fee) => sum + fee, 0)
+  return alone
+}
+const AMOUNT = /(^|_)value$/
+function withoutFees(node, depth) {
+  if (Array.isArray(node)) return node.map(item => withoutFees(item, depth + 1))
+  if (!node || typeof node !== 'object' || depth > 5) return node
+  const out = {}
+  for (const key of Object.keys(node)) out[key] = AMOUNT.test(key) && typeof node[key] === 'number' ? 0 : withoutFees(node[key], depth + 1)
+  return out
+}
+const MONEY_SIDE = /^\/(client|cash|production|pipeline\/billing)(\/|\?|$)/        // a client's billing and the money tab's own requests
+/** Every answer the page is given passes through here. It notes how the pipeline is paid for and the seats its
+    searches have left, and for a contract pipeline leaves every fee out of what the page sees (a fee that is on a
+    record from before the pipeline was contract work then shows nowhere: not on the board, the record or the data
+    table). What the money tab reads (`cash`) and a client's own billing are left as they are. */
+function seenAnswer(path, pipe, answer) {
+  if (!answer || typeof answer !== 'object') return answer
+  const key = pipeKey(pipe), state = /^\/state(\?|$)/.test(path)
+  if (state) {
+    $paidHow.set({ ...$paidHow.get(), [key]: answer.billing || {} })
+    if (Array.isArray(answer.groups)) SEATS[key] = Object.fromEntries(answer.groups.map(group => [groupName(group.name), seatsLeft(group)]).filter(pair => pair[1] !== 1))
+  }
+  if (($paidHow.get()[key] || {}).type !== 'contract' || MONEY_SIDE.test(path)) return answer
+  if (!state) return withoutFees(answer, 0)
+  const out = { ...answer }
+  for (const side of ['deals', 'totals', 'flow', 'groups', 'companies', 'clients']) if (answer[side]) out[side] = withoutFees(answer[side], 0)
+  if (answer.playbook) out.playbook = { ...answer.playbook, billing: 'none' }       // a record is never billed itself on contract work
+  return out
+}
+
+/** In the form that starts a new map on a recruiting pipeline: which search it is for, and whether to look for more people. */
+function MapFor({ value, onChange, web, onWeb }) {
+  const state = useDesk().data
+  const rows = ((state && state.groups) || []).filter(row => row.status === 'open' || row.status === 'hold')
+  const known = rows.some(row => row.name === value)
+  return h('div', { className: 'stoa-mapfor' },
+    rows.length ? h('label', null, h('span', { className: 'stoa-sub' }, 'Which search is it for?'),
+      h('select', { className: 'stoa-select', value: known ? value : '', onChange: event => onChange(event.target.value) },
+        h('option', { value: '' }, 'A new search, named after the role'),
+        rows.map(row => h('option', { key: row.name, value: row.name }, row.name + (row.client && !row.name.toLowerCase().includes(row.client.toLowerCase()) ? '  ·  ' + row.client : ''))))) : null,
+    h('label', { className: 'stoa-mapweb' }, h('input', { type: 'checkbox', checked: web !== false, onChange: event => onWeb(event.target.checked) }),
+      h('span', null, 'Look for more candidates'), h('span', { className: 'stoa-sub' }, web !== false ? 'Each one found comes with the public page they were found on.' : 'Hermes is asked to put only the people you name above on the map.')))
+}
+
+/** At the head of a candidate map: the search its candidates join when they are added to the pipeline, and a way to
+    point the map at another. Left alone, it is the search named after the map, which the first one added opens. */
+function MapSearch({ market }) {
+  const pipe = useContext(InPipe)
+  const state = useDesk(pipe).data
+  const [busy, setBusy] = useState(false)
+  if (rowsOf(market) !== 'people' || !state) return null
+  const groups = state.groups || [], goes = market.search || market.name
+  const now = groups.find(group => groupName(group.name) === groupName(goes))
+  const own = groupName(goes) === groupName(market.name)
+  const set = search => {
+    setBusy(true)
+    rest('/market/' + encodeURIComponent(market.id) + '/search', { method: 'POST', body: { search }, ...inPipe(pipe) })
+      .then(() => refresh()).catch(error => host.notifyError(error, 'Not changed')).then(() => setBusy(false))
+  }
+  return h('div', { className: 'stoa-mapsearch' },
+    h('span', { className: 'stoa-eyebrow' }, cap(state.playbook.terms.group)),
+    h('span', null, 'Candidates added from this map join'),
+    h('select', { className: 'stoa-select', value: own ? '' : goes, disabled: busy, 'aria-label': 'The search this map’s candidates join', onChange: event => set(event.target.value) },
+      h('option', { value: '' }, '“' + market.name + '”' + (own && !now ? '  ·  opened by the first one added' : '')),
+      groups.filter(group => groupName(group.name) !== groupName(market.name)).map(group => h('option', { key: group.name, value: group.name },
+        group.name + (group.client && !group.name.toLowerCase().includes(group.client.toLowerCase()) ? '  ·  ' + group.client : '') + (group.status === 'open' ? '' : '  ·  ' + group.status_label.toLowerCase())))),
+    now ? h('span', { className: 'stoa-sub' }, now.client ? 'for ' + now.client : 'no client on it yet') : null)
+}
+
+/** The panel beside a candidate map for the one candidate picked. The panel for a company offers to look up a buyer
+    there (a paid lookup, which on a person's name finds nothing and costs a credit) and has no place for a title or
+    an employer. `actions` are the map's own buttons for the row. */
+function MapPerson({ c, market, busy, actions, open, move, close }) {
+  const fact = (label, value, link) => (value ? h('div', { key: label, style: { gridColumn: '1 / -1' } }, h('small', { className: 'stoa-eyebrow' }, label),
+    link ? h('a', { className: 'stoa-alink', href: value, target: '_blank', rel: 'noreferrer', style: { display: 'block', overflowWrap: 'anywhere' } }, bareLink(value))
+      : h('span', { style: { overflowWrap: 'anywhere' } }, value)) : null)
+  const head = text => h('div', { className: 'stoa-sechead', style: { padding: '0 0 6px' } }, h('span', { className: 'stoa-eyebrow' }, text))
+  return h('div', { className: 'stoa-mapperson' },
+    h('div', { className: 'stoa-eyebrow' }, c.segment + (c.also ? ' · also fits ' + c.also : '')),
+    h('div', { className: 'stoa-maph' }, c.company),
+    h('div', { className: 'stoa-sub' }, [c.size, c.uses ? 'at ' + c.uses : ''].filter(Boolean).join(' ') || 'Title and employer not known'),
+    c.location ? h('div', { className: 'stoa-sub' }, c.location) : null,
+    h('div', { className: 'stoa-chips' },
+      c.status === 'tracked' ? h(Chip, { tone: 'good' }, 'in your pipeline') : c.fresh ? h(Chip, { tone: 'warn' }, 'new') : h(Chip, null, 'on the map'),
+      c.signal ? h(Chip, { tone: 'warn', wrap: true }, c.signal) : null,
+      c.signal ? h('span', { className: 'stoa-sub' }, agoWords(c.days) || 'no date on it') : null),
+    h('div', { className: 'stoa-mapscore' }, h('span', { className: 'stoa-eyebrow' }, c.weighed ? 'Fit for the role, by your weights' : 'Fit for the role'), h('b', null, c.score), h(Fit, { value: squaresOf(c.score) })),
+    c.why ? h('p', { style: { margin: '10px 0' } }, c.why) : null,
+    h('div', { className: 'stoa-btns' }, open ? h(Btn, { kind: 'primary', onClick: open }, 'Open the record') : null, actions),
+    (c.requirements || []).length ? [head('Against the role'), c.requirements.map(req => h('div', { key: req.label, className: 'stoa-mapreq', 'data-on': req.shown ? '1' : '0' },
+      h('span', null, req.shown ? '[x]' : '[ ]'), h('span', null, h('b', null, req.label), h('span', { className: 'stoa-sub', style: { display: 'block' } }, req.shown ? (req.evidence || 'Shown; the source is on the map') : 'No evidence found'))))] : null,
+    head('About them'),
+    h('div', { className: 'stoa-facts', style: { marginTop: 0, paddingTop: 0, borderTop: 0 } },
+      fact('Title', c.size || 'Not known'), fact('Works at', c.uses || 'Not known'), fact('Based', c.location),
+      /^https?:\/\//.test(c.source || '') ? fact('Found on', c.source, true) : fact('Found on', c.source)),
+    c.status !== 'tracked' && market.segments.length > 1 ? [head('Adjust'), h('select', { key: 'move', className: 'stoa-select', value: c.segment, disabled: busy, 'aria-label': 'Move to another pool',
+      onChange: event => move(event.target.value) }, market.segments.map(segment => h('option', { key: segment.name, value: segment.name }, (segment.name === c.segment ? 'In ' : 'Move to ') + segment.name)))] : null,
+    h('div', { className: 'stoa-btns' }, h(Btn, { kind: 'quiet', onClick: close }, 'Close')))
+}
+
+const BILLING_KINDS = [
+  ['contingent', 'Contingent', 'A fee for each placement, a share of the salary. The pipeline counts in money: what is in play, what was placed.'],
+  ['contract', 'Contract', 'Paid by the hour by one company, on any number of searches, and billed each month. The pipeline counts candidates; the money is on the Cash tab only.']]
+const monthNow = () => { const now = new Date(); return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') }
+
+/** At the head of the Pipeline tab on a recruiting pipeline: one line on how it is paid for, and the form that changes
+    it. A contract needs the company, the hourly rate and the hours a week: the Cash tab bills from them. */
+function Billing({ state }) {
+  const billing = state.billing || {}
+  const [open, setOpen] = useState(false)
+  const [v, setV] = useState(null)
+  const [busy, setBusy] = useState(false)
+  if (!billing.type) return null
+  const hourly = billing.type === 'contract', pb = state.playbook
+  const start = () => { setV({ type: billing.type, client: billing.client || '', rate: billing.rate ? String(billing.rate) : '', hours: billing.hours_week ? String(billing.hours_week) : '',
+    pct: billing.fee_pct ? String(billing.fee_pct) : '', from: billing.start || monthNow(), clear: false }); setOpen(true) }
+  const line = h('div', { className: 'stoa-billing' },
+    h('span', { className: 'stoa-eyebrow' }, 'Billing'), h('b', null, hourly ? 'Contract' : 'Contingent'),
+    hourly ? (billing.client ? h('span', null, 'with ' + billing.client) : null) : billing.fee_pct ? h('span', null, billing.fee_pct + '% of salary') : null,
+    h('span', { className: 'stoa-sub' }, hourly ? 'Paid by the hour and billed each month. This side counts ' + pb.terms.deals + '; the hours and the bills are on the Cash tab.'
+      : 'A fee for each placement. What is in play counts each ' + pb.terms.group + ' once, for each opening left.'),
+    billing.fixed || open ? null : h(Btn, { kind: 'quiet', onClick: start }, 'Change'))
+  if (!open || !v) return line
+  const set = key => event => setV({ ...v, [key]: event.target.value })
+  const contract = v.type === 'contract'
+  const ready = contract ? v.client.trim() && Number(v.rate) > 0 && Number(v.hours) > 0 : true
+  const carried = (state.totals.open_value || 0) + (state.totals.won_value || 0) || state.deals.reduce((sum, deal) => sum + (deal.value || 0), 0)
+  const save = () => {
+    setBusy(true)
+    rest('/pipeline/billing', { method: 'POST', body: { type: v.type, client: v.client.trim(), rate: Number(v.rate) || 0, hours_week: Number(v.hours) || 0, start: v.from, fee_pct: Number(v.pct) || 0, clear_fees: contract && v.clear } })
+      .then(() => { setOpen(false); refresh() }).catch(error => host.notifyError(error, 'Not saved')).then(() => setBusy(false))
+  }
+  return h('div', null, line, h('div', { className: 'stoa-box stoa-billform' },
+    h('div', { className: 'stoa-eyebrow' }, 'How this pipeline is paid for'),
+    h('div', { className: 'stoa-billkinds' }, BILLING_KINDS.map(([id, title, words]) => h('button', { type: 'button', key: id, className: 'stoa-billkind', 'aria-pressed': v.type === id, 'data-on': v.type === id ? '1' : '0', onClick: () => setV({ ...v, type: id }) },
+      h('b', null, title), h('span', { className: 'stoa-sub' }, words)))),
+    contract ? h('div', { className: 'stoa-form' },
+      h(Field, { label: 'The company the contract is with', value: v.client, onChange: set('client') }),
+      h(Field, { label: 'Hourly rate, ' + (pb.currency || 'USD'), type: 'number', min: 0, value: v.rate, onChange: set('rate') }),
+      h(Field, { label: 'Hours a week', type: 'number', min: 1, max: 80, value: v.hours, onChange: set('hours') }),
+      h(Field, { label: 'Billed from the month of', type: 'month', value: v.from, onChange: set('from') }))
+      : h('div', { className: 'stoa-form' }, h(Field, { label: 'Your usual fee, % of salary (optional)', type: 'number', min: 0, max: 100, value: v.pct, onChange: set('pct') })),
+    h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, contract
+      ? 'Each month that ends is put on the Cash tab to bill: the rate times that month’s hours (the hours a week, over its working days), which you can correct before you record the invoice. A month that is not over shows there as the month in progress. No fee is asked for or shown on a ' + pb.terms.deal + ' here.'
+      : 'Give a ' + pb.terms.group + ' the fee each ' + pb.terms.deal + ' in it would bring, and how many openings it has; what is in play counts that fee once for each opening left.'),
+    contract && carried ? h('label', { className: 'stoa-billclear' }, h('input', { type: 'checkbox', checked: v.clear, onChange: event => setV({ ...v, clear: event.target.checked }) }),
+      h('span', null, 'Some ' + pb.terms.deals + ' here already carry fees. They stop showing on this pipeline either way. Tick this to clear them as well: left on, the reports still count them, and a record loses its fee when it is next edited.')) : null,
+    h('div', { className: 'stoa-btns', style: { marginTop: 10 } }, h(Btn, { kind: 'primary', disabled: busy || !ready, onClick: save }, busy ? 'Saving…' : 'Save'), h(Btn, { kind: 'quiet', onClick: () => setOpen(false) }, 'Cancel'))))
+}
+
+/** At the head of the Cash tab: every pipeline at once (a contract's month of hours beside the others' fees), then, on
+    a contract pipeline, the contract itself and the month in progress. A month is put on the tab to bill only once it
+    has ended, so without that the tab would have nothing to show for a contract until the first of next month. */
+function ProductionHead({ state, openClient, showPipe }) {
+  const all = useQuery({ queryKey: ['stoa', 'production'], queryFn: () => rest('/production'), staleTime: 3000, refetchInterval: 30000 }).data
+  const rows = (all && all.pipelines) || [], billing = state.billing || {}, pb = state.playbook
+  const cols = [['this_month', (all && all.month) || 'This month', ''], ['collected', 'Collected', 'good'], ['owed', 'Owed', ''], ['overdue', 'Overdue', 'bad'], ['to_bill', 'To bill', 'warn'], ['likely', 'Likely to come', '']]
+  const cell = (row, key, tone, currency) => h('td', { key, 'data-num': '1', 'data-tone': row[key] && tone ? tone : '' }, row[key] ? money(row[key], row.currency || currency) : '—')
+  const across = rows.length > 1 ? h('div', { key: 'all', className: 'stoa-prod' },
+    h('div', { className: 'stoa-sechead', style: { padding: '0 0 8px' } }, h('span', { className: 'stoa-eyebrow' }, 'Across your ' + rows.length + ' pipelines'), h('span', { className: 'stoa-sub' }, 'Press one for its own')),
+    h('div', { style: { overflowX: 'auto' } }, h('table', { className: 'stoa-prodtable' },
+      h('thead', null, h('tr', null, h('th', null, 'Pipeline'), cols.map(col => h('th', { key: col[0], 'data-num': '1' }, col[1])))),
+      h('tbody', null, rows.map(row => h('tr', { key: row.id, 'data-on': row.id === state.pipeline ? '1' : '0' },
+        h('td', null, h('button', { type: 'button', className: 'stoa-prodname', disabled: row.id === state.pipeline, onClick: () => showPipe(row.id) }, row.name),
+          h('small', null, [row.billing === 'contract' ? 'Contract' + (row.client ? ' · ' + row.client : '') : row.billing === 'contingent' ? 'Contingent' : '', row.this_month_note].filter(Boolean).join(' · '))),
+        cols.map(col => cell(row, col[0], col[2], all.currency))))),
+      all.totals ? h('tfoot', null, h('tr', null, h('td', null, 'All of them'), cols.map(col => cell(all.totals, col[0], col[2], all.currency)))) : null)),
+    h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, ((all && all.month) || 'This month') + ' is what was won since the first, and for contract work the month in progress at the hours agreed. “Likely to come” weighs what is open by how far along it is.'
+      + (all.totals ? '' : ' No totals: the pipelines are in different currencies.'))) : null
+  const month = billing.month
+  const contract = billing.type === 'contract' ? h('div', { key: 'contract', className: 'stoa-prod' },
+    h('div', { className: 'stoa-sechead', style: { padding: '0 0 8px' } }, h('span', { className: 'stoa-eyebrow' }, 'Contract' + (billing.client ? ' · ' + billing.client : '')),
+      billing.client && openClient ? h(Btn, { kind: 'quiet', onClick: () => openClient(billing.client) }, 'Its terms and invoices') : null),
+    month ? h('div', { className: 'stoa-strip' },
+      h('div', { className: 'stoa-tile' }, h('span', { className: 'stoa-eyebrow' }, 'Hourly rate'), h('b', null, money(billing.rate, pb.currency)), h('span', { className: 'stoa-sub' }, billing.hours_week + ' hours a week')),
+      h('div', { className: 'stoa-tile' }, h('span', { className: 'stoa-eyebrow' }, 'This month'), h('b', null, month.running ? money(month.amount, pb.currency) : '—'),
+        h('span', { className: 'stoa-sub' }, month.running ? month.label + ' · about ' + month.hours + ' hours' : 'outside the contract’s months')),
+      h('div', { className: 'stoa-tile', 'data-tone': billing.to_bill ? 'warn' : '' }, h('span', { className: 'stoa-eyebrow' }, 'Waiting to be billed'), h('b', null, billing.to_bill ? String(billing.to_bill) : '0'),
+        h('span', { className: 'stoa-sub' }, billing.to_bill ? (billing.to_bill === 1 ? 'month' : 'months') + ' ended, below' : 'no month has ended yet')))
+      : h('p', { className: 'stoa-sub' }, 'Say who the contract is with, the hourly rate and the hours a week on the Pipeline tab, under Billing, and each month’s bill is worked out here.'),
+    month ? h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'A month is put here to bill once it has ended, and you can correct the hours before you record the invoice. '
+      + (month.running ? month.label + ' can be billed from ' + month.bills_from + '. ' : '') + 'Billing runs from ' + (billing.start_label || 'this month') + '.') : null) : null
+  return [across, contract]
+}
+
 const CSS = `
 /* The look. Surfaces, words and lines are the app's theme (--ui-*), so every theme carries it.
    Labels, figures and anything you press are set in the app's mono face; sentences stay in its text face.
@@ -1494,7 +1757,33 @@ button.stoa-replabel { cursor: pointer; } button.stoa-replabel:hover { text-deco
 @media (prefers-reduced-motion: reduce) { .stoa-reptrack > i.stoa-repfill { animation: none; } }
 `
 
-const Style = () => h('style', null, CSS)
+const CSS_RECRUITING = `
+.stoa-mapsearch { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 14px; padding: 8px 0 10px; border-bottom: 1px dotted var(--ui-stroke-secondary); font-size: 12.5px; color: var(--ui-text-secondary); }
+.stoa-mapsearch .stoa-select, .stoa-mapfor .stoa-select { width: auto; max-width: min(440px, 100%); }
+.stoa-mapfor { display: grid; gap: 8px; margin: 8px 0 2px; }
+.stoa-mapfor label { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.stoa-billing { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0 0 12px; font-size: 12.5px; color: var(--ui-text-secondary); }
+.stoa-billing b { color: var(--ui-text-primary); font-weight: 600; }
+.stoa-billform { margin: 0 0 14px; }
+.stoa-billkinds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
+.stoa-billkind { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--ui-stroke-secondary); border-radius: var(--stoa-r); background: var(--ui-bg-card); color: var(--ui-text-primary); text-align: left; cursor: pointer; }
+.stoa-billkind[data-on="1"] { border-color: var(--stoa-accent); background: var(--stoa-accent-soft); }
+.stoa-billkind b { font-weight: 600; }
+.stoa-billclear { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0 0; font-size: 12px; line-height: 1.45; color: var(--ui-text-secondary); }
+.stoa-prod { margin: 0 0 20px; padding-bottom: 14px; border-bottom: 1px dotted var(--ui-stroke-secondary); }
+.stoa-prodtable { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.stoa-prodtable th { padding: 6px 10px 6px 0; border-bottom: 1px solid var(--ui-stroke-secondary); font: 10.5px var(--stoa-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ui-text-tertiary); text-align: left; white-space: nowrap; }
+.stoa-prodtable td { padding: 8px 10px 8px 0; border-bottom: 1px dotted var(--ui-stroke-secondary); vertical-align: top; }
+.stoa-prodtable [data-num="1"] { text-align: right; font-family: var(--stoa-mono); font-variant-numeric: tabular-nums; white-space: nowrap; padding: 8px 0 8px 14px; }
+.stoa-prodtable td[data-tone="good"] { color: var(--stoa-accent-text); }
+.stoa-prodtable td[data-tone="warn"] { color: var(--ui-orange, #c8642d); }
+.stoa-prodtable td[data-tone="bad"] { color: var(--ui-red, #b83a4b); }
+.stoa-prodtable small { display: block; margin-top: 2px; font-size: 11px; color: var(--ui-text-tertiary); }
+.stoa-prodname { padding: 0; border: 0; background: none; color: var(--ui-text-primary); font: inherit; font-weight: 600; text-align: left; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.stoa-prodname:disabled { cursor: default; text-decoration: none; }
+.stoa-prodtable tfoot td { border-bottom: 0; border-top: 1px solid var(--ui-stroke-secondary); font-weight: 600; }
+`
+const Style = () => h('style', null, CSS + CSS_RECRUITING)
 // A tag is one short word or two and never breaks. `wrap` is for a tag that carries someone's own sentence (a signal), which must fold inside its box.
 const Chip = ({ tone, wrap, children }) => h('span', { className: 'stoa-chip', 'data-tone': tone || '', 'data-wrap': wrap ? '1' : '0' }, children)
 const Btn = ({ kind, children, ...props }) => h('button', { type: 'button', className: 'stoa-btn', 'data-kind': kind || '', ...props }, children)
@@ -1912,7 +2201,7 @@ function Edit({ deal, state, done }) {
       open ? h(Field, { label: 'Stage' }, h('select', { className: 'stoa-field', value: deal.stage, disabled: busy,
         onChange: event => send({ verb: 'move', stage: event.target.value }) },
         pb.stages.map(stage => h('option', { key: stage.id, value: stage.id }, stage.label)))) : h('span'),
-      h(Field, { label: cap(terms.value), type: 'number', min: 0, value: v.value, onChange: set('value') }),
+      noFees() ? null : h(Field, { label: cap(terms.value), type: 'number', min: 0, value: v.value, onChange: set('value') }),
       h(Field, { label: cap(terms.owner), value: v.owner, onChange: set('owner') }),
       h(Field, { label: cap(terms.company), value: v.company, onChange: set('company') }),
       h(Field, { label: cap(terms.group), value: v.group, onChange: set('group') }),
@@ -1967,7 +2256,7 @@ function NewRecord({ state, close, opened, preset }) {
       h(Field, { label: cap(terms.group), list: 'stoa-new-groups', value: v.group, onChange: set('group') }),
       h(Field, { label: 'Stage' }, h('select', { className: 'stoa-field', value: v.stage, onChange: set('stage') },
         pb.stages.map(stage => h('option', { key: stage.id, value: stage.id }, stage.label)))),
-      h(Field, { label: cap(terms.value), type: 'number', min: 0, value: v.value, onChange: set('value') }),
+      noFees() ? null : h(Field, { label: cap(terms.value), type: 'number', min: 0, value: v.value, onChange: set('value') }),
       h(Field, { label: cap(terms.owner), list: 'stoa-new-owners', value: v.owner, onChange: set('owner') }),
       h(Field, { label: 'Email', type: 'email', value: v.email, onChange: set('email') }),
       h(Field, { label: 'Phone', type: 'tel', value: v.phone, onChange: set('phone') }),
@@ -1998,7 +2287,7 @@ function Record({ id, state: shown, sessionId, close, onCompany, onGroup }) {
   const pb = state.playbook
   const open = deal.status === 'open', active = open || Boolean(deal.in_delivery)      // a win still in delivery keeps its next step
   const run = body => { setBusy(true); act(id, body, sessionId, pipe).then(() => setBusy(false)) }
-  const facts = [[cap(pb.terms.group), deal.group], [pb.terms.value, money(deal.value, pb.currency)], [cap(pb.terms.owner), deal.owner],
+  const facts = [[cap(pb.terms.group), deal.group], ...(noFees() ? [] : [[pb.terms.value, money(deal.value, pb.currency)]]), [cap(pb.terms.owner), deal.owner],
     ['Expected close', open && deal.close_on ? shortDate(deal.close_on) + (deal.close_on < today() ? ' (past)' : '') : '']]
     .concat(pb.fields.map(field => [field.label, (deal.fields || {})[field.key]]))
     .concat([['Email', deal.email], ['Phone', deal.phone]]).filter(pair => pair[1])
@@ -2330,7 +2619,7 @@ function Pane() {
       pb.stages.map(stage => {
         const here = open.filter(deal => deal.stage === stage.id)
         if (!here.length) return null
-        const value = here.reduce((sum, deal) => sum + (deal.value || 0), 0)
+        const value = inPlay(here)
         return h('div', { className: 'stoa-sec', key: stage.id },
           h('div', { className: 'stoa-sechead' }, h('span', { className: 'stoa-eyebrow' }, stage.label),
             h('span', { className: 'stoa-num' }, here.length + (value ? ' · ' + money(value, pb.currency) : ''))),
@@ -3861,6 +4150,7 @@ function Cash({ state, openId, setOpenId, openClient }) {
     if (record && record.delivery !== stage.id) act(id, { verb: 'update', delivery: stage.id })
   }
   return h('div', { className: 'stoa-cash' },
+    h(ProductionHead, { state, openClient, showPipe: id => { $pipe.set(id === 'main' ? '' : id); if (storage) storage.set('pipe', id === 'main' ? '' : id); refresh() } }),
     h('div', { className: 'stoa-strip' }, tiles.map(tile => h('div', { key: tile[0], className: 'stoa-tile', 'data-tone': tile[3], title: tile[4] },
       h('span', { className: 'stoa-eyebrow' }, tile[0]), h('b', null, money(tile[1], pb.currency) || '0'), h('span', { className: 'stoa-sub' }, tile[2])))),
     toBill.length ? h('div', { className: 'stoa-h2' }, 'To bill') : null,
@@ -4009,7 +4299,7 @@ function DetailsForm({ deal, pb, state, done }) {
       h(Field, { label: 'Phone', type: 'tel', value: v.phone, onChange: set('phone'), onKeyDown: enter }),
       h(Field, { label: 'LinkedIn', value: v.linkedin, placeholder: 'linkedin.com/in/…', onChange: set('linkedin'), onKeyDown: enter }),
       h(Field, { label: cap(terms.owner), list: 'stoa-edit-owners', value: v.owner, onChange: set('owner'), onKeyDown: enter }),
-      h(Field, { label: cap(terms.value), type: 'number', min: 0, value: v.value, onChange: set('value'), onKeyDown: enter }),
+      noFees() ? null : h(Field, { label: cap(terms.value), type: 'number', min: 0, value: v.value, onChange: set('value'), onKeyDown: enter }),
       open ? h(Field, { label: 'Expected close', type: 'date', value: v.close_on, title: 'The forecast puts it in this month', onChange: set('close_on') }) : null,
       pb.fields.map(field => h(Field, { key: field.key, label: field.label, value: f[field.key], onChange: event => setF({ ...f, [field.key]: event.target.value }), onKeyDown: enter })),
       h(Field, { label: 'Source', value: v.source, placeholder: 'Referral, LinkedIn, an event…', onChange: set('source'), onKeyDown: enter })),
@@ -4034,7 +4324,7 @@ function RecordDetails({ deal, pb, state, openGroup, openCompany }) {
     ['Phone', deal.phone ? h('a', { className: 'stoa-alink', href: 'tel:' + deal.phone.replace(/[^+\d]/g, '') }, deal.phone) : ''],
     ['LinkedIn', deal.linkedin ? h('a', { className: 'stoa-alink', href: webLink(deal.linkedin), target: '_blank', rel: 'noreferrer' }, bareLink(deal.linkedin)) : ''],
     [cap(terms.owner), deal.owner],
-    [cap(terms.value), money(deal.value, pb.currency)],
+    ...(noFees() ? [] : [[cap(terms.value), money(deal.value, pb.currency)]]),
     open ? ['Expected close', deal.close_on ? shortDate(deal.close_on) + (deal.close_on < today() ? ' (past)' : '') : ''] : null]
     .concat(pb.fields.map(field => [field.label, (deal.fields || {})[field.key]]))
     .concat([['Source', deal.source], ['Added', deal.created_at ? shortDate(deal.created_at.slice(0, 10)) : '']])
@@ -4325,14 +4615,14 @@ function GroupPage({ name, state, sessionId, back, backLabel, openRecord, openCl
               h(Field, { label: 'Status' },
                 h('select', { className: 'stoa-field', value: now.status, onChange: event => set({ status: event.target.value }) },
                   GROUP_STATUS.map(pair => h('option', { key: pair[0], value: pair[0] }, pair[1])))),
-              h(Field, { label: cap(pb.terms.value) + ' for each ' + pb.terms.deal, value: now.value, placeholder: 'Left blank: each says its own',
+              noFees() ? null : h(Field, { label: cap(pb.terms.value) + ' for each ' + pb.terms.deal, value: now.value, placeholder: 'Left blank: each says its own',
                 title: 'A new ' + pb.terms.deal + ' here takes this unless it brings its own', onChange: event => set({ value: event.target.value }) }),
-              (group.facts || []).map(item => h(Field, { key: item.key, label: item.label, value: fact(item), onChange: event => set({ fields: { ...now.fields, [item.key]: event.target.value } }) }))),
+              (group.facts || []).filter(item => !(noFees() && FEE_FACTS.includes(item.key))).map(item => h(Field, { key: item.key, label: item.label, value: fact(item), onChange: event => set({ fields: { ...now.fields, [item.key]: event.target.value } }) }))),
             h('div', { className: 'stoa-btns' }, h(Btn, { kind: 'primary', disabled: busy || !now.title.trim() || !draft, onClick: save }, 'Save'),
               h(Btn, { kind: 'quiet', disabled: busy, onClick: () => { setDraft(null); setEditing(false) } }, 'Cancel')))
             : h(Facts, { rows: [company ? ['Email domain', company.domain ? company.domain + (company.domain_known ? '' : ' (from their email)') : ''] : ['Client', group.client],
-              ['Status', group.status_label], [cap(pb.terms.value) + ' for each ' + pb.terms.deal, group.value ? money(group.value, pb.currency) : '']]
-              .concat((group.facts || []).map(item => [item.label, item.value])) })),
+              ['Status', group.status_label], ...(noFees() ? [] : [[cap(pb.terms.value) + ' for each ' + pb.terms.deal, group.value ? money(group.value, pb.currency) : '']])]
+              .concat((group.facts || []).filter(item => !(noFees() && FEE_FACTS.includes(item.key))).map(item => [item.label, item.value])) })),
         h(Section, { title: 'Notes' },
           h('textarea', { className: 'stoa-field stoa-notes', style: { marginTop: 0 }, rows: 4, value: note === null ? group.note : note,
             placeholder: 'What to know about them: how they decide, what was agreed, what to avoid…', onChange: event => setNote(event.target.value) }),
@@ -4721,7 +5011,7 @@ function Board({ state, openId, setOpenId }) {
   const columns = pb.stages.map(stage => ({ ...stage, here: open.filter(deal => deal.stage === stage.id) }))
     .concat(strays.length ? [{ id: '~other', label: 'Other stages', other: true, here: strays }] : [])
     .concat([{ id: '~won', label: pb.won.label, won: true, here: won.slice(0, 8) }])
-    .map(column => ({ ...column, value: column.here.reduce((sum, deal) => sum + (deal.value || 0), 0) }))
+    .map(column => ({ ...column, value: inPlay(column.here) }))
   const most = Math.max(1, ...columns.filter(column => !column.won).map(column => column.value))
   const drop = (event, column) => {
     const id = event.dataTransfer.getData(DRAG)
@@ -4941,7 +5231,8 @@ function mapLayout(list, lens, W, segments, sizeBy) {
 }
 
 /** The picture itself. It only draws and reports what was picked; what a pick means is the map's business. */
-function MapPicture({ market, list, lens, sizeBy, sel, shown, onPick, onLasso, onClear, onGrow, onSuggest }) {
+function MapPicture({ market, list, lens, sizeBy, sel, shown, onPick, onLasso, onClear, onGrow, onSuggest, say: said }) {
+  const say = said || MAP_SALES
   const box = useRef(null), drag = useRef(null), lassoed = useRef(false)
   const [W, setW] = useState(0)
   const [hover, setHover] = useState('')
@@ -4997,7 +5288,7 @@ function MapPicture({ market, list, lens, sizeBy, sel, shown, onPick, onLasso, o
         const c = n.c, k = heatOf(c.score), picked = sel.has(n.id)
         return h('g', { key: n.id, className: 'stoa-mapco', 'data-state': c.status === 'tracked' ? 'in' : c.fresh ? 'fresh' : 'on', 'data-sel': picked ? '1' : '0', 'data-dim': shown(c) ? '0' : '1',
           style: { transform: 'translate(' + n.x.toFixed(1) + 'px,' + n.y.toFixed(1) + 'px)' }, tabIndex: 0, role: 'button', 'aria-pressed': picked,
-          'aria-label': c.company + ', fit ' + c.score + ' of 100' + (c.status === 'tracked' ? ', in the pipeline' : '') + (c.reason ? ', has a reason to call' : ''),
+          'aria-label': c.company + ', fit ' + c.score + ' of 100' + (c.status === 'tracked' ? ', in the pipeline' : '') + (c.reason ? ', has ' + say.reason : ''),
           onClick: event => { event.stopPropagation(); onPick(n.id, event.shiftKey || event.metaKey || event.ctrlKey) },
           onKeyDown: event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onPick(n.id, event.shiftKey) } },
           onPointerEnter: event => { if (event.pointerType !== 'touch') setHover(n.id) }, onPointerLeave: () => setHover('') },
@@ -5021,17 +5312,17 @@ function MapPicture({ market, list, lens, sizeBy, sel, shown, onPick, onLasso, o
       L.groups.map(g => {
         if (g.ghost) {
           return h('div', { key: 'ghost', className: 'stoa-mapghost', style: { left: g.cx, top: g.cy, width: Math.min(2 * g.R - 34, 216) } },
-            h('span', { className: 'stoa-eyebrow' }, 'Next to this market'), h('b', null, 'A neighbouring segment'),
+            h('span', { className: 'stoa-eyebrow' }, say.recruiting ? 'Next to this role' : 'Next to this market'), h('b', null, say.recruiting ? 'A neighbouring pool' : 'A neighbouring segment'),
             h('p', null, 'Hermes can suggest who else has this problem.'), h(Btn, { onClick: onSuggest }, 'Ask Hermes'))
         }
         const count = g.m.length, avg = count ? Math.round(g.m.reduce((sum, n) => sum + n.c.score, 0) / count) : 0
         return h('div', { key: lens + g.key, className: 'stoa-mapcap', style: { left: g.cx, top: g.cy + g.R + 6, width: g.colW - 8 } },
-          h('b', null, g.name), h('span', null, plural(count, 'company', 'companies') + (lens === 'held' ? ' · ' + Math.round(100 * count / L.ns.length) + '%' : ' · fit ' + avg)),
+          h('b', null, g.name), h('span', null, plural(count, say.thing, say.things) + (lens === 'held' ? ' · ' + Math.round(100 * count / L.ns.length) + '%' : ' · fit ' + avg)),
           lens === 'seg' && count <= 3 ? h('span', { className: 'stoa-chip', 'data-tone': 'warn', style: { marginLeft: 6 } }, 'thin') : null,
-          lens === 'seg' ? h(Btn, { kind: 'quiet', title: 'Ask Hermes to find more companies for this segment', onClick: () => onGrow(g.name) }, '+ Grow') : null)
+          lens === 'seg' ? h(Btn, { kind: 'quiet', title: 'Ask Hermes to find more ' + say.things + ' for this ' + (say.recruiting ? 'pool' : 'segment'), onClick: () => onGrow(g.name) }, '+ Grow') : null)
       }),
       hovered ? h('div', { className: 'stoa-maptip', style: { left: Math.max(4, hovered.x + hovered.r + 14 + 236 > L.W ? hovered.x - hovered.r - 14 - 232 : hovered.x + hovered.r + 14), top: Math.max(4, Math.min(L.H - 120, hovered.y - 24)) } },
-        h('b', null, hovered.c.company), h(Fit, { value: squaresOf(hovered.c.score) }), h('span', { className: 'stoa-sub' }, '  fit ' + hovered.c.score + (hovered.c.size ? ' · ' + hovered.c.size : '')),
+        h('b', null, hovered.c.company), h(Fit, { value: squaresOf(hovered.c.score) }), h('span', { className: 'stoa-sub' }, '  fit ' + hovered.c.score + (hovered.c.size ? ' · ' + hovered.c.size : '') + (say.people && hovered.c.uses ? ' at ' + hovered.c.uses : '')),
         hovered.c.signal ? h('div', null, h(Chip, { wrap: true }, hovered.c.signal), agoWords(hovered.c.days) ? h('span', { className: 'stoa-sub' }, '  ' + agoWords(hovered.c.days)) : null) : null, hovered.c.why ? h('div', { className: 'stoa-sub' }, hovered.c.why) : null) : null,
       lasso ? h('div', { className: 'stoa-maplasso', style: { left: lasso.l, top: lasso.t, width: lasso.w, height: lasso.h } }) : null) : null)
 }
@@ -5057,12 +5348,16 @@ const MenuItem = ({ title, sub, on, danger, onClick }) => h('button', { type: 'b
   h('span', null, title), sub ? h('small', null, sub) : null)
 
 /** Starting a map is Hermes's work: it has to go and find the companies. This takes what you sell and who to, and hands it over. */
-function NewMap({ first, onClose }) {
+function NewMap({ first, onClose, shape }) {
+  const role = shape === 'roles'
+  const mapPipe = useContext(InPipe) || $pipe.get()        // on the page itself nothing names a pipeline but the one it is showing
+  const [goes, setGoes] = useState(() => (role ? $filter.get().group || '' : ''))       // the search it is for: the one the pipeline is narrowed to, to begin with
+  const [findMore, setFindMore] = useState(true)        // look on the web for candidates, or keep to the people named in the request
   const [text, setText] = useState('')
   const go = () => {
     const said = text.trim()
     if (!said) return
-    const sent = toChat('Map a new market for me and keep it on the desk as a map of its own: ' + said + ' Name the market, split it into segments that would each get a different pitch, set the requirements, '
+    const sent = toChat(role ? roleMapAsk(said, goes, findMore) : 'Map a new market for me and keep it on the desk as a map of its own: ' + said + ' Name the market, split it into segments that would each get a different pitch, set the requirements, '
       + 'then research companies. For each one record the evidence and its source, its headcount, what it uses today for the job we do, any signal with the date it happened, and the likely buyer if you come across one. Tell me when it is on the desk.', null, 'maps')
     if (!sent) return
     host.notify({ kind: 'info', message: 'Hermes is mapping it. The map appears here when it is saved, which takes a few minutes.' })
@@ -5070,9 +5365,10 @@ function NewMap({ first, onClose }) {
     if (onClose) onClose()
   }
   return h('div', { className: 'stoa-box stoa-mapform' },
-    h('label', { className: 'stoa-name', htmlFor: 'stoa-newmap' }, first ? 'Map your first market' : 'A new map'),
-    h('p', { className: 'stoa-sub', style: { margin: '4px 0 8px' } }, 'Say what you sell and who you are after. Hermes names the market, splits it into segments, researches companies and saves it as a map of its own. It takes a few minutes, and you can keep working while it does.'),
-    h('textarea', { id: 'stoa-newmap', className: 'stoa-field stoa-maptext', rows: 3, autoFocus: !first, value: text, placeholder: 'We sell a fraud prevention tool to fintechs and marketplaces in the US with a small risk team.', onChange: event => setText(event.target.value) }),
+    h('label', { className: 'stoa-name', htmlFor: 'stoa-newmap' }, role ? (first ? 'Map the candidates for a role' : 'A new candidate map') : first ? 'Map your first market' : 'A new map'),
+    h('p', { className: 'stoa-sub', style: { margin: '4px 0 8px' } }, role ? 'Describe the role and who would fit it. Stoa splits the candidates into pools, finds people who could fill the role from public sources, each with their own fit and the evidence for it, and saves them as a map of its own. It takes a few minutes, and you can keep working while it does.' : 'Say what you sell and who you are after. Hermes names the market, splits it into segments, researches companies and saves it as a map of its own. It takes a few minutes, and you can keep working while it does.'),
+    h('textarea', { id: 'stoa-newmap', className: 'stoa-field stoa-maptext', rows: 3, autoFocus: !first, value: text, placeholder: role ? 'A Head of Events for a 40-person trade association in Columbus. Has run a 3,000-person annual show end to end. $130–150k, hybrid.' : 'We sell a fraud prevention tool to fintechs and marketplaces in the US with a small risk team.', onChange: event => setText(event.target.value) }),
+    role ? h(MapFor, { pipe: mapPipe, value: goes, onChange: setGoes, web: findMore, onWeb: setFindMore }) : null,
     h('div', { className: 'stoa-btns' }, h(Btn, { kind: 'primary', disabled: !text.trim(), onClick: go }, 'Have Hermes map it'), onClose ? h(Btn, { kind: 'quiet', onClick: onClose }, 'Cancel') : null))
 }
 
@@ -5178,6 +5474,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
   const [seenAt, setSeenAt] = useState(() => Number(kept('mapseen')) || Date.now())
   useEffect(() => { const id = market.id; setSeenAt(Number(kept('mapseen')) || Date.now()); return () => { try { if (storage) storage.set('mapseen:' + id, Date.now()) } catch { /* no storage */ } } }, [market.id])
   const list = useMemo(() => mapCompanies(market, weights, seenAt), [market, weights, seenAt])
+  const mapSay = mapWords(shape, market)
   const byId = useMemo(() => new Map(list.map(c => [c.id, c])), [list])
   const sel = useMemo(() => new Set(picked.filter(id => byId.has(id))), [picked, byId])
   const chosen = [...sel].map(id => byId.get(id))
@@ -5239,14 +5536,14 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
         (result.none || []).length ? 'Nobody with a title like that at ' + result.none.join(', ') + '.' : '', result.problem || ''].filter(Boolean).join(' ') || 'Every company picked already has a buyer.')
     },
     move: (company, segment) => send('move', [company], { segment }, result => (result.ok ? result.company + ' now sits in ' + result.segment + '.' : result.error)),
-    draft: companies => ask(companies.length === 1
+    draft: companies => ask(mapSay.draftAsk ? mapSay.draftAsk(here, companies.map(c => c.company)) : companies.length === 1
       ? 'Draft a first outreach note to ' + (companies[0].buyer ? companies[0].buyer.name + ' at ' : who.likely + ' at ') + companies[0].company + ', leading with the evidence on' + here + '. Show me the draft. Do not send anything.'
       : 'Draft a first outreach note for each of these companies from' + here + ', each leading with its own evidence: ' + companies.map(c => c.company).join(', ') + '. Show me the drafts. Do not send anything.'),
-    more: companies => roomFor() && research('Find up to ' + roomFor() + ' more ' + (roomFor() === 'one' ? 'company' : 'companies') + ' like ' + namesOf(companies) + ' for' + here + '. Keep to the map\'s requirements and check each one against them with the evidence. ' + RECORD + ' Add them to the map, then tell me who you added and why.'),
-    grow: segment => roomFor() && research('Find up to ' + roomFor() + ' more ' + (roomFor() === 'one' ? 'company' : 'companies') + ' for the “' + segment + '” segment of' + here + '. Keep to the map\'s requirements and check each one against them with the evidence. ' + RECORD + ' Add them to the map, then tell me who you added and why.'),
+    more: companies => roomFor() && research(mapSay.moreAsk ? mapSay.moreAsk(here, roomFor(), namesOf(companies)) : 'Find up to ' + roomFor() + ' more ' + (roomFor() === 'one' ? 'company' : 'companies') + ' like ' + namesOf(companies) + ' for' + here + '. Keep to the map\'s requirements and check each one against them with the evidence. ' + RECORD + ' Add them to the map, then tell me who you added and why.'),
+    grow: segment => roomFor() && research(mapSay.growAsk ? mapSay.growAsk(here, roomFor(), segment) : 'Find up to ' + roomFor() + ' more ' + (roomFor() === 'one' ? 'company' : 'companies') + ' for the “' + segment + '” segment of' + here + '. Keep to the map\'s requirements and check each one against them with the evidence. ' + RECORD + ' Add them to the map, then tell me who you added and why.'),
     fill: gaps => research('On' + here + ', fill in what is missing. For each company that lacks it: ' + gaps.map(gap => gap.ask).join('; ') + '. Keep what is already there, give a source for anything you add, leave out what no source says, and tell me what you could not find.'),
-    suggest: () => research('Suggest two neighbouring segments for' + here + ': who they are, and why they would be worth mapping. Do not add anything yet; I will say which.'),
-    require: text => research('Add this requirement to' + here + ' and check every company on it against it, with the evidence: ' + text)
+    suggest: () => research(mapSay.suggestAsk ? mapSay.suggestAsk(here) : 'Suggest two neighbouring segments for' + here + ': who they are, and why they would be worth mapping. Do not add anything yet; I will say which.'),
+    require: text => research(mapSay.requireAsk ? mapSay.requireAsk(here, text) : 'Add this requirement to' + here + ' and check every company on it against it, with the evidence: ' + text)
   }
   const save = share => { setSaving(share ? 'share' : 'own'); savePage(market, share, pipe).then(() => setSaving('')) }
   const facetBtn = (kind, value, label, big, pct, text, small) => {
@@ -5263,7 +5560,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
     const open = companies.filter(c => c.status !== 'tracked'), nobody = companies.filter(c => !c.buyer)
     return [
       open.length ? h(Btn, { key: 'add', kind: 'primary', disabled: Boolean(busy), onClick: () => act.add(companies) }, busy === 'track' ? 'Adding…' : companies.length === 1 ? 'Add to pipeline' : 'Add ' + open.length + ' to pipeline') : null,
-      nobody.length ? (market.lookups && (market.buyer_titles || []).length
+      nobody.length && !mapSay.people ? (market.lookups && (market.buyer_titles || []).length
         ? h(Btn, { key: 'buy', disabled: Boolean(busy), title: 'One People Data Labs lookup per company, for one person ranked manager or above with a title like the buyers already on this map (' + market.buyer_titles.slice(0, 3).join(', ') + '). Read the title before you use the name. One person is one credit, so this spends at most ' + plural(nobody.length, 'credit', 'credits') + ', inside your monthly cap.',
           onClick: () => act.buyers(companies) }, busy === 'buyers' ? 'Looking…' : (companies.length === 1 ? who.find[0] : who.find[1]) + ' · ' + plural(nobody.length, 'lookup', 'lookups'))
         : h(Btn, { key: 'buy', title: market.lookups ? 'No buyer is named on this map yet, so there is no job title to look for. Hermes works out who the buyer is at each company.' : 'Hermes works out who the buyer is with its web search. A People Data Labs key (Setup) lets it look people up.',
@@ -5276,7 +5573,10 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
   const label = text => h('div', { className: 'stoa-sechead', style: { padding: '0 0 6px' } }, h('span', { className: 'stoa-eyebrow' }, text))
 
   let side
-  if (chosen.length === 1) {
+  if (chosen.length === 1 && mapSay.people) {
+    const c = chosen[0]
+    side = h(MapPerson, { c, market, busy: Boolean(busy), actions: actions([c]), open: c.status === 'tracked' && c.deal ? () => openRecord(c.deal) : null, move: segment => act.move(c, segment), close: () => setPicked([]) })
+  } else if (chosen.length === 1) {
     const c = chosen[0]
     side = h('div', null,
       h('div', { className: 'stoa-eyebrow' }, c.segment + (c.also ? ' · also fits ' + c.also : '')),
@@ -5291,7 +5591,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
         h('span', null, req.shown ? '[x]' : '[ ]'), h('span', null, h('b', null, req.label), h('span', { className: 'stoa-sub', style: { display: 'block' } }, req.shown ? (req.evidence || 'Shown; the source is on the map') : 'No evidence found'))))] : null,
       label('Facts'),
       h('div', { className: 'stoa-facts', style: { marginTop: 0, paddingTop: 0, borderTop: 0 } },
-        [['Size', c.size || 'Not known'], ['Uses today', c.uses || 'Not known'], [who.Cap, c.buyer ? [c.buyer.name, c.buyer.title].filter(Boolean).join(', ') : 'Nobody named yet'],
+        [['Size', c.size || 'Not known'], [shape === 'roles' ? 'Works with' : 'Uses today', c.uses || 'Not known'], [who.Cap, c.buyer ? [c.buyer.name, c.buyer.title].filter(Boolean).join(', ') : 'Nobody named yet'],
           ['Source', c.source || 'None recorded']].map(pair => h('div', { key: pair[0], style: { gridColumn: '1 / -1' } }, h('small', { className: 'stoa-eyebrow' }, pair[0]),
           pair[0] === 'Source' && /^https?:\/\//.test(pair[1]) ? h('a', { className: 'stoa-alink', href: pair[1], target: '_blank', rel: 'noreferrer', style: { display: 'block', overflowWrap: 'anywhere' } }, bareLink(pair[1])) : h('span', { style: { overflowWrap: 'anywhere' } }, pair[1])))),
       c.status !== 'tracked' && market.segments.length > 1 ? [label('Adjust'), h('select', { key: 'move', className: 'stoa-select', value: c.segment, disabled: Boolean(busy), 'aria-label': 'Move to another segment',
@@ -5341,26 +5641,30 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
       .then(result => { setBusy(''); return result })
   }
   const clamp = (text, lines) => h('span', { className: 'stoa-clamp', style: lines ? { WebkitLineClamp: lines } : undefined, title: text }, text)
-  const cols = [['company', 'Company', '18%'], ['segment', 'Segment', null], ['score', 'Fit', '104px'], ['reason', 'Why now', null], ['headcount', 'People', '74px'], ['uses', 'Uses today', null], ['buyer', who.Cap, null], ['status', 'Pipeline', '128px']]
+  const cols = [['company', mapSay.thingCap || 'Company', '18%'], ['segment', mapSay.people ? 'Pool' : 'Segment', null], ['score', 'Fit', '104px'], ['reason', 'Why now', null], ['headcount', 'People', '74px'], ['uses', mapSay.people ? 'Works at' : shape === 'roles' ? 'Works with' : 'Uses today', null], ['buyer', mapSay.people ? 'Title' : who.Cap, null], ['status', 'Pipeline', '128px']].filter(col => !(mapSay.people && col[0] === 'headcount'))
   return h('div', { className: 'stoa-mapwrap' },
     h('div', { className: 'stoa-maptop' },
       h('div', { className: 'stoa-grow', style: { minWidth: 0 } },
         h(Menu, { kind: 'title', label: market.name, title: 'Your market maps: switch, start a new one, rename or delete' },
           (markets || []).map(item => h(MenuItem, { key: item.id, on: item.id === market.id, title: item.name,
-            sub: plural(item.counts.mapped, 'company', 'companies') + (shortDay(item.updated) ? ' · updated ' + shortDay(item.updated) : ''), onClick: () => onMarket(item.id) })),
+            sub: (shape === 'roles' ? item.counts.mapped + ' on the map' : plural(item.counts.mapped, 'company', 'companies')) + (shortDay(item.updated) ? ' · updated ' + shortDay(item.updated) : ''), onClick: () => onMarket(item.id) })),
           h('div', { className: 'stoa-menurule' }),
-          h(MenuItem, { title: '+  New map…', sub: 'Tell Hermes what you sell and who to, and it maps the market', onClick: () => setMode('new') }),
+          h(MenuItem, { title: '+  New map…', sub: shape === 'roles' ? 'Describe the role, and the candidates for it are found and mapped' : 'Tell Hermes what you sell and who to, and it maps the market', onClick: () => setMode('new') }),
           h(MenuItem, { title: 'Rename this map…', onClick: () => { setDraft(market.name); setMode('rename') } }),
+          rowsOf(market) ? h(MenuItem, { title: rowsOf(market) === 'people' ? 'Dots are candidates · change to companies' : 'Dots are companies · change to candidates',
+            sub: rowsOf(market) === 'people' ? 'For a map of where the people work, with people named under each company' : 'For a map where every row is one person. Nothing on the map is changed, only how it is read',
+            onClick: () => manage('rows', { rows: rowsOf(market) === 'people' ? 'companies' : 'people' }, result => (result.rows === 'people' ? 'This map’s dots are now candidates.' : 'This map’s dots are now companies.')) }) : null,
           h(MenuItem, { title: 'Delete this map…', danger: true, onClick: () => setMode('delete') })),
-        h('div', { className: 'stoa-sub' }, [plural(list.length, 'company', 'companies'), market.numbers.in_pipeline + ' in the pipeline', list.filter(c => c.reason).length + ' with a reason to call',
-          plural(list.filter(c => c.buyer).length, who.one + ' named', who.many + ' named'), shortDay(market.updated) ? 'updated ' + shortDay(market.updated) : ''].filter(Boolean).join(' · '))),
+        h('div', { className: 'stoa-sub' }, [plural(list.length, mapSay.thing, mapSay.things), market.numbers.in_pipeline + mapSay.inPipe, list.filter(c => c.reason).length + ' with ' + mapSay.reason,
+          mapSay.people ? plural(new Set(list.map(c => (c.uses || '').toLowerCase()).filter(Boolean)).size, 'employer', 'employers') : plural(list.filter(c => c.buyer).length, who.one + ' named', who.many + ' named'), shortDay(market.updated) ? 'updated ' + shortDay(market.updated) : ''].filter(Boolean).join(' · '))),
       h('div', { className: 'stoa-btns', style: { margin: 0 } },
         h(ModelPick, { lane: 'maps' }),
         h(Btn, { title: 'This map by the numbers: what is on it, where it came from, what it has cost, and its limits', onClick: () => setMode('facts') }, 'Map facts'),
         h(Btn, { disabled: Boolean(saving), title: 'The whole map as one web page, with buyers\' names and what is in your pipeline', onClick: () => save(false) }, saving === 'own' ? 'Saving…' : 'Download page'),
         h(Btn, { disabled: Boolean(saving), title: 'The same page without buyers\' names or your pipeline: the one to host or send to a client', onClick: () => save(true) }, saving === 'share' ? 'Saving…' : 'Download a copy to share'))),
+    h(MapSearch, { market }),
     mode === 'facts' ? h(MapFacts, { market, onClose: () => setMode(''), onFill: act.fill }) : null,
-    mode === 'new' ? h(NewMap, { onClose: () => setMode('') }) : null,
+    mode === 'new' ? h(NewMap, { shape, onClose: () => setMode('') }) : null,
     mode === 'rename' ? h('form', { className: 'stoa-box stoa-mapform', onSubmit: event => { event.preventDefault(); if (draft.trim() && draft.trim() !== market.name) manage('rename', { name: draft.trim() }, result => 'The map is now called ' + result.name + '.') } },
       h('label', { className: 'stoa-name', htmlFor: 'stoa-mapname' }, 'What this map is called'),
       h('div', { className: 'stoa-pathrow', style: { marginTop: 8 } },
@@ -5369,34 +5673,34 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
         h(Btn, { kind: 'quiet', onClick: () => setMode('') }, 'Cancel'))) : null,
     mode === 'delete' ? h('div', { className: 'stoa-box stoa-mapform', role: 'alertdialog', 'aria-label': 'Delete this map' },
       h('div', { className: 'stoa-name' }, 'Delete “' + market.name + '”?'),
-      h('p', { className: 'stoa-sub', style: { margin: '4px 0 0' } }, 'The map and the ' + plural(list.length + dismissed.length, 'company', 'companies') + ' on it go for good: this cannot be taken back from the page. '
+      h('p', { className: 'stoa-sub', style: { margin: '4px 0 0' } }, 'The map and the ' + plural(list.length + dismissed.length, mapSay.thing, mapSay.things) + ' on it go for good: this cannot be taken back from the page. '
         + (market.numbers.in_pipeline ? 'The ' + plural(market.numbers.in_pipeline, 'record', 'records') + ' already in your pipeline ' + (market.numbers.in_pipeline === 1 ? 'stays' : 'stay') + ' there.' : 'Nothing in your pipeline is touched.')),
-      h('div', { className: 'stoa-btns' }, h(Btn, { kind: 'danger', disabled: Boolean(busy), onClick: () => manage('remove', {}, result => result.name + ' was deleted, with ' + plural(result.companies, 'company', 'companies') + '.') }, busy === 'remove' ? 'Deleting…' : 'Delete the map'),
+      h('div', { className: 'stoa-btns' }, h(Btn, { kind: 'danger', disabled: Boolean(busy), onClick: () => manage('remove', {}, result => result.name + ' was deleted, with ' + plural(result.companies, mapSay.thing, mapSay.things) + '.') }, busy === 'remove' ? 'Deleting…' : 'Delete the map'),
         h(Btn, { autoFocus: true, onClick: () => setMode('') }, 'Keep it'))) : null,
-    gone && dismissed.length ? h('div', { className: 'stoa-box', style: { marginBottom: 12 } }, h('div', { className: 'stoa-sub', style: { marginBottom: 6 } }, 'Taken off this map. Hermes does not propose a dismissed company again.'),
+    gone && dismissed.length ? h('div', { className: 'stoa-box', style: { marginBottom: 12 } }, h('div', { className: 'stoa-sub', style: { marginBottom: 6 } }, 'Taken off this map. ' + mapSay.gone),
       h('div', { className: 'stoa-chips' }, dismissed.map(row => h(Btn, { key: row.id, disabled: Boolean(busy), title: 'Put ' + row.company + ' back on the map',
         onClick: () => send('restore', [row], null, result => ((result.restored || []).length ? row.company + ' is back on the map.' : 'Nothing was put back.')) }, row.company + '  ↩')))) : null,
     h('div', { className: 'stoa-mapbody' },
       h('div', { className: 'stoa-mapa' },
         h('div', { className: 'stoa-mapbar' },
           h('div', { className: 'stoa-tabs', style: { margin: 0 }, role: 'group', 'aria-label': 'How the map is drawn' }, MAP_LENSES.map(item => h('button', { type: 'button', key: item[0], className: 'stoa-tab', style: { height: 28 },
-            'data-on': lens === item[0] ? '1' : '0', 'aria-pressed': lens === item[0], onClick: () => setLens(item[0]) }, item[1]))),
+            'data-on': lens === item[0] ? '1' : '0', 'aria-pressed': lens === item[0], onClick: () => setLens(item[0]) }, (mapSay.lens && mapSay.lens[item[0]]) || item[1]))),
           h('div', { className: 'stoa-mapquick' },
-            [['all', 'All'], ['open', 'Not in the pipeline'], ['reason', 'Reason to call'], ['nobuyer', shape === 'roles' ? 'Nobody named' : 'No buyer named'], ['fresh', 'New']].filter(item => item[0] !== 'fresh' || count('fresh')).map(item =>
+            [['all', 'All'], ['open', 'Not in the pipeline'], ['reason', shape === 'roles' ? 'Reason to move' : 'Reason to call'], ['nobuyer', shape === 'roles' ? 'Nobody named' : 'No buyer named'], ['fresh', 'New']].filter(item => (item[0] !== 'fresh' || count('fresh')) && !(item[0] === 'nobuyer' && mapSay.people)).map(item =>
               h(Btn, { key: item[0], kind: 'quiet', 'aria-pressed': quick === item[0], 'data-on': quick === item[0] ? '1' : '0', onClick: () => setQuick(item[0]) }, item[1] + ' ' + count(item[0]))),
             facet ? h(Btn, { title: 'Show every company again', onClick: () => setFacet(null) }, facet.label + ' ×') : null,
             filtered && showing.length ? h(Btn, { onClick: () => setPicked(showing.map(c => c.id)) }, 'Pick these ' + showing.length) : null,
             dismissed.length ? h(Btn, { kind: 'quiet', 'aria-expanded': gone, onClick: () => setGone(!gone) }, dismissed.length + ' dismissed') : null)),
-        h('div', { className: 'stoa-maphow' }, h('p', { className: 'stoa-sub' }, MAP_LENSES.find(item => item[0] === lens)[2]),
-          h('input', { className: 'stoa-field stoa-mapfind', type: 'search', value: find, placeholder: 'Find a company', 'aria-label': 'Find a company', onChange: event => setFind(event.target.value) })),
-        h(MapPicture, { market, list, lens, sizeBy, sel, shown, onPick: pick, onClear: () => setPicked(now => (now.length ? [] : now)), onGrow: act.grow, onSuggest: act.suggest,
+        h('div', { className: 'stoa-maphow' }, h('p', { className: 'stoa-sub' }, (mapSay.how && mapSay.how[lens]) || MAP_LENSES.find(item => item[0] === lens)[2]),
+          h('input', { className: 'stoa-field stoa-mapfind', type: 'search', value: find, placeholder: mapSay.find || 'Find a company', 'aria-label': mapSay.find || 'Find a company', onChange: event => setFind(event.target.value) })),
+        h(MapPicture, { say: mapSay, market, list, lens, sizeBy, sel, shown, onPick: pick, onClear: () => setPicked(now => (now.length ? [] : now)), onGrow: act.grow, onSuggest: act.suggest,
           onLasso: (ids, add) => setPicked(now => (add ? [...new Set(now.concat(ids))] : ids)) }),
         h('div', { className: 'stoa-maplegend' },
           h('div', null,
             h('span', null, 'Fit ', h('i', { className: 'stoa-mapheat' }), ' cold to hot'),
             h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'on' }), 'on the map'), h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'in' }), 'in the pipeline'),
             h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'fresh' }), 'new since you last looked'), h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'sig' }), 'a reason to call')),
-          h('div', null, h('span', null, 'Size by'), h('span', { className: 'stoa-tabs', style: { margin: 0 }, role: 'group', 'aria-label': 'What a mark\'s size shows' }, MAP_SIZES.map(item => h('button', { type: 'button', key: item[0], className: 'stoa-tab',
+          mapSay.people ? null : h('div', null, h('span', null, 'Size by'), h('span', { className: 'stoa-tabs', style: { margin: 0 }, role: 'group', 'aria-label': 'What a mark\'s size shows' }, MAP_SIZES.map(item => h('button', { type: 'button', key: item[0], className: 'stoa-tab',
             style: { height: 22, padding: '0 8px', fontSize: 10.5 }, title: item[2], 'data-on': sizeBy === item[0] ? '1' : '0', 'aria-pressed': sizeBy === item[0], onClick: () => setSize(item[0]) }, item[1])))))),
       h('aside', { ref: rail, className: 'stoa-box stoa-mapside', 'aria-live': 'polite' }, side),
       h('div', { className: 'stoa-mapb' },
@@ -5423,7 +5727,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
               MAP_BANDS.map(name => { const group = list.filter(c => c.band === name); if (!group.length) return null
                 return facetBtn('size', name, name + ' people', Math.round(100 * group.length / list.length) + '%', Math.round(100 * group.length / list.length), name + ' people', group.length + ' · fit ' + Math.round(group.reduce((sum, c) => sum + c.score, 0) / group.length)) })]
               : h('p', { className: 'stoa-sub stoa-mapnote' }, 'No headcounts recorded yet. Ask Hermes to add each company\'s size.'))),
-        h('div', { className: 'stoa-sechead', style: { padding: '0 0 6px', marginTop: 22 } }, h('span', { className: 'stoa-eyebrow' }, 'The companies'), h('span', { className: 'stoa-sub' }, showing.length + ' of ' + list.length + ' showing')),
+        h('div', { className: 'stoa-sechead', style: { padding: '0 0 6px', marginTop: 22 } }, h('span', { className: 'stoa-eyebrow' }, 'The ' + (mapSay.things || 'companies')), h('span', { className: 'stoa-sub' }, showing.length + ' of ' + list.length + ' showing')),
         h('div', { className: 'stoa-maptablewrap' }, h('table', { className: 'stoa-maptable' },
           h('colgroup', null, h('col', { style: { width: 36 } }), cols.map(col => h('col', { key: col[0], style: col[2] ? { width: col[2] } : undefined }))),
           h('thead', null, h('tr', null, h('th', null), cols.map(col =>
@@ -5434,9 +5738,9 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
             h('td', null, clamp(c.segment, 2)),
             h('td', { style: { whiteSpace: 'nowrap' } }, h(Fit, { value: squaresOf(c.score) }), ' ', h('span', { className: 'stoa-num' }, c.score)),
             h('td', null, c.signal ? [h('span', { key: 's' }, clamp(c.signal, 2)), agoWords(c.days) ? h('span', { key: 'a', className: 'stoa-sub', style: { display: 'block' } }, agoWords(c.days)) : null] : h('span', { className: 'stoa-sub' }, 'None yet')),
-            h('td', { className: 'stoa-num', 'data-num': '1' }, c.headcount ? c.headcount.toLocaleString() : ''),
+            mapSay.people ? null : h('td', { className: 'stoa-num', 'data-num': '1' }, c.headcount ? c.headcount.toLocaleString() : ''),
             h('td', null, c.uses ? clamp(c.uses, 2) : null),
-            h('td', null, c.buyer ? [h('span', { key: 'n' }, clamp(c.buyer.name, 2)), c.buyer.title ? h('span', { key: 't', className: 'stoa-sub stoa-clamp', style: { WebkitLineClamp: 1 }, title: c.buyer.title }, c.buyer.title) : null] : h('span', { className: 'stoa-sub' }, 'Not named')),
+            h('td', null, mapSay.people ? (c.size ? clamp(c.size, 2) : null) : c.buyer ? [h('span', { key: 'n' }, clamp(c.buyer.name, 2)), c.buyer.title ? h('span', { key: 't', className: 'stoa-sub stoa-clamp', style: { WebkitLineClamp: 1 }, title: c.buyer.title }, c.buyer.title) : null] : h('span', { className: 'stoa-sub' }, 'Not named')),
             h('td', null, c.status === 'tracked' ? h(Chip, { tone: 'good' }, 'in the pipeline') : h(Btn, { disabled: Boolean(busy), title: 'Add ' + c.company + ' to the pipeline', onClick: () => act.add([c]) }, c.fresh ? 'Add · new' : 'Add'))))))),
         chosen.length > 1 ? h('div', { className: 'stoa-mapabar' }, h('b', null, chosen.length + ' picked'), actions(chosen), h(Btn, { kind: 'quiet', onClick: () => setPicked([]) }, 'Clear')) : null)))
 }
@@ -5901,7 +6205,7 @@ function dbColumns(thing, data, pb) {
     { key: 'status', label: 'Status', type: 'pick', on: true, order: ['Open', pb.won.label, pb.lost.label] },
     { key: 'stage', label: 'Stage', type: 'pick', on: true, order: data.stages },
     { key: 'delivery', label: 'After the win', type: 'pick', order: data.delivery },
-    { key: 'value', label: cap(terms.value || 'value'), type: 'money', on: true },
+    ...(noFees() ? [] : [{ key: 'value', label: cap(terms.value || 'value'), type: 'money', on: true }]),
     { key: 'owner', label: cap(terms.owner || 'owner'), type: 'pick', on: true },
     { key: 'next_step', label: 'Next step', type: 'text', on: true },
     { key: 'next_due', label: 'Due', type: 'date', on: true },
@@ -6592,6 +6896,7 @@ function Page() {
       state.deals.length || waiting || (day.to_bill || []).length ? h(Today, { state, openId: '', setOpenId: openRecord, openClient }) : nothing,
       side || (state.deals.length ? h(Ahead, { state, setOpenId: openRecord }) : null)) : null,
     !paged && tab === 'pipeline' && (!welcome || waiting) ? h('div', null,
+      h(Billing, { state }),
       state.deals.length && view === 'board' ? h(Funnel, { state }) : null,
       state.deals.length || groups.length ? h('div', { className: 'stoa-viewrow' },
         h('div', { className: 'stoa-grow', style: { maxWidth: 760 } }, h(Filters, { state })),
@@ -6609,7 +6914,7 @@ function Page() {
       h(Cash, { state, openId: '', setOpenId: openRecord, openClient })) : null,
     tab === 'market' ? (market
       ? h(MarketMap, { market, markets: state.markets, onMarket: setMarketId, shape: state.playbook.shape, openRecord })
-      : h('div', { style: { maxWidth: 720 } }, h(NewMap, { first: true }))) : null,
+      : h('div', { style: { maxWidth: 720 } }, h(NewMap, { first: true, shape: state.playbook.shape }))) : null,
     !paged && tab === 'reports' ? h(Reports, { state, openRecord }) : null,
     !paged && tab === 'activity' ? h('div', { style: { maxWidth: 800 } }, state.activity.length ? state.activity.map(entry => h('div', { key: entry.id, className: 'stoa-row', style: { cursor: 'default', alignItems: 'center' } },
       h('i', { className: 'stoa-dot', style: { marginTop: 0 }, 'data-tone': entry.kind === 'stage' && !entry.undone ? 'good' : '' }),
@@ -6851,6 +7156,7 @@ export default {
       const { pipeline, ...rest_ } = options || {}
       const pipe = typeof pipeline === 'string' ? pipeline : $pipe.get()
       return ctx.rest(pipe && pipe !== 'main' ? path + (path.includes('?') ? '&' : '?') + 'pipeline=' + encodeURIComponent(pipe) : path, options ? rest_ : options)
+        .then(answer => seenAnswer(path, pipe, answer))        // how the pipeline is paid for is noted, and a contract pipeline's fees are left out
     }
     try { $folds.set({ ...(storage.get('folds', {}) || {}) }) } catch { /* no storage: every group starts closed */ }
     for (const lane of Object.keys(LANES)) {

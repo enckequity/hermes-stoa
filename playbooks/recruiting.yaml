@@ -78,6 +78,7 @@ group_fields:
   - {key: target_base, label: Target base}
   - {key: rate, label: Hourly rate}
   - {key: hours, label: Hours a week}
+  - {key: openings, label: Openings}       # how many seats the search is hiring for; in play counts its fee once for each left to fill
   - {key: contract_end, label: Contract end}
   - {key: location, label: Location}
   - {key: guarantee, label: Guarantee}
