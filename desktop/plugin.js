@@ -4515,13 +4515,17 @@ function RecordPage({ id, state: shown, sessionId, back, backLabel, openRecord, 
 
 /** The records in a group or at a company, a stage at a time in the playbook's order, the closed ones last. */
 function ByStage({ records, pb, openRecord, showCompany }) {
-  const sections = pb.stages.map(stage => [stage.label, records.filter(record => record.status === 'open' && record.stage === stage.id)])
-    .concat([[pb.won.label, records.filter(record => record.status === 'won')], [pb.lost.label, records.filter(record => record.status === 'lost')]])
+  // A stage's amount, as on the board: on a contingent recruiting pipeline each search once, where its furthest-along record is.
+  const staged = stageSums(records.filter(record => record.status === 'open'), { playbook: pb })
+  const plain = list => list.reduce((sum, record) => sum + (record.value || 0), 0)
+  const closed = status => records.filter(record => record.status === status)
+  const sections = pb.stages.map(stage => [stage.label, records.filter(record => record.status === 'open' && record.stage === stage.id), staged.get(stage.id) || 0])
+    .concat([[pb.won.label, closed('won'), plain(closed('won'))], [pb.lost.label, closed('lost'), plain(closed('lost'))]])
     .filter(pair => pair[1].length)
   if (!sections.length) return h('p', { className: 'stoa-sub' }, 'None yet.')
   return h('div', null, sections.map(pair => h('div', { key: pair[0], className: 'stoa-stagegroup' },
     h('div', { className: 'stoa-stagehead' }, h('span', { className: 'stoa-eyebrow' }, pair[0]),
-      h('span', { className: 'stoa-sub' }, [String(pair[1].length), money(pair[1].reduce((sum, record) => sum + (record.value || 0), 0), pb.currency)].filter(Boolean).join(' · '))),
+      h('span', { className: 'stoa-sub' }, [String(pair[1].length), money(pair[2], pb.currency)].filter(Boolean).join(' · '))),
     h(RecordList, { rows: pair[1], pb, openRecord, showCompany, underStage: true }))))
 }
 
