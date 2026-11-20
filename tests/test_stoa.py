@@ -1517,6 +1517,36 @@ class RecruitingBillingTests(unittest.TestCase):
         everything = self.desk.stage_sums(self.desk.store.list(status="all"))
         self.assertEqual(everything.get(won["id"]), 30000.0)
 
+    def test_the_board_as_text_a_split_report_and_the_funnel_follow_the_same_stages(self):
+        stages = [stage["id"] for stage in self.desk.playbook().stages]
+        put = lambda name, group, value, at, owner="": self.desk.store.add(name, at, actor="tester", grp=group, value=value, owner=owner)      # noqa: E731
+        put("A1", "VP Finance", 30000, stages[0], "Maya"), put("A2", "VP Finance", 30000, stages[1], "Jonah"), put("A3", "VP Finance", 30000, stages[3], "Maya")
+        put("B1", "Head of Risk", 45000, stages[1], "Jonah")
+        label = {stage["id"]: stage["label"] for stage in self.desk.playbook().stages}
+        # The board as text heads each stage as the board itself does: a search once, where its furthest-along candidate is.
+        for text in (self.desk.pipeline({"action": "board"})["board"], cards.board_text(self.desk.playbook(), self.desk.store.list(status="open"), total=self.desk.sum,
+                                                                                      staged=self.desk.stage_sums(self.desk.store.list(status="open")))):
+            heads = [line for line in text.split("\n") if line and not line.startswith(" ") and "(" in line]
+            self.assertEqual(heads[:4], ["%s (1)" % label[stages[0]], "%s (2)  $45k" % label[stages[1]], "%s (0)" % label[stages[2]], "%s (1)  $30k" % label[stages[3]]])
+            self.assertIn("$75k", text.split("\n")[1])
+        # What each record carries adds up to the stage and to the whole.
+        open_ = self.desk.store.list(status="open")
+        carried = self.desk.carried(open_)
+        by_name = {deal["name"]: carried[deal["id"]] for deal in open_}
+        self.assertEqual((by_name, sum(carried.values())), ({"A1": 0, "A2": 0, "A3": 30000.0, "B1": 45000.0}, self.desk.sum(open_)))
+        # A report by stage, split by how far each got: each stage's parts add up to its row, and the rows to the total.
+        kept = self.desk.reports.save({"title": "Value by stage", "count": "value", "by": "stage", "when": "open", "split": "furthest"}, by="dashboard")
+        report = self.desk.reports.run(kept["id"])
+        self.assertTrue(report["rows"] and any(row["parts"] for row in report["rows"]))
+        for row in report["rows"]:
+            self.assertAlmostEqual(sum(part["n"] for part in row["parts"]), row["n"], msg=row["label"])
+        self.assertEqual((sum(row["n"] for row in report["rows"]), {row["label"]: row["n"] for row in report["rows"]}[label[stages[1]]]), (75000.0, 45000.0))
+        # A record at a stage that is not the playbook's is not drawn in the funnel, but its search's fee still counts
+        # where the search has got to, so the funnel adds up to what is in play.
+        put("Stray", "Controller", 50000, "a_stage_from_another_playbook"), put("Here", "Controller", 20000, stages[0])
+        funnel = {stage["id"]: stage["value"] for stage in self.desk.flow()["stages"]}
+        self.assertEqual((funnel[stages[0]], sum(funnel.values())), (50000.0, self.desk.sum(self.desk.store.list(status="open"))))
+
     def test_a_sales_pipeline_adds_up_as_it_always_did(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)

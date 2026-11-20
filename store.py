@@ -364,8 +364,18 @@ def by_stage(deals: Iterable[dict], seats: Optional[dict] = None, position: Any 
     people at three stages is not counted three times. The furthest along carries the group's largest amount. An open
     record in no group counts by itself, where it is. ``position``: how far along a stage id is (larger is further; a
     stage that is not the playbook's is behind them all). Returns cents by stage id."""
+    out: dict = {}
+    for deal, cents in _carriers(deals, seats, position):
+        out[deal["stage"]] = out.get(deal["stage"], 0) + cents
+    return out
+
+
+def _carriers(deals: Iterable[dict], seats: Optional[dict] = None, position: Any = None) -> list:
+    """Which OPEN records carry what toward what is in play, as ``(record, cents)``: in a group, its furthest-along
+    records, one for each seat still to fill, the furthest with the group's largest amount; a record in no group
+    carries its own. Every other open record carries nothing."""
     how_far = position or (lambda stage: 0)
-    seats, groups, out = seats or {}, {}, {}
+    seats, groups, out = seats or {}, {}, []
     for deal in deals:
         if deal.get("status", "open") != "open":
             continue
@@ -373,13 +383,21 @@ def by_stage(deals: Iterable[dict], seats: Optional[dict] = None, position: Any 
         if key:
             groups.setdefault(key, []).append(deal)
         else:
-            out[deal["stage"]] = out.get(deal["stage"], 0) + int(deal.get("value_cents") or 0)
+            out.append((deal, int(deal.get("value_cents") or 0)))
     for key, mine in groups.items():
         take = max(0, min(len(mine), int(seats.get(key, 1))))
         fees = sorted((int(deal.get("value_cents") or 0) for deal in mine), reverse=True)[:take]
         ahead = sorted(mine, key=lambda deal: how_far(deal["stage"]), reverse=True)[:take]         # stable: among equals, as they came
-        for deal, cents in zip(ahead, fees):
-            out[deal["stage"]] = out.get(deal["stage"], 0) + cents
+        out.extend(zip(ahead, fees))
+    return out
+
+
+def carried(deals: Iterable[dict], seats: Optional[dict] = None, position: Any = None) -> dict:
+    """The same by record id: the cents each open record carries toward what is in play (``by_stage`` a record at a
+    time). It is what lets a stage's amount be split, by owner or by outcome, into parts that still add up to it."""
+    out: dict = {}
+    for deal, cents in _carriers(deals, seats, position):
+        out[deal["id"]] = out.get(deal["id"], 0) + cents
     return out
 
 

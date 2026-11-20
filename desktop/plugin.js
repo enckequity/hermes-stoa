@@ -604,7 +604,9 @@ const billingNow = () => $paidHow.get()[pipeKey($pipe.get())] || {}
     caller has it (a card in a chat is about its own pipeline, which need not be the one the page is showing). */
 const noFees = from => ((from && from.billing) || billingNow()).type === 'contract'
 const FEE_FACTS = ['fee_type', 'fee_pct', 'target_base', 'rate', 'hours', 'openings']        // what the recruiting playbook keeps on a search about money
-const groupName = text => String(text || '').trim().toLowerCase().replace(/\s+/g, ' ')
+// One key for a search however it is typed, as the desk has it (`store.group_key`): "Staff Backend · Northwind" and
+// "staff backend - northwind" are one search, counted once.
+const groupName = text => String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 /** How many seats a search is hiring for, and how many it still has to fill (none once it is done or closed). */
 const openingsOf = group => Math.max(1, Math.round(Number(((group || {}).fields || {}).openings) || 1))
 const seatsLeft = group => (group.status === 'done' || group.status === 'closed' ? 0 : Math.max(0, openingsOf(group) - (group.won || 0)))

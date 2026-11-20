@@ -621,6 +621,19 @@ class Desk:
                 out[stage] = out.get(stage, 0) + cents
         return {stage: cents / 100 for stage, cents in out.items()}
 
+    def carried(self, deals: Any) -> dict:
+        """What each of some records counts for, by record id, the way the pipeline in hand counts: on a contingent
+        recruiting pipeline an open search's fee is carried by its furthest-along candidate (``store.carried``) and the
+        others in it carry nothing; everywhere else, and for what is no longer open, a record counts for its own amount.
+        The amounts add up to ``sum`` of the same records, and a stage's to ``stage_sums``."""
+        rows = list(deals)
+        if self.billing_kind() != BILL_CONTINGENT:
+            return {deal["id"]: int(deal.get("value_cents") or 0) / 100 for deal in rows}
+        out = {deal["id"]: (0 if deal["status"] == "open" else int(deal.get("value_cents") or 0) / 100) for deal in rows}
+        for key, cents in st.carried(rows, self.seats(), self.playbook().position).items():
+            out[key] = cents / 100
+        return out
+
     def production(self) -> dict:
         """The money side of every pipeline in one view: a contract's month of hours beside the others' fees. For each:
         this month (a contract's month in progress at the hours agreed; otherwise what was won since the first), what
@@ -975,12 +988,12 @@ class Desk:
                                                     "contract work keeps its own). Speak of %s and where they stand, not of money in play."
                                                     % (playbook.terms["deal"], playbook.terms["deals"])}
         elif kind:
-            out["billing"] = {"type": kind, "note": "Contingent: a fee for each placement. A stage's amount is the fees of the %s whose furthest-along %s is there. "
+            out["billing"] = {"type": kind, "note": "Contingent: a fee for each placement. A stage's amount is the fees of the %s whose furthest-along %s, among those listed, is there. "
                                                     % (playbook.terms["groups"], playbook.terms["deal"])
                                                     + "What is in play counts each %s's fee once for each seat still to fill, "
                                                     "not once for every %s in it." % (playbook.terms["group"], playbook.terms["deal"])}
         if view == "board":
-            out["board"] = cards.board_text(playbook, deals, total=self.sum)
+            out["board"] = cards.board_text(playbook, deals, total=self.sum, staged=self.stage_sums(d for d in deals if d["status"] == "open"))
             out["by_stage"] = self._by_stage(playbook, deals)
             if status == "open":         # the board is what is still in play; say what else is on the desk, so its absence is not read as not there
                 closed = [d for d in self.store.list(status="all") if d["status"] != "open"]
@@ -1558,10 +1571,12 @@ class Desk:
         won_value = 0          # money is added up in cents and turned into an amount at the end
         value = [0] * count
         at: list = [[] for _ in stages]            # the open records at each stage, for a pipeline that counts a search at a time
+        off: list = []                             # open records at a stage that is not the playbook's: not drawn, though a search they are in still counts its fee
         for deal in (deals if deals is not None else self.store.list(status="all")):
             if deal["status"] == "open":
                 far = playbook.position(deal["stage"])
                 if far < 0:
+                    off.append(deal)
                     continue
                 here[far] += 1
                 value[far] += deal["value_cents"]
@@ -1578,7 +1593,7 @@ class Desk:
             for index in range(far + 1):
                 reached[index] += 1
         if self.billing_kind() == BILL_CONTINGENT:      # each search once, where its furthest-along candidate is: the stages add up to what is in play
-            sums = self.stage_sums(deal for mine in at for deal in mine)
+            sums = self.stage_sums([deal for mine in at for deal in mine] + off)
             value = [round(sums.get(stage["id"], 0) * 100) for stage in stages]
         return {"stages": [{"id": s["id"], "label": s["label"], "reached": reached[i], "here": here[i], "lost": lost[i],
                             "value": value[i] / 100} for i, s in enumerate(stages)],
@@ -4168,7 +4183,8 @@ class Desk:
             if not self.store.count():
                 return ("The desk is empty. Tell me about a %s to add it, or run `hermes stoa demo` for sample data."
                         % playbook.terms["deal"])
-            return cards.board_text(playbook, self.store.list(status="open"), total=self.sum)
+            everyone = self.store.list(status="open")
+            return cards.board_text(playbook, everyone, total=self.sum, staged=self.stage_sums(everyone))
         if word == "help":
             return ("/gtm — the pipeline board\n/gtm today — what needs you, most pressing first\n/gtm cash — won, invoiced, collected, overdue, and the forecast\n/gtm brief — the morning brief\n/gtm stale — records gone quiet\n"
                     "/gtm due — next steps due\n/gtm map [market] — a market map\n/gtm <name> — one record's card\n"

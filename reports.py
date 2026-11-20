@@ -360,7 +360,10 @@ class Reports:
             bucket = buckets.setdefault(label.lower(), {"label": label, "order": order, "deals": []})
             bucket["deals"].append(deal)
         rows = []
-        staged = self.desk.stage_sums(deals) if spec["by"] == "stage" else None      # by stage: each search once, where it has got to
+        # By stage: each search once, where it has got to, and a row's parts are what the records in each part carry of
+        # it, so the parts add up to their row.
+        carried = self.desk.carried(deals) if spec["by"] == "stage" else None
+        worth_of = (lambda group: sum(carried.get(deal["id"], 0) for deal in group)) if carried is not None else self.desk.sum
         for key, bucket in buckets.items():
             mine = bucket["deals"]
             parts = {k: [] for k in legend}
@@ -368,8 +371,8 @@ class Reports:
                 part = self._part(playbook, deal, spec["split"])
                 if part in parts:
                     parts[part].append(deal)
-            worth = sum(staged.get(stage, 0) for stage in {deal["stage"] for deal in mine}) if staged is not None else self.desk.sum(mine)
-            size = (lambda group: worth if group is mine else self.desk.sum(group)) if spec["count"] == "value" else len
+            worth = worth_of(mine)
+            size = worth_of if spec["count"] == "value" else len
             row = {"key": key, "label": bucket["label"], "order": bucket["order"], "n": size(mine), "count": len(mine), "value": worth,
                    "parts": [{"k": k, "n": size(parts[k]), "count": len(parts[k])} for k in legend]}
             if full:
