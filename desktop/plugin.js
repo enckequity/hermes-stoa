@@ -600,8 +600,9 @@ const roleMapAsk = (said, search, web) => 'Map the candidates for a role I am re
 const $paidHow = atom({})                   // by pipeline id
 const pipeKey = pipe => (pipe === '' || pipe === null || pipe === undefined || pipe === 'main' ? 'main' : String(pipe))
 const billingNow = () => $paidHow.get()[pipeKey($pipe.get())] || {}
-/** On a contract pipeline no fee is shown or asked for anywhere but the money tab. */
-const noFees = () => billingNow().type === 'contract'
+/** On a contract pipeline no fee is shown or asked for anywhere but the money tab. `from`: the desk's state where the
+    caller has it (a card in a chat is about its own pipeline, which need not be the one the page is showing). */
+const noFees = from => ((from && from.billing) || billingNow()).type === 'contract'
 const FEE_FACTS = ['fee_type', 'fee_pct', 'target_base', 'rate', 'hours', 'openings']        // what the recruiting playbook keeps on a search about money
 const groupName = text => String(text || '').trim().toLowerCase().replace(/\s+/g, ' ')
 /** How many seats a search is hiring for, and how many it still has to fill (none once it is done or closed). */
@@ -611,14 +612,14 @@ const SEATS = {}                            // by pipeline: the seats left in ea
 /** What a list of open records has in play. On a contingent recruiting pipeline a search's fee counts once for each
     seat still to fill, however many candidates are in it (the desk adds its own totals up the same way: `store.once`).
     This is for the sums the page makes itself: the board's columns and Today's stages. */
-function inPlay(deals) {
+function inPlay(deals, from) {
   const list = deals || []
-  if (billingNow().type !== 'contingent') return list.reduce((sum, deal) => sum + (deal.value || 0), 0)
-  const fees = new Map(), seats = SEATS[pipeKey($pipe.get())] || {}
+  if (((from && from.billing) || billingNow()).type !== 'contingent') return list.reduce((sum, deal) => sum + (deal.value || 0), 0)
+  const fees = new Map(), seats = SEATS[pipeKey(from && from.pipeline !== undefined ? from.pipeline : $pipe.get())] || {}
   let alone = 0
   for (const deal of list) {
     const search = groupName(deal.group)
-    if (!search) alone += deal.value || 0
+    if (!search || (deal.status && deal.status !== 'open')) alone += deal.value || 0       // placed or passed: each was paid for, a plain sum
     else fees.set(search, (fees.get(search) || []).concat([deal.value || 0]))
   }
   for (const [search, mine] of fees) alone += mine.sort((a, b) => b - a).slice(0, search in seats ? seats[search] : 1).reduce((sum, fee) => sum + fee, 0)
@@ -648,7 +649,9 @@ function seenAnswer(path, pipe, answer) {
   if (!state) return withoutFees(answer, 0)
   const out = { ...answer }
   for (const side of ['deals', 'totals', 'flow', 'groups', 'companies', 'clients']) if (answer[side]) out[side] = withoutFees(answer[side], 0)
-  if (answer.playbook) out.playbook = { ...answer.playbook, billing: 'none' }       // a record is never billed itself on contract work
+  // A record is not billed itself on contract work. One placed before the pipeline was contract work may be: where any
+  // record here has an invoice, the page keeps the place they are shown and paid.
+  if (answer.playbook && !(answer.billing || {}).record_invoices) out.playbook = { ...answer.playbook, billing: 'none' }
   return out
 }
 
@@ -725,7 +728,6 @@ function MapPerson({ c, market, busy, actions, open, move, close }) {
 const BILLING_KINDS = [
   ['contingent', 'Contingent', 'A fee for each placement, a share of the salary. The pipeline counts in money: what is in play, what was placed.'],
   ['contract', 'Contract', 'Paid by the hour by one company, on any number of searches, and billed each month. The pipeline counts candidates; the money is on the Cash tab only.']]
-const monthNow = () => { const now = new Date(); return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') }
 
 /** At the head of the Pipeline tab on a recruiting pipeline: one line on how it is paid for, and the form that changes
     it. A contract needs the company, the hourly rate and the hours a week: the Cash tab bills from them. */
@@ -737,7 +739,7 @@ function Billing({ state }) {
   if (!billing.type) return null
   const hourly = billing.type === 'contract', pb = state.playbook
   const start = () => { setV({ type: billing.type, client: billing.client || '', rate: billing.rate ? String(billing.rate) : '', hours: billing.hours_week ? String(billing.hours_week) : '',
-    pct: billing.fee_pct ? String(billing.fee_pct) : '', from: billing.start || monthNow(), clear: false }); setOpen(true) }
+    pct: billing.fee_pct ? String(billing.fee_pct) : '', from: billing.start || '', moved: false, clear: false }); setOpen(true) }
   const line = h('div', { className: 'stoa-billing' },
     h('span', { className: 'stoa-eyebrow' }, 'Billing'), h('b', null, hourly ? 'Contract' : 'Contingent'),
     hourly ? (billing.client ? h('span', null, 'with ' + billing.client) : null) : billing.fee_pct ? h('span', null, billing.fee_pct + '% of salary') : null,
@@ -748,10 +750,10 @@ function Billing({ state }) {
   const set = key => event => setV({ ...v, [key]: event.target.value })
   const contract = v.type === 'contract'
   const ready = contract ? v.client.trim() && Number(v.rate) > 0 && Number(v.hours) > 0 : true
-  const carried = (state.totals.open_value || 0) + (state.totals.won_value || 0) || state.deals.reduce((sum, deal) => sum + (deal.value || 0), 0)
+  const carried = billing.fees_kept || 0          // fees in the file, which a contract pipeline neither counts nor shows
   const save = () => {
     setBusy(true)
-    rest('/pipeline/billing', { method: 'POST', body: { type: v.type, client: v.client.trim(), rate: Number(v.rate) || 0, hours_week: Number(v.hours) || 0, start: v.from, fee_pct: Number(v.pct) || 0, clear_fees: contract && v.clear } })
+    rest('/pipeline/billing', { method: 'POST', body: { type: v.type, client: v.client.trim(), rate: Number(v.rate) || 0, hours_week: Number(v.hours) || 0, ...(v.moved && v.from ? { start: v.from } : {}), fee_pct: Number(v.pct) || 0, clear_fees: contract && v.clear } })
       .then(() => { setOpen(false); refresh() }).catch(error => host.notifyError(error, 'Not saved')).then(() => setBusy(false))
   }
   return h('div', null, line, h('div', { className: 'stoa-box stoa-payform' },
@@ -762,13 +764,13 @@ function Billing({ state }) {
       h(Field, { label: 'The company the contract is with', value: v.client, onChange: set('client') }),
       h(Field, { label: 'Hourly rate, ' + (pb.currency || 'USD'), type: 'number', min: 0, value: v.rate, onChange: set('rate') }),
       h(Field, { label: 'Hours a week', type: 'number', min: 1, max: 80, value: v.hours, onChange: set('hours') }),
-      h(Field, { label: 'Billed from the month of', type: 'month', value: v.from, onChange: set('from') }))
+      h(Field, { label: 'Billed from the month of', type: 'month', value: v.from, onChange: event => setV({ ...v, from: event.target.value, moved: true }) }))
       : h('div', { className: 'stoa-form' }, h(Field, { label: 'Your usual fee, % of salary (optional)', type: 'number', min: 0, max: 100, value: v.pct, onChange: set('pct') })),
     h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, contract
-      ? 'Each month that ends is put on the Cash tab to bill: the rate times that month’s hours (the hours a week, over its working days), which you can correct before you record the invoice. A month that is not over shows there as the month in progress. No fee is asked for or shown on a ' + pb.terms.deal + ' here.'
+      ? 'Each month that ends is put on the Cash tab to bill: the rate times that month’s hours (the hours a week, over its working days), which you can correct before you record the invoice. A month that is not over shows there as the month in progress. Leave the month empty to start with this one; a company you already bill by the hour keeps the month it started. No fee is asked for or shown on a ' + pb.terms.deal + ' here.'
       : 'Give a ' + pb.terms.group + ' the fee each ' + pb.terms.deal + ' in it would bring, and how many openings it has; what is in play counts that fee once for each opening left.'),
     contract && carried ? h('label', { className: 'stoa-billclear' }, h('input', { type: 'checkbox', checked: v.clear, onChange: event => setV({ ...v, clear: event.target.checked }) }),
-      h('span', null, 'Some ' + pb.terms.deals + ' here already carry fees. They stop showing on this pipeline either way. Tick this to clear them as well: left on, the reports still count them, and a record loses its fee when it is next edited.')) : null,
+      h('span', null, 'Some ' + pb.terms.deals + ' or ' + pb.terms.groups + ' here carry fees from before. On contract work they are not counted or shown anywhere. Tick this to remove them for good; left alone, they are back if this pipeline is made contingent again.')) : null,
     h('div', { className: 'stoa-btns', style: { marginTop: 10 } }, h(Btn, { kind: 'primary', disabled: busy || !ready, onClick: save }, busy ? 'Saving…' : 'Save'), h(Btn, { kind: 'quiet', onClick: () => setOpen(false) }, 'Cancel'))))
 }
 
@@ -2202,7 +2204,7 @@ function Edit({ deal, state, done }) {
       open ? h(Field, { label: 'Stage' }, h('select', { className: 'stoa-field', value: deal.stage, disabled: busy,
         onChange: event => send({ verb: 'move', stage: event.target.value }) },
         pb.stages.map(stage => h('option', { key: stage.id, value: stage.id }, stage.label)))) : h('span'),
-      noFees() ? null : h(Field, { label: cap(terms.value), type: 'number', min: 0, value: v.value, onChange: set('value') }),
+      noFees(state) ? null : h(Field, { label: cap(terms.value), type: 'number', min: 0, value: v.value, onChange: set('value') }),
       h(Field, { label: cap(terms.owner), value: v.owner, onChange: set('owner') }),
       h(Field, { label: cap(terms.company), value: v.company, onChange: set('company') }),
       h(Field, { label: cap(terms.group), value: v.group, onChange: set('group') }),
@@ -2257,7 +2259,7 @@ function NewRecord({ state, close, opened, preset }) {
       h(Field, { label: cap(terms.group), list: 'stoa-new-groups', value: v.group, onChange: set('group') }),
       h(Field, { label: 'Stage' }, h('select', { className: 'stoa-field', value: v.stage, onChange: set('stage') },
         pb.stages.map(stage => h('option', { key: stage.id, value: stage.id }, stage.label)))),
-      noFees() ? null : h(Field, { label: cap(terms.value), type: 'number', min: 0, value: v.value, onChange: set('value') }),
+      noFees(state) ? null : h(Field, { label: cap(terms.value), type: 'number', min: 0, value: v.value, onChange: set('value') }),
       h(Field, { label: cap(terms.owner), list: 'stoa-new-owners', value: v.owner, onChange: set('owner') }),
       h(Field, { label: 'Email', type: 'email', value: v.email, onChange: set('email') }),
       h(Field, { label: 'Phone', type: 'tel', value: v.phone, onChange: set('phone') }),
@@ -2288,7 +2290,7 @@ function Record({ id, state: shown, sessionId, close, onCompany, onGroup }) {
   const pb = state.playbook
   const open = deal.status === 'open', active = open || Boolean(deal.in_delivery)      // a win still in delivery keeps its next step
   const run = body => { setBusy(true); act(id, body, sessionId, pipe).then(() => setBusy(false)) }
-  const facts = [[cap(pb.terms.group), deal.group], ...(noFees() ? [] : [[pb.terms.value, money(deal.value, pb.currency)]]), [cap(pb.terms.owner), deal.owner],
+  const facts = [[cap(pb.terms.group), deal.group], ...(noFees(shown) ? [] : [[pb.terms.value, money(deal.value, pb.currency)]]), [cap(pb.terms.owner), deal.owner],
     ['Expected close', open && deal.close_on ? shortDate(deal.close_on) + (deal.close_on < today() ? ' (past)' : '') : '']]
     .concat(pb.fields.map(field => [field.label, (deal.fields || {})[field.key]]))
     .concat([['Email', deal.email], ['Phone', deal.phone]]).filter(pair => pair[1])
@@ -2620,7 +2622,7 @@ function Pane() {
       pb.stages.map(stage => {
         const here = open.filter(deal => deal.stage === stage.id)
         if (!here.length) return null
-        const value = inPlay(here)
+        const value = inPlay(here, state)
         return h('div', { className: 'stoa-sec', key: stage.id },
           h('div', { className: 'stoa-sechead' }, h('span', { className: 'stoa-eyebrow' }, stage.label),
             h('span', { className: 'stoa-num' }, here.length + (value ? ' · ' + money(value, pb.currency) : ''))),
@@ -4300,7 +4302,7 @@ function DetailsForm({ deal, pb, state, done }) {
       h(Field, { label: 'Phone', type: 'tel', value: v.phone, onChange: set('phone'), onKeyDown: enter }),
       h(Field, { label: 'LinkedIn', value: v.linkedin, placeholder: 'linkedin.com/in/…', onChange: set('linkedin'), onKeyDown: enter }),
       h(Field, { label: cap(terms.owner), list: 'stoa-edit-owners', value: v.owner, onChange: set('owner'), onKeyDown: enter }),
-      noFees() ? null : h(Field, { label: cap(terms.value), type: 'number', min: 0, value: v.value, onChange: set('value'), onKeyDown: enter }),
+      noFees(state) ? null : h(Field, { label: cap(terms.value), type: 'number', min: 0, value: v.value, onChange: set('value'), onKeyDown: enter }),
       open ? h(Field, { label: 'Expected close', type: 'date', value: v.close_on, title: 'The forecast puts it in this month', onChange: set('close_on') }) : null,
       pb.fields.map(field => h(Field, { key: field.key, label: field.label, value: f[field.key], onChange: event => setF({ ...f, [field.key]: event.target.value }), onKeyDown: enter })),
       h(Field, { label: 'Source', value: v.source, placeholder: 'Referral, LinkedIn, an event…', onChange: set('source'), onKeyDown: enter })),
@@ -4325,7 +4327,7 @@ function RecordDetails({ deal, pb, state, openGroup, openCompany }) {
     ['Phone', deal.phone ? h('a', { className: 'stoa-alink', href: 'tel:' + deal.phone.replace(/[^+\d]/g, '') }, deal.phone) : ''],
     ['LinkedIn', deal.linkedin ? h('a', { className: 'stoa-alink', href: webLink(deal.linkedin), target: '_blank', rel: 'noreferrer' }, bareLink(deal.linkedin)) : ''],
     [cap(terms.owner), deal.owner],
-    ...(noFees() ? [] : [[cap(terms.value), money(deal.value, pb.currency)]]),
+    ...(noFees(state) ? [] : [[cap(terms.value), money(deal.value, pb.currency)]]),
     open ? ['Expected close', deal.close_on ? shortDate(deal.close_on) + (deal.close_on < today() ? ' (past)' : '') : ''] : null]
     .concat(pb.fields.map(field => [field.label, (deal.fields || {})[field.key]]))
     .concat([['Source', deal.source], ['Added', deal.created_at ? shortDate(deal.created_at.slice(0, 10)) : '']])
@@ -4616,14 +4618,14 @@ function GroupPage({ name, state, sessionId, back, backLabel, openRecord, openCl
               h(Field, { label: 'Status' },
                 h('select', { className: 'stoa-field', value: now.status, onChange: event => set({ status: event.target.value }) },
                   GROUP_STATUS.map(pair => h('option', { key: pair[0], value: pair[0] }, pair[1])))),
-              noFees() ? null : h(Field, { label: cap(pb.terms.value) + ' for each ' + pb.terms.deal, value: now.value, placeholder: 'Left blank: each says its own',
+              noFees(state) ? null : h(Field, { label: cap(pb.terms.value) + ' for each ' + pb.terms.deal, value: now.value, placeholder: 'Left blank: each says its own',
                 title: 'A new ' + pb.terms.deal + ' here takes this unless it brings its own', onChange: event => set({ value: event.target.value }) }),
-              (group.facts || []).filter(item => !(noFees() && FEE_FACTS.includes(item.key))).map(item => h(Field, { key: item.key, label: item.label, value: fact(item), onChange: event => set({ fields: { ...now.fields, [item.key]: event.target.value } }) }))),
+              (group.facts || []).filter(item => !(noFees(state) && FEE_FACTS.includes(item.key))).map(item => h(Field, { key: item.key, label: item.label, value: fact(item), onChange: event => set({ fields: { ...now.fields, [item.key]: event.target.value } }) }))),
             h('div', { className: 'stoa-btns' }, h(Btn, { kind: 'primary', disabled: busy || !now.title.trim() || !draft, onClick: save }, 'Save'),
               h(Btn, { kind: 'quiet', disabled: busy, onClick: () => { setDraft(null); setEditing(false) } }, 'Cancel')))
             : h(Facts, { rows: [company ? ['Email domain', company.domain ? company.domain + (company.domain_known ? '' : ' (from their email)') : ''] : ['Client', group.client],
-              ['Status', group.status_label], ...(noFees() ? [] : [[cap(pb.terms.value) + ' for each ' + pb.terms.deal, group.value ? money(group.value, pb.currency) : '']])]
-              .concat((group.facts || []).filter(item => !(noFees() && FEE_FACTS.includes(item.key))).map(item => [item.label, item.value])) })),
+              ['Status', group.status_label], ...(noFees(state) ? [] : [[cap(pb.terms.value) + ' for each ' + pb.terms.deal, group.value ? money(group.value, pb.currency) : '']])]
+              .concat((group.facts || []).filter(item => !(noFees(state) && FEE_FACTS.includes(item.key))).map(item => [item.label, item.value])) })),
         h(Section, { title: 'Notes' },
           h('textarea', { className: 'stoa-field stoa-notes', style: { marginTop: 0 }, rows: 4, value: note === null ? group.note : note,
             placeholder: 'What to know about them: how they decide, what was agreed, what to avoid…', onChange: event => setNote(event.target.value) }),
@@ -5012,7 +5014,7 @@ function Board({ state, openId, setOpenId }) {
   const columns = pb.stages.map(stage => ({ ...stage, here: open.filter(deal => deal.stage === stage.id) }))
     .concat(strays.length ? [{ id: '~other', label: 'Other stages', other: true, here: strays }] : [])
     .concat([{ id: '~won', label: pb.won.label, won: true, here: won.slice(0, 8) }])
-    .map(column => ({ ...column, value: inPlay(column.here) }))
+    .map(column => ({ ...column, value: inPlay(column.here, state) }))
   const most = Math.max(1, ...columns.filter(column => !column.won).map(column => column.value))
   const drop = (event, column) => {
     const id = event.dataTransfer.getData(DRAG)
@@ -5355,10 +5357,14 @@ function NewMap({ first, onClose, shape }) {
   const [goes, setGoes] = useState(() => (role ? $filter.get().group || '' : ''))       // the search it is for: the one the pipeline is narrowed to, to begin with
   const [findMore, setFindMore] = useState(true)        // look on the web for candidates, or keep to the people named in the request
   const [text, setText] = useState('')
+  // What is sent is what the form shows: a search remembered from the board's filter that is done, closed or another
+  // pipeline's is not one of the choices, so the map is for a new search.
+  const searches = ((useDesk().data || {}).groups || []).filter(row => row.status === 'open' || row.status === 'hold')
+  const search = searches.some(row => row.name === goes) ? goes : ''
   const go = () => {
     const said = text.trim()
     if (!said) return
-    const sent = toChat(role ? roleMapAsk(said, goes, findMore) : 'Map a new market for me and keep it on the desk as a map of its own: ' + said + ' Name the market, split it into segments that would each get a different pitch, set the requirements, '
+    const sent = toChat(role ? roleMapAsk(said, search, findMore) : 'Map a new market for me and keep it on the desk as a map of its own: ' + said + ' Name the market, split it into segments that would each get a different pitch, set the requirements, '
       + 'then research companies. For each one record the evidence and its source, its headcount, what it uses today for the job we do, any signal with the date it happened, and the likely buyer if you come across one. Tell me when it is on the desk.', null, 'maps')
     if (!sent) return
     host.notify({ kind: 'info', message: 'Hermes is mapping it. The map appears here when it is saved, which takes a few minutes.' })
@@ -5369,7 +5375,7 @@ function NewMap({ first, onClose, shape }) {
     h('label', { className: 'stoa-name', htmlFor: 'stoa-newmap' }, role ? (first ? 'Map the candidates for a role' : 'A new candidate map') : first ? 'Map your first market' : 'A new map'),
     h('p', { className: 'stoa-sub', style: { margin: '4px 0 8px' } }, role ? 'Describe the role and who would fit it. Hermes splits the candidates into pools, finds people who could fill the role from public sources, each with their own fit and the evidence for it, and saves them as a map of its own. It takes a few minutes, and you can keep working while it does.' : 'Say what you sell and who you are after. Hermes names the market, splits it into segments, researches companies and saves it as a map of its own. It takes a few minutes, and you can keep working while it does.'),
     h('textarea', { id: 'stoa-newmap', className: 'stoa-field stoa-maptext', rows: 3, autoFocus: !first, value: text, placeholder: role ? 'A Head of Events for a 40-person trade association in Columbus. Has run a 3,000-person annual show end to end. $130–150k, hybrid.' : 'We sell a fraud prevention tool to fintechs and marketplaces in the US with a small risk team.', onChange: event => setText(event.target.value) }),
-    role ? h(MapFor, { pipe: mapPipe, value: goes, onChange: setGoes, web: findMore, onWeb: setFindMore }) : null,
+    role ? h(MapFor, { pipe: mapPipe, value: search, onChange: setGoes, web: findMore, onWeb: setFindMore }) : null,
     h('div', { className: 'stoa-btns' }, h(Btn, { kind: 'primary', disabled: !text.trim(), onClick: go }, 'Have Hermes map it'), onClose ? h(Btn, { kind: 'quiet', onClick: onClose }, 'Cancel') : null))
 }
 
@@ -6900,7 +6906,7 @@ function Page() {
       state.deals.length || waiting || (day.to_bill || []).length ? h(Today, { state, openId: '', setOpenId: openRecord, openClient }) : nothing,
       side || (state.deals.length ? h(Ahead, { state, setOpenId: openRecord }) : null)) : null,
     !paged && tab === 'pipeline' && (!welcome || waiting) ? h('div', null,
-      h(Billing, { state }),
+      h(Billing, { key: state.pipeline || 'main', state }),          // each pipeline its own: a form left open does not follow the page to another
       state.deals.length && view === 'board' ? h(Funnel, { state }) : null,
       state.deals.length || groups.length ? h('div', { className: 'stoa-viewrow' },
         h('div', { className: 'stoa-grow', style: { maxWidth: 760 } }, h(Filters, { state })),
