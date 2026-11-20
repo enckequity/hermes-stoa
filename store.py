@@ -550,22 +550,46 @@ class Store:
     def _conn(self) -> "Store._Session":
         return Store._Session(self)
 
-    # A pipeline of contract work (a recruiter paid by the hour) keeps and shows no fee. The desk says so here, and the
-    # ledger itself then leaves amounts out: nothing read from it carries one (a record, a search), and nothing written to
-    # it sets one, whichever way it comes in (by hand, the agent, an import, a proposal). What was on a record before the
-    # pipeline became contract work stays in the file, untouched and unseen, and is back if it is made contingent again.
-    no_fees = False
+    # A pipeline of contract work (a recruiter paid by the hour) keeps and shows no fee. The desk says so here, with the
+    # moment it became contract work, and the ledger itself then leaves amounts out: nothing read from it carries one (a
+    # record, a search), and nothing written to it sets one, whichever way it comes in (by hand, the agent, an import, a
+    # proposal). The one exception is a placement made BEFORE then: that fee was earned, may still be owed, and is
+    # history, so it reads and bills as it always did. What else was on a record before stays in the file, untouched
+    # and unseen, and is back if the pipeline is made contingent again.
+    no_fees = ""                    # "" = fees as usual; otherwise the moment the pipeline became contract work
+
+    def keeps_fee(self, deal: dict, since: str = "") -> bool:
+        """Whether this record's amount is kept and shown."""
+        since = since or self.no_fees
+        return not since or (deal.get("status") == "won" and str(deal.get("stage_at") or "") <= since)
 
     def stamp(self) -> int:
         """A number that grows with every change written here: what a figure kept for a moment is checked against."""
         with self._conn() as conn:
             return int(conn.execute("SELECT MAX(seq) FROM ledger").fetchone()[0] or 0)
 
-    def fees_kept(self) -> int:
-        """How many records and groups have an amount in the file, whatever ``no_fees`` says."""
+    def _fees(self) -> tuple:
+        """The records and the groups with an amount in the file that contract work would not show (or does not)."""
+        since = self.no_fees or now()
         with self._conn() as conn:
-            return int(conn.execute("SELECT (SELECT COUNT(*) FROM deals WHERE value_cents > 0 AND archived_at = '') "
-                                    "+ (SELECT COUNT(*) FROM grps WHERE value_cents > 0)").fetchone()[0])
+            deals = [self._raw_deal(row) for row in conn.execute("SELECT * FROM deals WHERE value_cents > 0 AND archived_at = ''").fetchall()]
+            groups = [row["name"] for row in conn.execute("SELECT name FROM grps WHERE value_cents > 0").fetchall()]
+        return [deal for deal in deals if not self.keeps_fee(deal, since)], groups
+
+    def fees_kept(self) -> int:
+        """How many records and groups carry an amount contract work leaves out: unseen now, or about to be."""
+        deals, groups = self._fees()
+        return len(deals) + len(groups)
+
+    def clear_fees(self, actor: str = "") -> int:
+        """Take those amounts away for good (asked for in so many words). A placement from before stays as it is."""
+        deals, groups = self._fees()
+        with self.operation():
+            for deal in deals:
+                self.update(deal["id"], actor=actor, value=0, _clearing=True)
+            for name in groups:
+                self.grp_put(name, actor=actor, value=0, _clearing=True)
+        return len(deals) + len(groups)
 
     # -- actions: what one click or one tool call wrote, so it can be taken back together ---------
     @contextmanager
@@ -668,7 +692,7 @@ class Store:
     def _deal(self, row) -> dict:
         """A record as it is handed out: without its amount where the pipeline keeps none."""
         deal = self._raw_deal(row)
-        if self.no_fees:
+        if not self.keeps_fee(deal):
             deal["value_cents"], deal["value"] = 0, 0.0
         return deal
 
@@ -739,7 +763,11 @@ class Store:
         deal = self.get(deal_id)
         if deal is None:
             raise KeyError(deal_id)
-        if self.no_fees:
+        clearing = bool(values.pop("_clearing", False))
+        if clearing:                        # the amount in the file is what is taken away, and what the ledger says was there
+            with self._conn() as conn:
+                deal = self._raw_deal(conn.execute("SELECT * FROM deals WHERE id = ?", (deal_id,)).fetchone())
+        elif not self.keeps_fee(deal):
             values.pop("value", None)       # no fee is kept here; what the file has is left as it is
         sets, params, changed, before, after = [], [], [], {}, {}
         for key in EDITABLE:
@@ -1065,7 +1093,7 @@ class Store:
                     conn.execute("UPDATE deals SET archived_at = ?, updated_at = ? WHERE id = ?", (stamp, stamp, deal_id))
                     before, after, archived = {"archived_at": ""}, {"archived_at": stamp}, True
                 elif kind == "deal" and what == "update":
-                    row = self._deal(conn.execute("SELECT * FROM deals WHERE id = ?", (deal_id,)).fetchone())
+                    row = self._raw_deal(conn.execute("SELECT * FROM deals WHERE id = ?", (deal_id,)).fetchone())
                     live, fields, sets, params = flat(row), dict(row["fields"]), [], []
                     for key, was in entry["before"].items():
                         if key in SOFT and live.get(key) != entry["after"].get(key):
@@ -1489,7 +1517,7 @@ class Store:
             if status not in GROUP_STATUS:
                 raise ValueError("status is one of: %s" % ", ".join(GROUP_STATUS))
             clean["status"] = status
-        if values.get("value") is not None and not self.no_fees:
+        if values.get("value") is not None and (not self.no_fees or values.get("_clearing")):
             clean["value_cents"] = max(0, to_cents(values["value"]))
         if values.get("note") is not None:
             clean["note"] = str(values["note"]).strip()[:4000]

@@ -1158,6 +1158,9 @@ class CandidateMapTests(unittest.TestCase):
         done = self.markets.track({"market": made["market"]["id"], "targets": ["Dana Whitcombe", "Luis Ortega"]}, actor="tester")
         first, second = done["added_to_pipeline"]
         self.assertEqual((first["deal"], first.get("existing_record")), (by_hand, True))
+        hers = self.desk.store.get(by_hand)                                              # and what the map found is on her record
+        self.assertEqual((hers["company"], hers["fields"].get("title"), hers["linkedin"]),
+                         ("PCBC (California Building Industry Association)", "Director of Events", "https://www.linkedin.com/in/dana-whitcombe"))
         self.assertFalse(second.get("existing_record"))
         self.assertIn("already in that search", done["note"])
         names = sorted(d["name"].lower() for d in self.desk.store.list(status="open"))
@@ -1172,10 +1175,14 @@ class CandidateMapTests(unittest.TestCase):
     def test_where_someone_works_is_a_name_not_their_history(self):
         from stoa import market as m
         for text in ("Left Stripe in 2025, now between roles", "Stripe, per a 2023 conference bio (could have moved since)", "Formerly Google: now freelance",
-                     "Between jobs", "Stripe (since 2021)", "Was at Lodestar until March"):
+                     "Stripe (since 2021)", "Was at Lodestar until March", "Lyft (2019-2023)", "Stripe 2021-present", "Stripe 2019\u20132023", "Stripe (2021 -)",
+                     "Stripe \u2192 Plaid", "Stripe / Plaid", "Formerly Google", "ex-Google", "Left Google to join a startup"):
             self.assertEqual(m.uses_name(text, employer=True), ("", "refuse"), text)
+        for text in ("Between jobs", "Open to work", "unemployed."):                      # not working anywhere: nothing to keep, nothing to complain of
+            self.assertEqual(m.uses_name(text, employer=True), ("", "clear"), text)
         for text in ("AT&T Inc. (Mobility)", "Ernst & Young LLP: Advisory", "PCBC (California Building Industry Association)", "Now Health International", "Vision 2030 Partners",
-                     "Between the Lines Ltd", "Stripe"):
+                     "Between the Lines Ltd", "Stripe", "X (formerly Twitter)", "Twitter (now X)", "Left Lane Capital", "Left Field Labs", "Formerly Known As Records",
+                     "Ex-Lab Tools", "UPS: Now Hiring", "Levi Strauss & Co.", "20th Century Studios", "Self-employed"):
             self.assertEqual(m.uses_name(text, employer=True), (text, "keep"), text)
 
     def test_a_map_of_companies_on_a_recruiting_desk_is_as_it_was(self):
@@ -1304,6 +1311,62 @@ class RecruitingBillingTests(unittest.TestCase):
         self.assertNotIn("month", back)
         self.assertFalse(self.desk.set_billing({"type": "contingent", "fee_pct": 140})["ok"])
 
+    def test_a_placement_from_before_the_contract_keeps_its_fee_and_is_still_billed(self):
+        won = self.desk.playbook().won
+        placed, unbilled, still_open = self.add("Placed Before", "VP Finance", 30000), self.add("Placed Unbilled", "Head of Risk", 25000), self.add("Still Open", "VP Finance", 30000)
+        for deal in (placed, unbilled):
+            self.desk.store.move(deal["id"], won["id"], status="won", actor="tester", label=won["label"])
+        self.assertTrue(self.desk.invoice({"action": "add", "deal": placed["id"], "amount": 10000})["ok"])
+        before = self.desk.cash()
+        self.assertTrue(self.desk.set_billing({"type": "contract", "client": "Halden Group", "rate": 85, "hours_week": 20})["ok"])
+        # The two placements read as they did, and what is owed on them is still asked for; the open candidate has no fee.
+        self.assertEqual([self.desk.store.get(d["id"])["value"] for d in (placed, unbilled, still_open)], [30000, 25000, 0])
+        self.assertEqual(self.desk.money(self.desk.store.get(placed["id"]), self.desk.store.invoices(placed["id"]))["uninvoiced"], 20000)
+        after = self.desk.cash()
+        self.assertEqual(after["strip"], before["strip"])
+        self.assertTrue(self.desk.invoice({"action": "add", "deal": unbilled["id"]})["ok"])            # for its fee, with no amount said
+        billing = self.desk.billing()
+        self.assertEqual((billing["record_billing"], billing["fees_kept"]), (True, 1))     # the open candidate's fee is the one left unseen
+        self.assertEqual(self.desk.sum(self.desk.store.list(status="open")), 0)
+        # A candidate placed once it is contract work brings no fee, whatever was on the record from before.
+        time.sleep(1.1)
+        self.desk.store.move(still_open["id"], won["id"], status="won", actor="tester", label=won["label"])
+        self.assertEqual(self.desk.store.get(still_open["id"])["value"], 0)
+        # Cleared in so many words: the unseen fee goes, the placements from before stay as they are.
+        self.desk.set_billing({"type": "contract", "client": "Halden Group", "rate": 85, "hours_week": 20, "clear_fees": True})
+        self.assertEqual((self.desk.billing()["fees_kept"], self.desk.store.get(placed["id"])["value"]), (0, 30000))
+        self.desk.set_billing({"type": "contingent"})
+        self.assertEqual([self.desk.store.get(d["id"])["value"] for d in (placed, unbilled, still_open)], [30000, 25000, 0])
+
+    def test_contract_work_through_undo_proposals_and_many_readers(self):
+        kept = self.add("Fee Carrier", "Plant Manager", 20000)
+        self.desk.deal({"action": "update", "deal": kept["id"], "value": 22000})
+        self.desk.set_billing({"type": "contract", "client": "Halden Group", "rate": 85, "hours_week": 20})
+        # Undo measures against the file: the ledger says 22,000 was there, not nothing.
+        self.desk.store.undo(kept["id"])
+        with self.desk.store._conn() as conn:
+            line = dict(conn.execute("SELECT before, after FROM ledger ORDER BY seq DESC LIMIT 1").fetchone())
+        self.assertEqual((json.loads(line["before"]).get("value_cents"), json.loads(line["after"]).get("value_cents")), (2200000, 2000000))
+        self.assertEqual(self.desk.store.get(kept["id"])["value"], 0)
+        # A list that names a fee does not offer one: nothing would come of approving it, and it would be offered again.
+        row = {"name": "Fee Carrier", "group": "Plant Manager", "value": 30000, "fields": {}}
+        self.assertNotIn("value", [change["key"] for change in self.desk.intake._changes(self.desk.store.get(kept["id"]), row, self.desk.playbook())])
+        # Clearing is one act of the ledger: other readers asking for the pipeline's ledger meanwhile cannot undo half of it.
+        for n in range(4):
+            self.desk.set_billing({"type": "contingent"})
+            self.add("More %d" % n, "Plant Manager", 10000)
+        self.desk.set_billing({"type": "contract", "client": "Halden Group", "rate": 85, "hours_week": 20})
+        real = st.Store.update
+
+        def and_another_reader(store, *args, **kwargs):
+            self.desk.store.list()                       # another request, as the page's own poll would be
+            return real(store, *args, **kwargs)
+        with mock.patch.object(st.Store, "update", and_another_reader):
+            self.desk.set_billing({"type": "contract", "client": "Halden Group", "rate": 85, "hours_week": 20, "clear_fees": True})
+        self.assertEqual(self.desk.billing()["fees_kept"], 0)
+        self.desk.set_billing({"type": "contingent"})
+        self.assertEqual(sum(d["value"] for d in self.desk.store.list(status="all")), 0)
+
     def test_each_pipeline_keeps_its_own_and_production_shows_them_together(self):
         made = self.desk.pipeline_add("Contract work", "recruiting")
         self.assertTrue(made["ok"], made)
@@ -1333,12 +1396,14 @@ class RecruitingBillingTests(unittest.TestCase):
         client = next(row for row in self.desk.clients() if row["name"] == "Columbus Trade Association")
         self.assertEqual((client["open"], client["open_value"]), (3, 30000.0))            # three candidates, one fee
         self.assertEqual(self.desk.group({"action": "get", "group": "VP Finance"})["open_value"], 30000.0)
-        # Two openings and candidates who would bring different fees: in play is the two largest, and the forecast is of the same.
-        one = self.desk.store.list(status="open")[0]
-        self.desk.store.update(one["id"], actor="tester", value=20000)
+        # Two openings and candidates who would bring different fees (40k, 30k, 20k): in play is the two largest, and the
+        # forecast is of the same 70k, not the largest twice over.
+        first, second = self.desk.store.list(status="open")[:2]
+        self.desk.store.update(first["id"], actor="tester", value=20000)
+        self.desk.store.update(second["id"], actor="tester", value=40000)
         self.desk.set_openings("VP Finance", 2)
         open_ = self.desk.store.list(status="open")
-        self.assertEqual((self.desk.sum(open_), self.desk.cash()["forecast"]["value"]), (60000.0, 60000.0))
+        self.assertEqual((self.desk.sum(open_), self.desk.cash()["forecast"]["value"]), (70000.0, 70000.0))
 
     def test_a_sales_pipeline_adds_up_as_it_always_did(self):
         tmp = tempfile.TemporaryDirectory()

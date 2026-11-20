@@ -228,7 +228,7 @@ class Desk:
         the last fourteen kept): the first time it is opened that day, so the copy is the desk as yesterday left it."""
         name, day = self.own_file(), st.today()
         store = self._store_at(name)
-        store.no_fees = self._contract_kept()       # contract work keeps and shows no fee, whichever way one comes in
+        store.no_fees = self._contract_since()      # contract work keeps and shows no fee, whichever way one comes in
         if self._copied.get(name) != day:
             self._copied[name] = day
             try:
@@ -434,15 +434,25 @@ class Desk:
         kept = (entry if entry else self._pipes()).get("billing")
         return kept if isinstance(kept, dict) else {}
 
-    def _contract_kept(self) -> bool:
-        """Whether the pipeline in hand is written down as contract work and is still a recruiting one. On the path of
-        every read: for any other pipeline it costs one look at what is already kept in memory."""
-        if self._billing_kept().get("type") != BILL_CONTRACT:
-            return False
-        try:
-            return self.own_playbook().shape == "roles"
-        except Exception:
-            return False
+    def _contract_since(self) -> str:
+        """Since when the pipeline in hand has been contract work; "" if it is not (or is no longer a recruiting one).
+        On the path of every read: for any other pipeline it costs one look at what is already kept in memory, and
+        for a contract one the shape of its playbook is remembered for a few seconds rather than read from disk."""
+        kept = self._billing_kept()
+        if kept.get("type") != BILL_CONTRACT:
+            return ""
+        entry = self._pipe()
+        name = str(entry.get("playbook") or DEFAULT) if entry else str(self.setting("playbook", DEFAULT))
+        seen = self._shapes.get(name) if hasattr(self, "_shapes") else None
+        if not seen or time.time() - seen[0] > 5:
+            try:
+                shape = self.library.load_or_default(name).shape
+            except Exception:
+                shape = ""
+            if not hasattr(self, "_shapes"):
+                self._shapes = {}
+            seen = self._shapes[name] = (time.time(), shape)
+        return (str(kept.get("since") or "") or "9999") if seen[1] == "roles" else ""
 
     def billing_kind(self) -> str:
         """"contract" or "contingent" for the pipeline in hand if its playbook is recruiting; "" for any other."""
@@ -463,7 +473,9 @@ class Desk:
         out = {"type": kind, "client": str(kept.get("client") or ""), "fee_pct": kept.get("fee_pct") or 0, "rate": 0, "hours_week": 0, "fixed": bool(self.tour()),
                # fees still in the file (unseen on contract work, and there to clear), and invoices on records here
                # (a placement from before the pipeline was contract work is still billed and paid on its record)
-               "fees_kept": self.store.fees_kept(), "record_invoices": len([i for i in self.store.invoices() if not str(i.get("deal_id") or "").startswith("client:")])}
+               "fees_kept": self.store.fees_kept(),
+               "record_billing": any(deal["status"] == "won" and deal["value_cents"] for deal in self.store.list(status="all"))
+               or any(not str(i.get("deal_id") or "").startswith("client:") for i in self.store.invoices())}
         if out["client"]:
             terms = self.terms_of(out["client"])
             if terms.get("kind") == "hourly":
@@ -512,19 +524,10 @@ class Desk:
             if not saved.get("ok"):
                 return {"ok": False, "error": saved.get("error") or "the hourly terms could not be saved"}
             if args.get("clear_fees"):
-                store = self.store
-                unseen, store.no_fees = store.no_fees, False        # the amounts themselves, to take them away
-                try:
-                    with store.operation():
-                        for deal in store.list(status="all"):
-                            if deal.get("value_cents"):
-                                store.update(deal["id"], actor=actor, value=0)
-                        for group in store.grps():
-                            if group.get("value"):
-                                store.grp_put(group["name"], actor=actor, value=0)
-                finally:
-                    store.no_fees = unseen
-            new = {"type": BILL_CONTRACT, "client": self._client_name(client), "fee_pct": was.get("fee_pct") or 0}
+                self.store.clear_fees(actor)        # a placement from before stays: it was earned, and may still be owed
+            new = {"type": BILL_CONTRACT, "client": self._client_name(client), "fee_pct": was.get("fee_pct") or 0,
+                   # from when no fee is kept: a placement made before then keeps its own
+                   "since": str(was.get("since") or "") if was.get("type") == BILL_CONTRACT and was.get("since") else st.now()}
         else:
             try:
                 pct = float(args.get("fee_pct") or 0)

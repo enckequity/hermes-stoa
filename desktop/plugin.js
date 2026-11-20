@@ -649,9 +649,9 @@ function seenAnswer(path, pipe, answer) {
   if (!state) return withoutFees(answer, 0)
   const out = { ...answer }
   for (const side of ['deals', 'totals', 'flow', 'groups', 'companies', 'clients']) if (answer[side]) out[side] = withoutFees(answer[side], 0)
-  // A record is not billed itself on contract work. One placed before the pipeline was contract work may be: where any
-  // record here has an invoice, the page keeps the place they are shown and paid.
-  if (answer.playbook && !(answer.billing || {}).record_invoices) out.playbook = { ...answer.playbook, billing: 'none' }
+  // A record is not billed itself on contract work. One placed before the pipeline was contract work is: where there is
+  // such a placement, or an invoice on any record here, the page keeps the place they are billed and paid.
+  if (answer.playbook && !(answer.billing || {}).record_billing) out.playbook = { ...answer.playbook, billing: 'none' }
   return out
 }
 

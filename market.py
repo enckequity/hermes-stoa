@@ -56,9 +56,18 @@ _NOT_KNOWN = {"unknown", "not known", "not known yet", "none", "n/a", "na", "tbd
 _UNSURE = re.compile(r"\b(not (?:yet )?(?:confirmed|identified|known|clear|sure|verified|disclosed|stated|found|named)|unconfirmed|unidentified|unknown|unclear|uncertain|unverified"
                      r"|may ?be|might be|possibly|probably|presumably|likely|appears?|seems?|tbd)\b|\?", re.I)
 # Where someone works is a company's name. What they did before, since when, or on whose word, is a note.
-_A_HISTORY = re.compile(r"^(left\s|formerly\b|previously\b|ex-|was at\b|between (roles|jobs)|currently (at|with|between|un)|now (at|with|between|freelanc))"
-                        r"|\b(in|since|until|from|as of|per a|a)\s+(19|20)\d\d\b|[,:(]\s*(now|then|per|since|until|formerly|previously|could|may)\b"
-                        r"|\bbetween (roles|jobs)\b", re.I)
+# A company's own name may say what it used to be called ("X (formerly Twitter)") or begin with such a word ("Left Lane
+# Capital", "Formerly Known As Records"): those are names.
+_A_HISTORY = re.compile(r"^left\s.+\s(in|to|after)\s"                                      # "Left Stripe in 2025"
+                        r"|^(formerly|previously|ex-)\s*\S+$"                               # "Formerly Google", "ex-Google"
+                        r"|^(formerly|previously) (at|with|of)\b|^was (at|with)\b|^currently (at|with|between|un)|^now (at|with|between|freelanc)"
+                        r"|\b(in|since|until|from|as of|per a|a)\s+(19|20)\d\d\b"
+                        r"|\b(19|20)\d\d\s*[-\u2013\u2014]"                              # a span of years: "2019–2023", "2021-present"
+                        r"|[,:]\s*now\s+(freelanc|between|at|with|independent|consult|retired|unemployed|looking|self)"
+                        r"|[,:(]\s*(then|per|since|until|could|may)\b"
+                        r"|\bbetween (roles|jobs)\b|\u2192|->|=>|\s/\s", re.I)
+_NO_EMPLOYER = {"open to work", "between jobs", "between roles", "unemployed", "not working", "not employed", "job seeking", "seeking work", "looking for work",
+                "career break", "on a career break"}
 USES_HELP = ("`uses` is the name of the tool or vendor a company uses today, alone and in a few words ('Cvent', 'Spreadsheets', 'In-house tool'): the map groups "
              "companies by it and prints it on the page a client is sent. Send the name alone where a source confirms it. Where none does, leave `uses` out "
              "(send 'unknown' to clear one saved earlier) and tell the person what you found in your reply. Do not save it anywhere on the map: `why` is the "
@@ -76,6 +85,8 @@ def uses_name(value: Any, employer: bool = False) -> tuple:
     if not text:
         return "", "none"
     if text.lower().strip(" .") in _NOT_KNOWN:
+        return "", "clear"
+    if employer and text.lower().strip(" .") in _NO_EMPLOYER:
         return "", "clear"
     if employer:
         if len(text) > EMPLOYER_MOST or len(text.split()) > EMPLOYER_WORDS or ";" in text or _UNSURE.search(text) or _A_HISTORY.search(text):
@@ -963,6 +974,14 @@ class Markets:
                 same = next((d for d in self.store.list(status="open") if d["name"].strip().lower() == target["company"].strip().lower()
                              and st.group_key(d.get("grp")) == st.group_key(group)), None)
                 if same is not None:      # already a candidate in that search (added by hand, from a list): theirs is the record, never a second
+                    # What the map found goes on it where the record says nothing: where they work, their title, their page.
+                    more = {key: value for key, value in fields.items() if value and not (same.get("fields") or {}).get(key)}
+                    plain = {key: value for key, value in (("company", employer), ("linkedin", target["source"] if "linkedin.com/" in (target["source"] or "") else ""))
+                             if value and not same.get(key)}
+                    if more or plain:
+                        self.store.update(same["id"], actor=actor, fields=more or None, **plain)
+                    if note:
+                        self.store.log(same["id"], "note", "From the %s map. %s" % (owner_market["name"], note), actor=actor)
                     with self.store._conn() as conn:
                         conn.execute("UPDATE targets SET status = 'tracked', deal_id = ?, updated_at = ? WHERE id = ?", (same["id"], st.now(), target["id"]))
                     made.append({"company": target["company"], "deal": same["id"], "market_id": target["market_id"], "contact": "", "group": same["grp"],

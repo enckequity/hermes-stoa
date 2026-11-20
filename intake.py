@@ -465,7 +465,7 @@ class Intake:
                 continue
             if new and differs:
                 changes.append({"key": key, "field": label, "from": old, "to": new})
-        if row.get("value") and abs(row["value"] - (record.get("value") or 0)) > 0.005:
+        if row.get("value") and self.store.keeps_fee(record) and abs(row["value"] - (record.get("value") or 0)) > 0.005:      # not on contract work, which keeps no fee
             changes.append({"key": "value", "field": terms["value"], "from": cards.money(record.get("value") or 0, playbook.currency),
                             "to": cards.money(row["value"], playbook.currency)})
         field_labels = {field["key"]: field["label"] for field in playbook.fields}
