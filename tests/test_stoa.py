@@ -1084,6 +1084,11 @@ class CandidateMapTests(unittest.TestCase):
         self.assertIn("one row for each PERSON", made["next"])
         added = self.people()
         self.assertEqual((sorted(added["added"]), added["rows"]), (["Dana Whitcombe", "Luis Ortega", "Priya Nand"], "people"))
+        # Map facts: a candidate has a title and an employer to be known, never a headcount or a buyer.
+        facts = self.markets.facts("Head of Events")
+        self.assertEqual((facts["rows"], facts["on_it"]["sized"], facts["on_it"]["uses"], facts["on_it"]["buyers"]), ("people", 3, 2, 0))             # a guess at an employer is not kept as one
+        self.assertEqual([gap["what"] for gap in facts["gaps"]], ["checked against the role's requirements", "a source link", "where they work now"])
+        self.assertEqual([gap["missing"] for gap in facts["gaps"]], [3, 2, 1])
         rows = {row["company"]: row for row in self.markets.targets("head-of-events")}
         self.assertEqual(rows["Dana Whitcombe"]["detail"]["uses"], "PCBC (California Building Industry Association)")      # an employer's name is kept whole
         self.assertNotIn("uses", rows["Priya Nand"]["detail"])                                                                # a guess still is not

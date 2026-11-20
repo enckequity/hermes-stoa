@@ -754,7 +754,7 @@ function Billing({ state }) {
     rest('/pipeline/billing', { method: 'POST', body: { type: v.type, client: v.client.trim(), rate: Number(v.rate) || 0, hours_week: Number(v.hours) || 0, start: v.from, fee_pct: Number(v.pct) || 0, clear_fees: contract && v.clear } })
       .then(() => { setOpen(false); refresh() }).catch(error => host.notifyError(error, 'Not saved')).then(() => setBusy(false))
   }
-  return h('div', null, line, h('div', { className: 'stoa-box stoa-billform' },
+  return h('div', null, line, h('div', { className: 'stoa-box stoa-payform' },
     h('div', { className: 'stoa-eyebrow' }, 'How this pipeline is paid for'),
     h('div', { className: 'stoa-billkinds' }, BILLING_KINDS.map(([id, title, words]) => h('button', { type: 'button', key: id, className: 'stoa-billkind', 'aria-pressed': v.type === id, 'data-on': v.type === id ? '1' : '0', onClick: () => setV({ ...v, type: id }) },
       h('b', null, title), h('span', { className: 'stoa-sub' }, words)))),
@@ -1764,7 +1764,8 @@ const CSS_RECRUITING = `
 .stoa-mapfor label { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 .stoa-billing { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0 0 12px; font-size: 12.5px; color: var(--ui-text-secondary); }
 .stoa-billing b { color: var(--ui-text-primary); font-weight: 600; }
-.stoa-billform { margin: 0 0 14px; }
+.stoa-payform { margin: 0 0 14px; }
+.stoa-payform .stoa-form { max-width: 620px; }
 .stoa-billkinds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
 .stoa-billkind { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--ui-stroke-secondary); border-radius: var(--stoa-r); background: var(--ui-bg-card); color: var(--ui-text-primary); text-align: left; cursor: pointer; }
 .stoa-billkind[data-on="1"] { border-color: var(--stoa-accent); background: var(--stoa-accent-soft); }
@@ -5398,7 +5399,10 @@ function MapFacts({ market, onClose, onFill }) {
   if (!facts) body = h('p', { className: 'stoa-sub' }, query.error ? 'The numbers could not be read: ' + why(query.error) : 'Counting…')
   else {
     const on = facts.on_it, cost = facts.cost, total = on.companies || 1
-    const cover = [['Checked against the requirements', on.checked, on.companies], ['With a source link', on.sourced, on.companies], ['Headcount known', on.sized, on.companies],
+    const persons = (facts.rows || rowsOf(market)) === 'people'      // a candidate map: no headcount and no buyer, a title and an employer
+    const cover = persons ? [['Checked against the role', on.checked, on.companies], ['With a source link', on.sourced, on.companies], ['Title known', on.sized, on.companies],
+      ['Employer known', on.uses, on.companies], ['Reasons to move with a date', on.dated, on.signals]]
+      : [['Checked against the requirements', on.checked, on.companies], ['With a source link', on.sourced, on.companies], ['Headcount known', on.sized, on.companies],
       ['What it uses today known', on.uses, on.companies], ['A buyer named', on.buyers, on.companies], ['Signals with a date', on.dated, on.signals]]
     const askable = facts.gaps.filter(gap => gap.ask)
     const limitRow = (name, label, hint, now) => h('label', { key: name, className: 'stoa-factlimit' },
@@ -5408,7 +5412,7 @@ function MapFacts({ market, onClose, onFill }) {
     body = [
       h('div', { key: 'grid', className: 'stoa-factgrid' },
         h('section', null, h('div', { className: 'stoa-sechead', style: { padding: '0 0 8px' } }, h('span', { className: 'stoa-eyebrow' }, 'What is on it')),
-          h('div', { className: 'stoa-factfigs' }, [['Companies', on.companies], ['Segments', on.segments], ['In the pipeline', on.in_pipeline], ['Dismissed', on.dismissed]].map(pair =>
+          h('div', { className: 'stoa-factfigs' }, [[persons ? 'Candidates' : 'Companies', on.companies], [persons ? 'Pools' : 'Segments', on.segments], ['In the pipeline', on.in_pipeline], ['Dismissed', on.dismissed]].map(pair =>
             h('div', { key: pair[0] }, h('b', null, pair[1]), h('small', null, pair[0])))),
           cover.map(row => h('div', { key: row[0], className: 'stoa-factrow' }, h('span', null, row[0]), h('span', { className: 'stoa-num' }, row[1] + ' of ' + row[2]),
             h('u', { className: 'stoa-mapmeter' }, h('i', { style: { width: (row[2] ? Math.round(100 * row[1] / row[2]) : 0) + '%' } })))),
@@ -5416,7 +5420,7 @@ function MapFacts({ market, onClose, onFill }) {
         h('section', null, h('div', { className: 'stoa-sechead', style: { padding: '0 0 8px' } }, h('span', { className: 'stoa-eyebrow' }, 'Where it came from')),
           facts.sources.links ? [h('p', { key: 'p', style: { margin: '0 0 8px' } }, plural(facts.sources.links, 'source link', 'source links') + ' from ' + plural(facts.sources.sites, 'site', 'sites') + '.'),
             facts.sources.top.map(row => h('div', { key: row.site, className: 'stoa-factrow', 'data-plain': '1' }, h('span', { style: { overflowWrap: 'anywhere' } }, row.site), h('span', { className: 'stoa-num' }, plural(row.links, 'link', 'links'))))]
-            : h('p', { className: 'stoa-sub' }, 'No company on this map has a source link yet.'),
+            : h('p', { className: 'stoa-sub' }, 'No ' + (persons ? 'candidate' : 'company') + ' on this map has a source link yet.'),
           h('div', { className: 'stoa-sechead', style: { padding: '0 0 8px', marginTop: 18 } }, h('span', { className: 'stoa-eyebrow' }, 'What it has cost')),
           h('div', { className: 'stoa-factcost' },
             h('div', null, h('b', null, cost.runs ? (cost.usd === null ? 'No price known' : usd(cost.usd)) : usd(0)), h('small', null, 'Hermes\'s work, as Hermes estimates it')),
@@ -5429,8 +5433,8 @@ function MapFacts({ market, onClose, onFill }) {
           h('p', { className: 'stoa-sub', style: { marginTop: 8 } }, 'The dollar figure is Hermes\'s own estimate from the provider\'s price list, for the turns that worked on this map' + (cost.since ? ' since ' + day(cost.since) : '') + '. It is not an invoice. Web research Hermes does with its own tools is inside that figure; only searches made through Stoa are counted on the Exa line.'))),
       h('form', { key: 'limits', className: 'stoa-factlimits', onSubmit: save },
         h('div', { className: 'stoa-sechead', style: { padding: '0 0 8px' } }, h('span', { className: 'stoa-eyebrow' }, 'Limits for this map'), h('span', { className: 'stoa-sub' }, 'leave a box empty for no limit')),
-        limitRow('companies', 'Companies on the map', 'Hermes stops adding when the map holds this many', on.companies + ' now'),
-        limitRow('budget', 'Hermes\'s work a month, in dollars', 'By Hermes\'s estimate; past it, Stoa refuses new companies and searches for this map', usd(cost.usd_month) + ' this month'),
+        limitRow('companies', (persons ? 'Candidates' : 'Companies') + ' on the map', 'Hermes stops adding when the map holds this many', on.companies + ' now'),
+        limitRow('budget', 'Hermes\'s work a month, in dollars', 'By Hermes\'s estimate; past it, Stoa refuses new ' + (persons ? 'candidates' : 'companies') + ' and searches for this map', usd(cost.usd_month) + ' this month'),
         limitRow('lookups', 'People Data Labs lookups a month', 'For this map alone, inside the cap for the whole desk', cost.lookups_month + ' this month'),
         limitRow('searches', 'Exa searches a month', 'Searches made through Stoa for this map', cost.searches_month + ' this month'),
         h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'At a limit, Stoa refuses the next step and tells Hermes to stop and tell you. It cannot stop a turn that is already running.'),
@@ -5510,7 +5514,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
   const roomFor = () => {
     const room = market.room
     if (room && (room.stop || room.companies === 0)) {
-      host.notify({ kind: 'info', message: room.stop ? 'This map has used the budget set for Hermes\'s work this month. Raise it under Map facts to carry on.' : 'This map is at its limit of ' + plural(room.limit, 'company', 'companies') + '. Raise it under Map facts, or dismiss a company to make room.' })
+      host.notify({ kind: 'info', message: room.stop ? 'This map has used the budget set for Hermes\'s work this month. Raise it under Map facts to carry on.' : 'This map is at its limit of ' + plural(room.limit, mapSay.thing, mapSay.things) + '. Raise it under Map facts, or dismiss a ' + mapSay.thing + ' to make room.' })
       return ''
     }
     return ['one', 'two', 'three', 'four', 'five'][Math.min(5, room && room.companies !== null ? room.companies : 5) - 1]
@@ -5520,9 +5524,9 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
       const added = result.added || [], filled = added.filter(a => a.existing).length, opened = added.length - filled
       if (!added.length) return 'Nothing was added: ' + ((result.skipped || [])[0] || 'they are already in the pipeline.')
       return [opened ? plural(opened, 'record', 'records') + ' opened in the pipeline, each with its evidence.' : '',
-        filled ? plural(filled, 'company', 'companies') + ' already had a record, so the map filled ' + (filled === 1 ? 'it' : 'them') + ' in instead.' : ''].filter(Boolean).join(' ')
+        filled ? plural(filled, mapSay.thing, mapSay.things) + ' already had a record, so the map filled ' + (filled === 1 ? 'it' : 'them') + ' in instead.' : ''].filter(Boolean).join(' ')
     }),
-    dismiss: companies => send('dismiss', companies.filter(c => c.status !== 'tracked'), null, result => { setPicked([]); return (result.dismissed || []).length ? plural(result.dismissed.length, 'company', 'companies') + ' taken off the map. “Dismissed” above the map puts one back.' : 'Records already in the pipeline stay on the map.' }),
+    dismiss: companies => send('dismiss', companies.filter(c => c.status !== 'tracked'), null, result => { setPicked([]); return (result.dismissed || []).length ? plural(result.dismissed.length, mapSay.thing, mapSay.things) + ' taken off the map. “Dismissed” above the map puts one back.' : 'Records already in the pipeline stay on the map.' }),
     // One person at each company, with a title like the buyers already named on this map: one lookup apiece, never more.
     // With a key but no buyer named yet there is no title to look for, so Hermes works out who the buyer is instead.
     buyers: companies => {
@@ -5612,7 +5616,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
     side = h('div', null,
       market.reading ? [label('Reading the map'), String(market.reading).split('\n').filter(Boolean).map((text, index) => h('p', { key: index, style: { margin: '0 0 8px' } }, text))] : null,
       (market.implications || []).length ? [label('What this means'), market.implications.map((text, index) => h('p', { key: 'i' + index, className: 'stoa-tip' }, text))] : null,
-      h('div', { className: 'stoa-sechead', style: { padding: '0 0 6px' } }, h('span', { className: 'stoa-eyebrow' }, 'Next calls'),
+      h('div', { className: 'stoa-sechead', style: { padding: '0 0 6px' } }, h('span', { className: 'stoa-eyebrow' }, mapSay.people ? 'Who to approach first' : 'Next calls'),
         calls.length > 1 ? h(Btn, { disabled: Boolean(busy), onClick: () => act.add(calls) }, 'Add all ' + calls.length) : null),
       calls.length ? calls.map((c, index) => h('div', { key: c.id, className: 'stoa-setrow' },
         h('span', { className: 'stoa-stagenum', style: { width: 18, margin: 0 } }, '0' + (index + 1)),

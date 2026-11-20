@@ -373,17 +373,29 @@ class Markets:
                  "signals": has(lambda r: r["signal"]), "dated": has(lambda r: r["signal"] and r["detail"].get("signal_date")),
                  "buyers": has(lambda r: r["detail"].get("people")), "sized": has(lambda r: headcount(r["size"])),
                  "uses": has(lambda r: r["detail"].get("uses"))}
-        gaps = [(total - on_it["checked"], "checked against the requirements", "check it against the map's requirements, with the evidence"),
-                (total - on_it["sourced"], "a source link", "give the page the evidence came from"),
-                (total - on_it["uses"], "what it uses today", "name the tool it uses today for the job we do, where a source says"),
-                (total - on_it["sized"], "its headcount", "give its headcount"),
-                (on_it["signals"] - on_it["dated"], "the date of its signal", "give the date its signal happened"),
-                (total - on_it["buyers"], "a buyer named", "")]
+        people = self.rows_of(market) == PEOPLE
+        if people:
+            # A candidate map: a row is a person, whose title is kept where a company's size is and whose employer where
+            # what a company uses is. Nobody on it has a headcount or a buyer.
+            on_it["sized"] = has(lambda r: r["size"])
+            on_it["buyers"] = 0
+            gaps = [(total - on_it["checked"], "checked against the role's requirements", "check them against the role's requirements, with the evidence"),
+                    (total - on_it["sourced"], "a source link", "give the page the evidence came from"),
+                    (total - on_it["uses"], "where they work now", "name the company they work at now, where a source says"),
+                    (total - on_it["sized"], "their title", "give their current title, where a source says"),
+                    (on_it["signals"] - on_it["dated"], "the date of their reason to move", "give the date their reason to move happened")]
+        else:
+            gaps = [(total - on_it["checked"], "checked against the requirements", "check it against the map's requirements, with the evidence"),
+                    (total - on_it["sourced"], "a source link", "give the page the evidence came from"),
+                    (total - on_it["uses"], "what it uses today", "name the tool it uses today for the job we do, where a source says"),
+                    (total - on_it["sized"], "its headcount", "give its headcount"),
+                    (on_it["signals"] - on_it["dated"], "the date of its signal", "give the date its signal happened"),
+                    (total - on_it["buyers"], "a buyer named", "")]
         month = st.today()[:7]
         n = lambda name: self._count(market["id"], name)
         calls, unpriced = n("calls"), n("unpriced")
         return {"ok": True, "id": market["id"], "name": market["name"], "created": st.local_day(market.get("created_at")),
-                "updated": st.local_day(market.get("updated_at")), "on_it": on_it,
+                "updated": st.local_day(market.get("updated_at")), "on_it": on_it, "rows": self.rows_of(market),
                 "sources": {"links": len(linked), "sites": len(sites), "top": [{"site": site, "links": count} for site, count in sites.most_common(6)]},
                 "gaps": [{"missing": missing, "what": what, "ask": ask} for missing, what, ask in gaps if missing > 0],
                 "cost": {"since": self.store.meta_get("map:%s:since" % market["id"], "")[:10], "last": self.store.meta_get("map:%s:last" % market["id"], ""),
