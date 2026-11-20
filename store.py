@@ -553,16 +553,19 @@ class Store:
     # A pipeline of contract work (a recruiter paid by the hour) keeps and shows no fee. The desk says so here, and the
     # ledger itself then leaves amounts out: nothing read from it carries one (an open or passed record, a search), and
     # nothing written to it sets one, whichever way it comes in (by hand, the agent, an import, a proposal).
-    # A PLACEMENT is the exception, and its amount in the file is always a fee that was earned: one made before the
-    # pipeline was contract work keeps its own (it may still be owed, and it is history), and a record placed WHILE it is
-    # contract work has whatever amount it carried from before taken off at that moment (``move``), because that
-    # placement brings none. So nothing here goes by the clock: not when a stage last changed, not how many times the
-    # pipeline went back and forth. What an open record carried from before stays in the file, unseen, and is back if the
-    # pipeline is made contingent again.
+    # A PLACEMENT is the exception: one made before the pipeline was contract work keeps the fee it earned (it may still
+    # be owed, and it is history). A record placed WHILE it is contract work is marked so at that moment (``move``, in the
+    # same line of the ledger, so undo takes the mark back with the placement): that placement brings no fee, so an
+    # amount it carried from before does not show on it, here or after the pipeline is made contingent again, and none
+    # can be put on it while the pipeline is contract work. Nothing goes by the clock, and nothing is taken out of the
+    # file: what a record carried from before stays there, unseen, until it is cleared in so many words.
     no_fees = False
+    NO_FEE = "_no_fee"              # the mark, kept with a record's own facts as ``_prev_stage`` is
 
     def keeps_fee(self, deal: dict) -> bool:
         """Whether this record's amount is kept and shown."""
+        if deal.get("status") == "won" and (deal.get("fields") or {}).get(self.NO_FEE):
+            return False            # placed on contract work
         return not self.no_fees or deal.get("status") == "won"
 
     def stamp(self) -> int:
@@ -573,9 +576,9 @@ class Store:
     def _fees(self) -> tuple:
         """The records and the groups with an amount in the file that contract work would not show (or does not)."""
         with self._conn() as conn:
-            deals = [self._raw_deal(row) for row in conn.execute("SELECT * FROM deals WHERE value_cents > 0 AND archived_at = '' AND status != 'won'").fetchall()]
+            deals = [self._raw_deal(row) for row in conn.execute("SELECT * FROM deals WHERE value_cents > 0 AND archived_at = ''").fetchall()]
             groups = [row["name"] for row in conn.execute("SELECT name FROM grps WHERE value_cents > 0").fetchall()]
-        return deals, groups
+        return [deal for deal in deals if deal["status"] != "won" or deal["fields"].get(self.NO_FEE)], groups
 
     def fees_kept(self) -> int:
         """How many records and groups carry an amount contract work leaves out: unseen now, or about to be."""
@@ -772,7 +775,14 @@ class Store:
             with self._conn() as conn:
                 deal = self._raw_deal(conn.execute("SELECT * FROM deals WHERE id = ?", (deal_id,)).fetchone())
         elif not self.keeps_fee(deal):
-            values.pop("value", None)       # no fee is kept here; what the file has is left as it is
+            if not self.no_fees and values.get("value") is not None:
+                # A contingent pipeline, and a person giving a fee to a record that was placed on contract work: theirs
+                # to give. The mark goes, and the change is measured against what the file has.
+                with self._conn() as conn:
+                    deal = self._raw_deal(conn.execute("SELECT * FROM deals WHERE id = ?", (deal_id,)).fetchone())
+                fields = dict(fields or {}, **{self.NO_FEE: ""})
+            else:
+                values.pop("value", None)   # no fee is kept here; what the file has is left as it is
         sets, params, changed, before, after = [], [], [], {}, {}
         for key in EDITABLE:
             if key in values and values[key] is not None:
@@ -815,7 +825,7 @@ class Store:
         return self.get(deal_id)
 
     def move(self, deal_id: str, stage: str, *, status: str = "open", reason: str = "", actor: str = "",
-             label: str = "", expect: Optional[str] = None, delivery: Optional[str] = None) -> Optional[dict]:
+             label: str = "", expect: Optional[str] = None, delivery: Optional[str] = None, earned: bool = False) -> Optional[dict]:
         """Change a record's stage and log it.
 
         With ``expect`` the change only happens if the record is still at that stage. The check and
@@ -831,10 +841,12 @@ class Store:
                 raise KeyError(deal_id)
             if expect is not None and row["stage"] != expect:
                 return None
-            # Placed while the pipeline is contract work: the placement brings no fee, so an amount carried from before
-            # goes, in this same line of the ledger (undo puts both back). One already billed was earned, and stays.
-            unearned = int(row["value_cents"] or 0) if self.no_fees and status == "won" and row["status"] != "won" and not conn.execute(
-                "SELECT 1 FROM invoices WHERE deal_id = ? AND archived_at = '' LIMIT 1", (deal_id,)).fetchone() else 0
+            # Placed while the pipeline is contract work: the placement brings no fee, and the record is marked so, in
+            # this same line of the ledger (undo takes both back). Not one already billed, nor a past placement brought
+            # in by a list (``earned``): those fees were earned. The mark goes when a record stops being a placement.
+            placing = status == "won" and row["status"] != "won"
+            mark = bool(placing and self.no_fees and not earned and not conn.execute(
+                "SELECT 1 FROM invoices WHERE deal_id = ? AND archived_at = '' LIMIT 1", (deal_id,)).fetchone())
             fields = row["fields"]
             try:
                 was = json.loads(fields or "{}")
@@ -851,7 +863,21 @@ class Store:
                     data = {}
                 data["_prev_stage"] = row["stage"]
                 fields = json.dumps(data)
+            try:
+                marked = json.loads(fields or "{}")
+            except ValueError:
+                marked = {}
+            had = marked.get(self.NO_FEE)
+            if mark:
+                marked[self.NO_FEE] = "1"
+            elif placing or status != "won":
+                marked.pop(self.NO_FEE, None)
+            if marked.get(self.NO_FEE) != had:
+                fields = json.dumps(marked)
+            before["fields." + self.NO_FEE] = had
             text = "%s \u2192 %s" % (row["stage"], label or stage)
+            if mark and int(row["value_cents"] or 0):
+                text += " \u00b7 placed on contract work, so the fee it carried is not counted"
             if reason:
                 text += " (%s)" % reason
             conn.execute("UPDATE deals SET stage = ?, status = ?, lost_reason = ?, snoozed_until = '', fields = ?, stage_at = ?, "
@@ -862,10 +888,7 @@ class Store:
             except ValueError:
                 kept = None
             after = {"stage": stage, "status": status, "lost_reason": reason if status == "lost" else "", "snoozed_until": "",
-                     "stage_at": stamp, "fields._prev_stage": kept, "delivery": delivery}
-            if unearned:
-                conn.execute("UPDATE deals SET value = 0, value_cents = 0 WHERE id = ?", (deal_id,))
-                before["value_cents"], after["value_cents"] = unearned, 0
+                     "stage_at": stamp, "fields._prev_stage": kept, "delivery": delivery, "fields." + self.NO_FEE: marked.get(self.NO_FEE)}
             changed = [key for key in after if after[key] != before[key]]
             self._entry(conn, batch, "deal", deal_id, deal_id, "update", {key: before[key] for key in changed},
                         {key: after[key] for key in changed}, actor, text, at=stamp)

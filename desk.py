@@ -1576,8 +1576,11 @@ class Desk:
             return self.restore(args.get("deal"), actor=actor)
         dropped = False
         if args.get("value") not in (None, "") and self.billing_kind() == BILL_CONTRACT:
-            found = self.store.find(str(args.get("deal") or "")) if action != "add" and args.get("deal") else None
-            if not (found and found["status"] == "won"):        # a placement from before keeps its fee, and it can be corrected
+            try:
+                found = self.store.find(str(args.get("deal") or "")) if action != "add" and args.get("deal") else None
+            except Exception:           # more than one record by that name: said properly below, where the record is looked up
+                found = None
+            if not (found and self.store.keeps_fee(found)):     # a placement from before keeps its fee, and it can be corrected
                 args, dropped = {key: value for key, value in args.items() if key != "value"}, True      # contract work: no candidate carries a fee
         with self.store.operation():
             out = self._deal(args, actor)
@@ -2013,15 +2016,16 @@ class Desk:
             entry[1] += 1
         return [name for name, _ in sorted(counts.values(), key=lambda item: (-item[1], item[0].lower()))[:most]]
 
-    def _move(self, deal: dict, stage: str, playbook: Playbook, actor: str, reason: str = "") -> Optional[dict]:
-        """Move a record from the stage it was read at. ``None`` means someone else moved it first."""
+    def _move(self, deal: dict, stage: str, playbook: Playbook, actor: str, reason: str = "", earned: bool = False) -> Optional[dict]:
+        """Move a record from the stage it was read at. ``None`` means someone else moved it first. ``earned``: a past
+        placement brought in by a list, which keeps its fee even on contract work."""
         status = playbook.status_of(stage)
         # Won: the work begins, at the playbook's first delivery stage. Anything else: there is no delivery to speak of.
         delivery = (playbook.delivery[0]["id"] if playbook.delivery else "") if status == "won" else ""
         if status == "lost":
             reason = playbook.reason(reason)      # "Timing" however it was put, where the playbook has the word for it
         return self.store.move(deal["id"], stage, status=status, reason=reason, actor=actor,
-                               label=playbook.label(stage), expect=deal["stage"], delivery=delivery)
+                               label=playbook.label(stage), expect=deal["stage"], delivery=delivery, earned=earned)
 
     def _reopen(self, deal: dict, playbook: Playbook, actor: str, stage: str = "") -> Optional[dict]:
         target = playbook.resolve_stage(stage) or deal["fields"].get("_prev_stage") or playbook.first_stage()
@@ -4114,7 +4118,7 @@ class Desk:
                                           source=row.get("source", "") or "import", notes=self.intake._kept_notes(row),
                                           fields=row.get("fields") or None)
                     if status != "open":
-                        self._move(deal, stage, playbook, "import", row.get("lost_reason", ""))
+                        self._move(deal, stage, playbook, "import", row.get("lost_reason", ""), earned=True)
                     if status == "won" and row.get("value") and self.store.no_fees:
                         self.store.update(deal["id"], actor="import", value=row.get("value"))      # history: a fee that was earned
                     if row.get("note"):
