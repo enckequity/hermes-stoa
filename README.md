@@ -216,7 +216,7 @@ no, with the evidence beside it in their words.
 It grew out of a setup a recruiting agency runs its searches on every day, and the recruiting
 shape is still first-class: candidates in searches, for clients, with fees and placements.
 
-![The recruiting example: $1.2M in open fees across eight searches](docs/desktop-pipeline.png)
+![The recruiting example: 24 open candidates across eight searches](docs/desktop-pipeline.png)
 
 ## Set up in five minutes
 

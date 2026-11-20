@@ -42,8 +42,8 @@ The sample data shows two businesses at a realistic size. Everything in it is ma
 | **Tour it** | `hermes stoa demo recruiting` | `hermes stoa demo saas` |
 | **A record is** | a candidate in a client's search | a deal with a buyer at an account |
 | **Stages** | Sourced → Contacted → Screened → Submitted → Client interview → Offer → Placed | Lead → Qualified → Discovery → Proposal → Negotiation → Closed won |
-| **On the desk** | 24 open candidates across 8 searches, **$1.2M** in fees, plus 3 placed and 5 passed | 28 open deals, **$2.5M**, plus 4 won and 6 lost |
-| **Its market map** | Where the candidates for one search work now: 10 companies, and adding one puts its named person in that search | Fintechs and marketplaces exposed to payment fraud: 14 companies, what each uses today, and who to call first |
+| **On the desk** | 24 open candidates across 8 searches, **$401k** in play (each search's fee counted once), plus 3 placed and 5 passed | 28 open deals, **$2.5M**, plus 4 won and 6 lost |
+| **Its market map** | A candidate map for one search: 12 people in three pools, each with their own fit and reason to move, and adding one makes them a candidate in that search | Fintechs and marketplaces exposed to payment fraud: 14 companies, what each uses today, and who to call first |
 
 A tour never touches your own desk. The sample data lives in a file of its own, with its own
 playbook; every surface says it is sample data while it is on show; lookups are off and scheduled
@@ -52,7 +52,7 @@ exactly as it was and throws the sample file away.
 
 The recruiting agency:
 
-![The recruiting example: $1.2M in open fees across eight searches](desktop-pipeline.png)
+![The recruiting example: 24 open candidates across eight searches](desktop-pipeline.png)
 
 The company selling a fraud prevention tool:
 

@@ -66,8 +66,18 @@ The map then reads itself back. This is the part a list of names never gives you
 | **First calls** | The few to approach first and why, chosen by Hermes or, failing that, the strongest fits spread across segments. |
 | **Reading the map** | Hermes's short interpretation and what to do about it, saved with the map. |
 
-A map does not have to be of customers. In the recruiting example it is a talent map: the
-companies where the candidates for one search work now, each with the people worth approaching.
+A map does not have to be of customers. On a recruiting pipeline it is a **candidate map**: a map
+for one role, where every dot is a person with their own fit, their own checks against the role
+and their own reason to move. The head of the map says which search it is for, and you can point
+it at another. Adding a candidate makes them a record in that search: where they work as the
+company, their title, the search's fee, and a first approach as what is next. Starting a map,
+you say which search it is for and whether Hermes should look for more people or map only the
+ones you name.
+
+A new map on a recruiting pipeline holds candidates. The map's menu switches one to the older
+kind, a map of the companies where such people work with people named under each, and back;
+nothing on the map changes, only how it is read. Maps made before 0.28 stay maps of companies
+until you switch them.
 
 In Slack each company has an **Add to pipeline** button. A tap creates the record at the first
 stage of your playbook with the first known buyer as the contact, carries the evidence into its
@@ -446,6 +456,26 @@ belongs to and that company's open records, so a sweep files mail in the right p
 propose adding the sender. A company is not something you set up: it is every record that names
 it, however the name is written ("Kestrel Labs, Inc." and "kestrel labs" are one), plus the notes
 and the email domain you keep on it.
+
+### How a recruiting pipeline is paid for
+
+A recruiting pipeline is **contingent** or **contract**; **Billing** at the head of the Pipeline
+tab says which and changes it. Each pipeline keeps its own.
+
+- **Contingent**: a fee for each placement. What is in play counts each search's fee once for
+  each opening still to fill, however many candidates are in it: six candidates in a $30k search
+  are $30k in play, not $180k. A search hiring for more than one seat has **Openings** on its
+  page; a seat that is filled, and a search marked done or closed, stop counting. The forecast
+  works the same way, a search at a time.
+- **Contract**: paid by the hour by one company, on any number of searches, and billed each
+  month. You give the company, the hourly rate and the hours a week. No candidate carries a fee
+  and the Pipeline side counts candidates, not money. The Cash tab shows the contract, the month
+  in progress at the hours agreed, and each month that has ended, ready to bill; you can correct
+  a month's hours before recording its invoice.
+
+With more than one pipeline, the Cash tab opens with all of them side by side: this month,
+collected, owed, overdue, to bill and likely to come, a contract's month of hours beside the
+others' fees.
 
 ### Several pipelines on one desk
 
