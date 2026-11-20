@@ -550,18 +550,20 @@ class Store:
     def _conn(self) -> "Store._Session":
         return Store._Session(self)
 
-    # A pipeline of contract work (a recruiter paid by the hour) keeps and shows no fee. The desk says so here, with the
-    # moment it became contract work, and the ledger itself then leaves amounts out: nothing read from it carries one (a
-    # record, a search), and nothing written to it sets one, whichever way it comes in (by hand, the agent, an import, a
-    # proposal). The one exception is a placement made BEFORE then: that fee was earned, may still be owed, and is
-    # history, so it reads and bills as it always did. What else was on a record before stays in the file, untouched
-    # and unseen, and is back if the pipeline is made contingent again.
-    no_fees = ""                    # "" = fees as usual; otherwise the moment the pipeline became contract work
+    # A pipeline of contract work (a recruiter paid by the hour) keeps and shows no fee. The desk says so here, and the
+    # ledger itself then leaves amounts out: nothing read from it carries one (an open or passed record, a search), and
+    # nothing written to it sets one, whichever way it comes in (by hand, the agent, an import, a proposal).
+    # A PLACEMENT is the exception, and its amount in the file is always a fee that was earned: one made before the
+    # pipeline was contract work keeps its own (it may still be owed, and it is history), and a record placed WHILE it is
+    # contract work has whatever amount it carried from before taken off at that moment (``move``), because that
+    # placement brings none. So nothing here goes by the clock: not when a stage last changed, not how many times the
+    # pipeline went back and forth. What an open record carried from before stays in the file, unseen, and is back if the
+    # pipeline is made contingent again.
+    no_fees = False
 
-    def keeps_fee(self, deal: dict, since: str = "") -> bool:
+    def keeps_fee(self, deal: dict) -> bool:
         """Whether this record's amount is kept and shown."""
-        since = since or self.no_fees
-        return not since or (deal.get("status") == "won" and str(deal.get("stage_at") or "") <= since)
+        return not self.no_fees or deal.get("status") == "won"
 
     def stamp(self) -> int:
         """A number that grows with every change written here: what a figure kept for a moment is checked against."""
@@ -570,11 +572,10 @@ class Store:
 
     def _fees(self) -> tuple:
         """The records and the groups with an amount in the file that contract work would not show (or does not)."""
-        since = self.no_fees or now()
         with self._conn() as conn:
-            deals = [self._raw_deal(row) for row in conn.execute("SELECT * FROM deals WHERE value_cents > 0 AND archived_at = ''").fetchall()]
+            deals = [self._raw_deal(row) for row in conn.execute("SELECT * FROM deals WHERE value_cents > 0 AND archived_at = '' AND status != 'won'").fetchall()]
             groups = [row["name"] for row in conn.execute("SELECT name FROM grps WHERE value_cents > 0").fetchall()]
-        return [deal for deal in deals if not self.keeps_fee(deal, since)], groups
+        return deals, groups
 
     def fees_kept(self) -> int:
         """How many records and groups carry an amount contract work leaves out: unseen now, or about to be."""
@@ -582,11 +583,14 @@ class Store:
         return len(deals) + len(groups)
 
     def clear_fees(self, actor: str = "") -> int:
-        """Take those amounts away for good (asked for in so many words). A placement from before stays as it is."""
+        """Take those amounts away for good (asked for in so many words). A placement stays as it is."""
         deals, groups = self._fees()
         with self.operation():
             for deal in deals:
-                self.update(deal["id"], actor=actor, value=0, _clearing=True)
+                try:
+                    self.update(deal["id"], actor=actor, value=0, _clearing=True)
+                except KeyError:            # taken off the desk by someone else meanwhile: nothing of it shows any more
+                    continue
             for name in groups:
                 self.grp_put(name, actor=actor, value=0, _clearing=True)
         return len(deals) + len(groups)
@@ -821,12 +825,16 @@ class Store:
         stamp, batch = now(), self._op()
         with self._conn() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute("SELECT stage, status, fields, lost_reason, snoozed_until, stage_at, delivery FROM deals "
+            row = conn.execute("SELECT stage, status, fields, lost_reason, snoozed_until, stage_at, delivery, value_cents FROM deals "
                                "WHERE id = ? AND archived_at = ''", (deal_id,)).fetchone()
             if row is None:
                 raise KeyError(deal_id)
             if expect is not None and row["stage"] != expect:
                 return None
+            # Placed while the pipeline is contract work: the placement brings no fee, so an amount carried from before
+            # goes, in this same line of the ledger (undo puts both back). One already billed was earned, and stays.
+            unearned = int(row["value_cents"] or 0) if self.no_fees and status == "won" and row["status"] != "won" and not conn.execute(
+                "SELECT 1 FROM invoices WHERE deal_id = ? AND archived_at = '' LIMIT 1", (deal_id,)).fetchone() else 0
             fields = row["fields"]
             try:
                 was = json.loads(fields or "{}")
@@ -855,6 +863,9 @@ class Store:
                 kept = None
             after = {"stage": stage, "status": status, "lost_reason": reason if status == "lost" else "", "snoozed_until": "",
                      "stage_at": stamp, "fields._prev_stage": kept, "delivery": delivery}
+            if unearned:
+                conn.execute("UPDATE deals SET value = 0, value_cents = 0 WHERE id = ?", (deal_id,))
+                before["value_cents"], after["value_cents"] = unearned, 0
             changed = [key for key in after if after[key] != before[key]]
             self._entry(conn, batch, "deal", deal_id, deal_id, "update", {key: before[key] for key in changed},
                         {key: after[key] for key in changed}, actor, text, at=stamp)

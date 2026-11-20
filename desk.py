@@ -228,7 +228,7 @@ class Desk:
         the last fourteen kept): the first time it is opened that day, so the copy is the desk as yesterday left it."""
         name, day = self.own_file(), st.today()
         store = self._store_at(name)
-        store.no_fees = self._contract_since()      # contract work keeps and shows no fee, whichever way one comes in
+        store.no_fees = self._contract_now()        # contract work keeps and shows no fee, whichever way one comes in
         if self._copied.get(name) != day:
             self._copied[name] = day
             try:
@@ -434,13 +434,13 @@ class Desk:
         kept = (entry if entry else self._pipes()).get("billing")
         return kept if isinstance(kept, dict) else {}
 
-    def _contract_since(self) -> str:
-        """Since when the pipeline in hand has been contract work; "" if it is not (or is no longer a recruiting one).
-        On the path of every read: for any other pipeline it costs one look at what is already kept in memory, and
-        for a contract one the shape of its playbook is remembered for a few seconds rather than read from disk."""
+    def _contract_now(self) -> bool:
+        """Whether the pipeline in hand is contract work (and is still a recruiting one). On the path of every read:
+        for any other pipeline it costs one look at what is already kept in memory, and for a contract one the shape
+        of its playbook is remembered for a few seconds rather than read from disk."""
         kept = self._billing_kept()
         if kept.get("type") != BILL_CONTRACT:
-            return ""
+            return False
         entry = self._pipe()
         name = str(entry.get("playbook") or DEFAULT) if entry else str(self.setting("playbook", DEFAULT))
         seen = self._shapes.get(name) if hasattr(self, "_shapes") else None
@@ -452,7 +452,7 @@ class Desk:
             if not hasattr(self, "_shapes"):
                 self._shapes = {}
             seen = self._shapes[name] = (time.time(), shape)
-        return (str(kept.get("since") or "") or "9999") if seen[1] == "roles" else ""
+        return seen[1] == "roles"
 
     def billing_kind(self) -> str:
         """"contract" or "contingent" for the pipeline in hand if its playbook is recruiting; "" for any other."""
@@ -524,10 +524,8 @@ class Desk:
             if not saved.get("ok"):
                 return {"ok": False, "error": saved.get("error") or "the hourly terms could not be saved"}
             if args.get("clear_fees"):
-                self.store.clear_fees(actor)        # a placement from before stays: it was earned, and may still be owed
-            new = {"type": BILL_CONTRACT, "client": self._client_name(client), "fee_pct": was.get("fee_pct") or 0,
-                   # from when no fee is kept: a placement made before then keeps its own
-                   "since": str(was.get("since") or "") if was.get("type") == BILL_CONTRACT and was.get("since") else st.now()}
+                self.store.clear_fees(actor)        # a placement stays: its fee was earned, and may still be owed
+            new = {"type": BILL_CONTRACT, "client": self._client_name(client), "fee_pct": was.get("fee_pct") or 0}
         else:
             try:
                 pct = float(args.get("fee_pct") or 0)
@@ -956,8 +954,9 @@ class Desk:
                "open_value": self.sum(d for d in deals if d["status"] == "open")}
         kind = self.billing_kind()
         if kind == BILL_CONTRACT:
-            out["billing"] = {"type": kind, "note": "Contract work, paid by the hour and billed each month: no %s here carries a fee. Speak of %s and where they stand, "
-                                                    "not of money in play." % (playbook.terms["deal"], playbook.terms["deals"])}
+            out["billing"] = {"type": kind, "note": "Contract work, paid by the hour and billed each month: no open %s here carries a fee (a placement made before it was "
+                                                    "contract work keeps its own). Speak of %s and where they stand, not of money in play."
+                                                    % (playbook.terms["deal"], playbook.terms["deals"])}
         elif kind:
             out["billing"] = {"type": kind, "note": "Contingent: a fee for each placement. What is in play counts each %s's fee once for each seat still to fill, "
                                                     "not once for every %s in it." % (playbook.terms["group"], playbook.terms["deal"])}
@@ -1577,7 +1576,9 @@ class Desk:
             return self.restore(args.get("deal"), actor=actor)
         dropped = False
         if args.get("value") not in (None, "") and self.billing_kind() == BILL_CONTRACT:
-            args, dropped = {key: value for key, value in args.items() if key != "value"}, True      # contract work: no candidate carries a fee
+            found = self.store.find(str(args.get("deal") or "")) if action != "add" and args.get("deal") else None
+            if not (found and found["status"] == "won"):        # a placement from before keeps its fee, and it can be corrected
+                args, dropped = {key: value for key, value in args.items() if key != "value"}, True      # contract work: no candidate carries a fee
         with self.store.operation():
             out = self._deal(args, actor)
         if dropped and isinstance(out, dict):
@@ -4114,6 +4115,8 @@ class Desk:
                                           fields=row.get("fields") or None)
                     if status != "open":
                         self._move(deal, stage, playbook, "import", row.get("lost_reason", ""))
+                    if status == "won" and row.get("value") and self.store.no_fees:
+                        self.store.update(deal["id"], actor="import", value=row.get("value"))      # history: a fee that was earned
                     if row.get("note"):
                         self.store.log(deal["id"], "note", str(row["note"])[:4000], actor="import")
                 added += 1

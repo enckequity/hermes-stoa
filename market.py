@@ -61,11 +61,12 @@ _UNSURE = re.compile(r"\b(not (?:yet )?(?:confirmed|identified|known|clear|sure|
 _A_HISTORY = re.compile(r"^left\s.+\s(in|to|after)\s"                                      # "Left Stripe in 2025"
                         r"|^(formerly|previously|ex-)\s*\S+$"                               # "Formerly Google", "ex-Google"
                         r"|^(formerly|previously) (at|with|of)\b|^was (at|with)\b|^currently (at|with|between|un)|^now (at|with|between|freelanc)"
-                        r"|\b(in|since|until|from|as of|per a|a)\s+(19|20)\d\d\b"
+                        r"|\b(in|since|until|from|as of|per a|a)\s+(19|20)\d\d\b|\b(last|this) (year|month|week)\b"
                         r"|\b(19|20)\d\d\s*[-\u2013\u2014]"                              # a span of years: "2019–2023", "2021-present"
-                        r"|[,:]\s*now\s+(freelanc|between|at|with|independent|consult|retired|unemployed|looking|self)"
+                        r"|[,:]\s*now\b(?! hiring)|[,;:]\s*(previously|formerly|joined|joining|moved to|left)\b"      # "Stripe, now Plaid"
+                        r"|\((now|previously|formerly) (at|with)\b|\((previously|formerly)\)"       # "Plaid (now at Stripe)"; "X (formerly Twitter)" is a name
                         r"|[,:(]\s*(then|per|since|until|could|may)\b"
-                        r"|\bbetween (roles|jobs)\b|\u2192|->|=>|\s/\s", re.I)
+                        r"|\bbetween (roles|jobs)\b|\u2192|->|=>", re.I)
 _NO_EMPLOYER = {"open to work", "between jobs", "between roles", "unemployed", "not working", "not employed", "job seeking", "seeking work", "looking for work",
                 "career break", "on a career break"}
 USES_HELP = ("`uses` is the name of the tool or vendor a company uses today, alone and in a few words ('Cvent', 'Spreadsheets', 'In-house tool'): the map groups "

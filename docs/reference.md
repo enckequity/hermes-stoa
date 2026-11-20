@@ -469,7 +469,10 @@ tab says which and changes it. Each pipeline keeps its own.
   works the same way, a search at a time.
 - **Contract**: paid by the hour by one company, on any number of searches, and billed each
   month. You give the company, the hourly rate and the hours a week. No candidate carries a fee
-  and the Pipeline side counts candidates, not money. The Cash tab shows the contract, the month
+  and the Pipeline side counts candidates, not money. A placement made before the pipeline was
+  contract work keeps its fee and is billed and paid as before; a candidate placed while it is
+  contract work brings none. Fees that open candidates carried from before are left out, not
+  lost: they are back if the pipeline is made contingent again, unless you clear them. The Cash tab shows the contract, the month
   in progress at the hours agreed, and each month that has ended, ready to bill; you can correct
   a month's hours before recording its invoice.
 

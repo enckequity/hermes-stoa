@@ -947,6 +947,8 @@ class Intake:
                               source=values.get("source") or label, fields=values.get("fields") or None)
         if closing:
             deal = self.desk._move(deal, stage, playbook, actor, values.get("lost_reason") or "") or deal
+            if playbook.status_of(stage) == "won" and values.get("value") and self.store.no_fees:
+                self.store.update(deal["id"], actor=actor, value=values.get("value"))      # a past placement brought onto contract work keeps the fee it earned
         if values.get("person"):
             self.store.person_add(deal["id"], actor=actor, **values["person"])
         if _text(values.get("note")):

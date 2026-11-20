@@ -1176,13 +1176,16 @@ class CandidateMapTests(unittest.TestCase):
         from stoa import market as m
         for text in ("Left Stripe in 2025, now between roles", "Stripe, per a 2023 conference bio (could have moved since)", "Formerly Google: now freelance",
                      "Stripe (since 2021)", "Was at Lodestar until March", "Lyft (2019-2023)", "Stripe 2021-present", "Stripe 2019\u20132023", "Stripe (2021 -)",
-                     "Stripe \u2192 Plaid", "Stripe / Plaid", "Formerly Google", "ex-Google", "Left Google to join a startup"):
+                     "Stripe \u2192 Plaid", "Formerly Google", "ex-Google", "Left Google to join a startup", "Left Stripe last year", "Left Google, joined Meta",
+                     "Stripe, now Plaid", "Stripe: now Plaid", "Plaid, previously Stripe", "Google, previously Meta", "Stripe, formerly", "Plaid (now at Stripe)",
+                     "Stripe (previously)"):
             self.assertEqual(m.uses_name(text, employer=True), ("", "refuse"), text)
         for text in ("Between jobs", "Open to work", "unemployed."):                      # not working anywhere: nothing to keep, nothing to complain of
             self.assertEqual(m.uses_name(text, employer=True), ("", "clear"), text)
         for text in ("AT&T Inc. (Mobility)", "Ernst & Young LLP: Advisory", "PCBC (California Building Industry Association)", "Now Health International", "Vision 2030 Partners",
                      "Between the Lines Ltd", "Stripe", "X (formerly Twitter)", "Twitter (now X)", "Left Lane Capital", "Left Field Labs", "Formerly Known As Records",
-                     "Ex-Lab Tools", "UPS: Now Hiring", "Levi Strauss & Co.", "20th Century Studios", "Self-employed"):
+                     "Ex-Lab Tools", "UPS: Now Hiring", "Levi Strauss & Co.", "20th Century Studios", "Self-employed", "Mo\u00ebt Hennessy / LVMH", "Deloitte / Monitor",
+                     "Roche / Genentech", "Stripe, Inc.", "Meta (formerly Facebook)"):
             self.assertEqual(m.uses_name(text, employer=True), (text, "keep"), text)
 
     def test_a_map_of_companies_on_a_recruiting_desk_is_as_it_was(self):
@@ -1328,10 +1331,40 @@ class RecruitingBillingTests(unittest.TestCase):
         billing = self.desk.billing()
         self.assertEqual((billing["record_billing"], billing["fees_kept"]), (True, 1))     # the open candidate's fee is the one left unseen
         self.assertEqual(self.desk.sum(self.desk.store.list(status="open")), 0)
-        # A candidate placed once it is contract work brings no fee, whatever was on the record from before.
-        time.sleep(1.1)
+        # The fee of a placement from before can still be corrected; an open candidate is still given none.
+        self.assertEqual(self.desk.deal({"action": "update", "deal": placed["id"], "value": 31000})["deal"]["value"], 31000)
+        self.desk.deal({"action": "update", "deal": placed["id"], "value": 30000})
+        self.assertIn("fee_not_kept", self.desk.deal({"action": "update", "deal": still_open["id"], "value": 31000}))
+        # Closing as placed a record that already is (an agent told "her placement is confirmed") leaves its fee alone.
+        self.desk.deal({"action": "close", "deal": placed["id"], "outcome": "won"})
+        self.assertEqual((self.desk.store.get(placed["id"])["value"], self.desk.billing()["record_billing"]), (30000, True))
+        # A candidate placed once it is contract work brings no fee, whatever was on the record from before: it is taken
+        # off in the file, in the same second or any other, and undoing the placement puts it back.
         self.desk.store.move(still_open["id"], won["id"], status="won", actor="tester", label=won["label"])
-        self.assertEqual(self.desk.store.get(still_open["id"])["value"], 0)
+        self.assertEqual((self.desk.store.get(still_open["id"])["value"], self.desk.billing()["fees_kept"]), (0, 0))
+        self.desk.store.undo(still_open["id"])
+        self.assertEqual((self.desk.store.get(still_open["id"])["status"], self.desk.billing()["fees_kept"]), ("open", 1))
+        self.desk.store.move(still_open["id"], won["id"], status="won", actor="tester", label=won["label"])
+        # Back and forth changes nothing: made contingent and contract again, that placement still brings no fee and
+        # nothing is owed on it; the two from before are as they were.
+        self.desk.set_billing({"type": "contingent"})
+        self.assertEqual([self.desk.store.get(d["id"])["value"] for d in (placed, unbilled, still_open)], [30000, 25000, 0])
+        self.desk.set_billing({"type": "contract", "client": "Halden Group", "rate": 85, "hours_week": 20})
+        self.assertEqual([self.desk.store.get(d["id"])["value"] for d in (placed, unbilled, still_open)], [30000, 25000, 0])
+        self.assertEqual(self.desk.money(self.desk.store.get(still_open["id"]), [])["uninvoiced"], 0)
+        # One that was billed, reopened by mistake and placed again, keeps what was earned.
+        first = self.desk.playbook().first_stage()
+        self.desk.store.move(placed["id"], first, status="open", actor="tester")
+        self.assertEqual(self.desk.store.get(placed["id"])["value"], 0)                   # open: no fee shows
+        self.desk.store.move(placed["id"], won["id"], status="won", actor="tester", label=won["label"])
+        self.assertEqual(self.desk.store.get(placed["id"])["value"], 30000)
+        # A list of past placements brought onto contract work: each keeps the fee it earned; an open row gets none.
+        listed = Path(self.tmp.name) / "past.csv"
+        listed.write_text("name,group,stage,value\nPast Placement,Old Search,%s,25000\nOpen Row,Old Search,%s,25000\n" % (won["label"], first), encoding="utf-8")
+        self.assertEqual(self.desk.import_csv(listed)["added"], 2)
+        rows = {d["name"]: (d["status"], d["value"]) for d in self.desk.store.list(status="all")}
+        self.assertEqual((rows["Past Placement"], rows["Open Row"]), (("won", 25000), ("open", 0)))
+        self.assertEqual(self.desk.billing()["fees_kept"], 0)
         # Cleared in so many words: the unseen fee goes, the placements from before stay as they are.
         self.desk.set_billing({"type": "contract", "client": "Halden Group", "rate": 85, "hours_week": 20, "clear_fees": True})
         self.assertEqual((self.desk.billing()["fees_kept"], self.desk.store.get(placed["id"])["value"]), (0, 30000))
