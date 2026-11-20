@@ -12,7 +12,15 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const heatOf = score => 1 + Math.min(6, Math.floor(score / 100 * 7));
 const squares = score => { const n = Math.max(1, Math.ceil(score / 20)); return '<span class="fit f' + n + '">' + '■'.repeat(n) + '<s>' + '■'.repeat(5 - n) + '</s></span>'; };
 const ago = days => (days === null ? '' : days === 0 ? 'today' : days === 1 ? 'yesterday' : days < 60 ? days + ' days ago' : Math.round(days / 30) + ' months ago');
-const LENSES = { seg: 'Each ring is a segment that would get a different pitch. The best fit sits in the middle.',
+// A candidate map (the page says so: rows "people") holds one person a row: `company` is their name, `size` their
+// title and `uses` where they work now. The words follow; nothing else about the map changes.
+const P = D.rows === 'people';
+const W = P ? { thing: 'candidate', things: 'candidates', reason: 'a reason to move', first: 'Who to approach first' }
+  : { thing: 'company', things: 'companies', reason: 'a reason to call', first: 'Who to call first' };
+const LENSES = P ? { seg: 'Each dot is a candidate, and each ring a pool that would get a different pitch. The best fit sits in the middle.',
+  pri: 'Each dot is a candidate. Further right is a better fit; higher up is a fresher reason to move. The top right is who to approach first.',
+  held: 'Each dot is a candidate, grouped by where they work now.' }
+  : { seg: 'Each ring is a segment that would get a different pitch. The best fit sits in the middle.',
   pri: 'Further right is a better fit; higher up is a fresher reason to call. The top right is who to call first.',
   held: 'Grouped by what each company uses today.' };
 const S = { lens: 'seg', size: D.size || 'people', sel: [], quick: 'all', find: '', weights: {} };
@@ -133,7 +141,7 @@ function drawMap() {
   L.groups.forEach(g => {
     r += '<circle class="sm-ring" cx="' + g.cx + '" cy="' + g.cy + '" r="' + g.R + '"/>';
     const n = g.m.length, avg = n ? Math.round(g.m.reduce((t, x) => t + x.c.score, 0) / n) : 0;
-    o += '<div class="sm-cap" style="left:' + g.cx + 'px;top:' + (g.cy + g.R + 6) + 'px;width:' + (g.colW - 8) + 'px"><b>' + esc(g.name) + '</b><span>' + n + (n === 1 ? ' company' : ' companies') +
+    o += '<div class="sm-cap" style="left:' + g.cx + 'px;top:' + (g.cy + g.R + 6) + 'px;width:' + (g.colW - 8) + 'px"><b>' + esc(g.name) + '</b><span>' + n + ' ' + (n === 1 ? W.thing : W.things) +
       (S.lens === 'held' ? ' · ' + Math.round(100 * n / L.ns.length) + '%' : ' · fit ' + avg) + '</span></div>';
   });
   gR.innerHTML = r; over.innerHTML = o;
@@ -145,7 +153,7 @@ function drawMap() {
     if (!g) { g = document.createElementNS(NS, 'g'); g.dataset.id = c.id; g.setAttribute('tabindex', '0'); g.setAttribute('role', 'button'); g.innerHTML = '<g class="sm-pop"></g>'; gN.appendChild(g); els.set(c.id, g); }
     g.style.transform = 'translate(' + n.x.toFixed(1) + 'px,' + n.y.toFixed(1) + 'px)';
     g.setAttribute('class', 'sm-co' + (c.status === 'tracked' ? ' in' : '') + (picked ? ' sel' : '') + (shown(c) ? '' : ' dim'));
-    g.setAttribute('aria-label', c.company + ', fit ' + c.score + ' of 100' + (c.signal ? ', has a reason to call' : ''));
+    g.setAttribute('aria-label', c.company + ', fit ' + c.score + ' of 100' + (c.signal ? ', has ' + W.reason : ''));
     g.setAttribute('aria-pressed', picked);
     g.firstChild.innerHTML = (c.signal ? '<circle class="sm-sig" r="' + (n.r + 4).toFixed(1) + '"/>' : '') +
       '<circle r="' + n.r.toFixed(1) + '" ' + (c.status === 'tracked' ? 'style="fill:var(--h' + k + ')"' : 'fill="url(#sm-st' + k + ')"') + '/>' +
@@ -164,24 +172,24 @@ function drawSide() {
   let h;
   if (chosen.length === 1) {
     const c = chosen[0];
-    h = '<div class="mono">' + esc(c.segment) + (c.also ? ' · also fits ' + esc(c.also) : '') + '</div><h3>' + esc(c.company) + '</h3><div class="sm-sub">' + [c.domain, c.location].filter(Boolean).map(esc).join(' · ') + '</div>' +
+    h = '<div class="mono">' + esc(c.segment) + (c.also ? ' · also fits ' + esc(c.also) : '') + '</div><h3>' + esc(c.company) + '</h3><div class="sm-sub">' + (P ? [[c.size, c.uses ? 'at ' + c.uses : ''].filter(Boolean).join(' '), c.location] : [c.domain, c.location]).filter(Boolean).map(esc).join(' · ') + '</div>' +
       (c.signal ? '<div class="sm-sub" style="margin-top:6px"><span class="tag on">' + esc(c.signal) + '</span>' + esc(ago(c.days) || 'no date on it') + '</div>' : '') +
       '<div class="sm-score"><span class="mono">' + (c.weighed ? 'Fit, by these weights' : 'Fit') + '</span><b>' + c.score + '</b>' + squares(c.score) + '</div>' +
       (c.why ? '<p>' + esc(c.why) + '</p>' : '') +
       (c.requirements || []).map(req => '<div class="sm-req' + (req.shown ? ' on' : '') + '"><span>' + (req.shown ? '[x]' : '[ ]') + '</span><span><b>' + esc(req.label) + '</b><br><span class="sm-sub">' + (req.shown ? esc(req.evidence || 'Shown') : 'No evidence found') + '</span></span></div>').join('') +
-      '<dl class="sm-facts"><dt>Size</dt><dd>' + esc(c.size || 'Not known') + '</dd><dt>Uses today</dt><dd>' + esc(c.uses || 'Not known') + '</dd>' +
-      (c.buyer ? '<dt>Buyer</dt><dd>' + esc([c.buyer.name, c.buyer.title].filter(Boolean).join(', ')) + '</dd>' : '') +
-      (/^https?:\/\//.test(c.source || '') ? '<dt>Source</dt><dd><a href="' + esc(c.source) + '" rel="noreferrer noopener">' + esc(c.source.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')) + '</a></dd>' : '') + '</dl>' +
+      '<dl class="sm-facts"><dt>' + (P ? 'Title' : 'Size') + '</dt><dd>' + esc(c.size || 'Not known') + '</dd><dt>' + (P ? 'Works at' : 'Uses today') + '</dt><dd>' + esc(c.uses || 'Not known') + '</dd>' +
+      (c.buyer && !P ? '<dt>Buyer</dt><dd>' + esc([c.buyer.name, c.buyer.title].filter(Boolean).join(', ')) + '</dd>' : '') +
+      (/^https?:\/\//.test(c.source || '') ? '<dt>' + (P ? 'Found on' : 'Source') + '</dt><dd><a href="' + esc(c.source) + '" rel="noreferrer noopener">' + esc(c.source.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')) + '</a></dd>' : '') + '</dl>' +
       '<button class="sm-btn" data-act="clear">Close</button>';
   } else if (chosen.length > 1) {
-    h = '<div class="mono">Picked</div><h3>' + chosen.length + ' companies</h3><div class="sm-sub">Average fit ' + Math.round(chosen.reduce((t, c) => t + c.score, 0) / chosen.length) + ' · ' + chosen.filter(c => c.signal).length + ' with a reason to call</div>' +
+    h = '<div class="mono">Picked</div><h3>' + chosen.length + ' ' + W.things + '</h3><div class="sm-sub">Average fit ' + Math.round(chosen.reduce((t, c) => t + c.score, 0) / chosen.length) + ' · ' + chosen.filter(c => c.signal).length + ' with ' + W.reason + '</div>' +
       chosen.slice().sort((a, b) => b.rank - a.rank).map(c => '<button class="sm-row" data-act="open" data-id="' + esc(c.id) + '"><b>' + esc(c.company) + '</b> ' + squares(c.score) + '<span class="sm-sub">' + esc([c.segment, c.signal, ago(c.days)].filter(Boolean).join(' · ')) + '</span></button>').join('') +
       '<button class="sm-btn" data-act="clear">Clear</button>';
   } else {
     const calls = LIST.filter(c => c.status !== 'tracked').sort((a, b) => b.rank - a.rank).slice(0, 5);
-    h = '<div class="mono">Who to call first</div>' + calls.map((c, i) => '<button class="sm-row" data-act="open" data-id="' + esc(c.id) + '"><b>0' + (i + 1) + '  ' + esc(c.company) + '</b> ' + squares(c.score) +
+    h = '<div class="mono">' + W.first + '</div>' + calls.map((c, i) => '<button class="sm-row" data-act="open" data-id="' + esc(c.id) + '"><b>0' + (i + 1) + '  ' + esc(c.company) + '</b> ' + squares(c.score) +
       '<span class="sm-sub">' + esc([c.segment, c.signal, ago(c.days)].filter(Boolean).join(' · ')) + '</span>' + (c.why ? '<span>' + esc(c.why) + '</span>' : '') + '</button>').join('') +
-      '<p class="sm-sub" style="margin-top:10px">Click a company on the map to open it.</p>';
+      '<p class="sm-sub" style="margin-top:10px">Click a ' + W.thing + ' on the map to open it.</p>';
   }
   side.innerHTML = h;
 }
@@ -195,7 +203,7 @@ function drawBar() {
     return '<div class="sm-weight"><span>' + esc(label) + '<small>' + (checked.length ? have + ' of ' + checked.length + ' show it' : 'not checked') + '</small></span><span class="sm-seg">' +
       ['Off', 'Nice', 'Matters', 'Must'].map((word, i) => '<button data-act="weight" data-label="' + esc(label) + '" data-w="' + i + '" aria-pressed="' + (w === i) + '">' + word + '</button>').join('') + '</span></div>'; }).join('') +
     (weighed ? '<button class="sm-btn" data-act="reset" style="margin-top:8px">Back to the fit as recorded</button>' : '');
-  $('sm-weighnote').textContent = weighed ? 'Fit is worked out from these weights, for every company that was checked against the requirements.' : 'Change how much a requirement counts and the map re-scores itself. Nothing is saved; reload to start again.';
+  $('sm-weighnote').textContent = weighed ? 'Fit is worked out from these weights, for every ' + W.thing + ' that was checked against the requirements.' : 'Change how much a requirement counts and the map re-scores itself. Nothing is saved; reload to start again.';
 }
 function render() { LIST = companies(); S.sel = S.sel.filter(id => LIST.some(c => c.id === id)); drawBar(); drawMap(); drawSide(); }
 function choose(id, many) {
@@ -220,7 +228,7 @@ gN.addEventListener('keydown', e => { const g = e.target.closest('.sm-co'); if (
 gN.addEventListener('pointerover', e => {
   const g = e.target.closest('.sm-co'); if (!g || e.pointerType === 'touch' || !LAY) return;
   const n = LAY.ns.find(x => x.id === g.dataset.id); if (!n) return; const c = n.c;
-  tip.innerHTML = '<b>' + esc(c.company) + '</b>' + squares(c.score) + ' <span class="sm-sub">fit ' + c.score + (c.size ? ' · ' + esc(c.size) : '') + '</span>' + (c.signal ? '<br><span class="tag on">' + esc(c.signal) + '</span><span class="sm-sub">' + esc(ago(c.days)) + '</span>' : '') + (c.why ? '<br><span class="sm-sub">' + esc(c.why) + '</span>' : '');
+  tip.innerHTML = '<b>' + esc(c.company) + '</b>' + squares(c.score) + ' <span class="sm-sub">fit ' + c.score + (c.size ? ' · ' + esc(c.size) : '') + (P && c.uses ? ' at ' + esc(c.uses) : '') + '</span>' + (c.signal ? '<br><span class="tag on">' + esc(c.signal) + '</span><span class="sm-sub">' + esc(ago(c.days)) + '</span>' : '') + (c.why ? '<br><span class="sm-sub">' + esc(c.why) + '</span>' : '');
   tip.hidden = false;
   let x = n.x + n.r + 14; if (x + 236 > LAY.W) x = n.x - n.r - 14 - 232;
   tip.style.left = Math.max(4, x) + 'px'; tip.style.top = clamp(n.y - 24, 4, LAY.H - 120) + 'px';

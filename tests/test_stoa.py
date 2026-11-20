@@ -1060,6 +1060,24 @@ class CandidateMapTests(unittest.TestCase):
             {"company": "Luis Ortega", "size": "Events Manager", "uses": "Ohio Health Care Association", "segment": "Association event leads", "fit": 4, "why": "Runs a 3,200-person convention."},
             {"company": "Priya Nand", "size": "Meetings Lead", "uses": "probably somewhere in Dayton (not confirmed)", "segment": "Association event leads", "fit": 3, "why": "Listed on a conference page."}]})
 
+    def test_the_downloaded_page_of_a_candidate_map_speaks_of_candidates(self):
+        self.markets.define({"name": "Head of Events", "brief": "A Head of Events.", "segments": ["Association event leads", "Trade show operators"]})
+        self.people()
+        for share in (False, True):
+            html = Path(self.markets.export({"action": "export", "share": share})["path"]).read_text(encoding="utf-8")
+            still = html[:html.index('<script type="application/json"')]            # the page itself, before the map's rows and its script
+            for said in ("Candidate map", "<small>Candidates</small>", "<small>Pools</small>", "<small>Employers</small>", "<th>Candidate</th>", "Title and place",
+                         "Why they fit", "At PCBC", "Find a candidate", "Reason to move", ">Employer</button>", '"rows": "people"', "who could fill a role"):
+                self.assertIn(said, html, (share, said))
+            for wrong in ("<small>Companies</small>", "Buyers named", "<th>Company</th>", "Size by", "Reason to call</", "Uses PCBC", "COMPANIES"):
+                self.assertNotIn(wrong, still, (share, wrong))
+        # A map of companies on the same pipeline (the older kind) reads as it always did.
+        self.markets.define({"name": "Event employers", "rows": "companies", "segments": ["Associations"]})
+        self.markets.add({"market": "Event employers", "companies": [{"company": "Ohio Health Care Association", "segment": "Associations", "fit": 4}]})
+        html = Path(self.markets.export({"action": "export", "market": "Event employers"})["path"]).read_text(encoding="utf-8")
+        for said in ("Market map", "<small>Companies</small>", "<th>Company</th>", "Find a company", "Size by", '"rows": "companies"'):
+            self.assertIn(said, html, said)
+
     def test_a_new_map_holds_candidates_and_says_so(self):
         made = self.markets.define({"name": "Head of Events", "brief": "A Head of Events.", "segments": ["Association event leads", "Trade show operators"]})
         self.assertEqual((made["rows"], made["market"]["rows"], made["search"]), ("people", "people", "Head of Events"))
@@ -1343,6 +1361,10 @@ class TourTests(unittest.TestCase):
 
     def test_a_tour_shows_the_example_and_leaves_the_real_desk_alone(self):
         started = self.desk.tour_start("recruiting")
+        # The tour's own line adds the sample up as the desk does: each search's fee once, not once for every candidate in it.
+        open_ = self.desk.store.list(status="open")
+        self.assertIn("worth %s across" % cards.money(self.desk.sum(open_), "USD"), started["summary"])
+        self.assertLess(self.desk.sum(open_), st.total(open_))
         self.assertEqual((started["ok"], started["example"], started["added"]), (True, "recruiting", len(demo.EXAMPLES["recruiting"]["rows"])))
         self.assertEqual(self.desk.playbook().name, "recruiting")                     # the example brings its own playbook...
         self.assertEqual(self.desk.own_playbook().name, "agency")                     # ...and the team's choice is not touched

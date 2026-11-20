@@ -88,7 +88,7 @@ def _run(desk, args, command) -> None:
             print("  ON TOUR       sample data (%s); your own desk is untouched. Leave with: hermes stoa demo --leave" % tour["example"])
         print("  playbook      %s (%s)" % (playbook.name, playbook.title))
         print("  records       %d open, %d closed" % (len(open_deals), len(deals) - len(open_deals)))
-        value = st.total(open_deals)
+        value = desk.sum(open_deals)
         if value:
             print("  open value    %s" % cards.money(value, playbook.currency))
         print("  data          %s" % (desk.data_dir / (tour["file"] if tour else desk.own_file())))
@@ -165,8 +165,9 @@ def _run(desk, args, command) -> None:
         result = desk.tour_start(args.which)
         example = demo.EXAMPLES[result["example"]]
         other = "saas" if result["example"] == "recruiting" else "recruiting"
-        print("On tour: the example of %s. %s, and a market map of %d companies." % (
-            example["title"], result["summary"], len(example["companies"])))
+        print("On tour: the example of %s. %s, and a %s of %d %s." % (
+            example["title"], result["summary"], *(("candidate map", len(example["companies"]), "candidates") if desk.playbook().shape == "roles"
+                                                   else ("market map", len(example["companies"]), "companies"))))
         print("Everything in it is made up and kept in a file of its own; your own desk is untouched and comes back with "
               "`hermes stoa demo --leave`. `hermes stoa demo %s` shows the other example." % other)
     elif command == "export":

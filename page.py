@@ -117,26 +117,30 @@ def _live(summary: dict, share: bool) -> str:
                     row["status"] = "tracked"
             rows.append(row)
         segments.append({"name": seg["segment"], "companies": rows})
+    people = summary.get("rows") == "people"                # a candidate map: every row is one person
     data = {"name": summary["market"]["name"], "today": dt.date.today().isoformat(), "requirements": summary["market"]["requirements"],
-            "segments": segments, "size": "people"}
+            "segments": segments, "size": "same" if people else "people", "rows": summary.get("rows") or ""}
     packed = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c")      # nothing in a company's words can end the block early
     patterns = "".join('<pattern id="sm-st%d" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="2.2" height="2.2" style="fill:var(--h%d)"/></pattern>' % (k, k)
                        for k in range(1, 8))
-    quick = [("all", "All"), ("best", "Best fit"), ("reason", "Reason to call")] + ([] if share else [("open", "Not in the pipeline")])
+    quick = [("all", "All"), ("best", "Best fit"), ("reason", "Reason to move" if people else "Reason to call")] + ([] if share else [("open", "Not in the pipeline")])
     sizes = [("people", "People there")] + ([] if share else [("named", "People named")]) + [("same", "Same size")]
+    lenses = ("Pools", "Priority", "Employer") if people else ("Segments", "Priority", "Held by")
+    find = "Find a candidate" if people else "Find a company"
+    size_by = "" if people else ('<span>Size by</span><span class="sm-seg" role="group" aria-label="What a mark\'s size shows">%s</span>'
+                                 % "".join('<button data-size="%s">%s</button>' % item for item in sizes))
     return "".join([
         '<div id="sm-live" hidden><div class="sm-bar"><span class="sm-seg" role="group" aria-label="How the map is drawn">',
-        '<button data-lens="seg">Segments</button><button data-lens="pri">Priority</button><button data-lens="held">Held by</button></span>',
+        '<button data-lens="seg">%s</button><button data-lens="pri">%s</button><button data-lens="held">%s</button></span>' % lenses,
         '<span class="sm-quick">%s</span>' % "".join('<button data-quick="%s">%s <i></i></button>' % item for item in quick),
-        '<input id="sm-find" type="search" placeholder="Find a company" aria-label="Find a company" autocomplete="off"></div>',
+        '<input id="sm-find" type="search" placeholder="%s" aria-label="%s" autocomplete="off"></div>' % (find, find),
         '<p id="sm-how" class="sm-sub"></p><div class="sm-main"><div>',
-        '<div id="sm-map"><svg id="sm-svg" role="group" aria-label="Market map"><defs>%s' % patterns,
+        '<div id="sm-map"><svg id="sm-svg" role="group" aria-label="%s"><defs>%s' % ("Candidate map" if people else "Market map", patterns),
         '<pattern id="sm-wash" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="1.6" height="1.6" style="fill:var(--h6)" opacity=".5"/></pattern></defs>',
         '<g id="sm-rings"></g><g id="sm-links"></g><g id="sm-nodes"></g><g id="sm-labels"></g></svg><div id="sm-over"></div><div id="sm-tip" hidden></div><div id="sm-lasso" hidden></div></div>',
-        '<div class="sm-legend"><span>Size by</span><span class="sm-seg" role="group" aria-label="What a mark\'s size shows">%s</span>'
-        % "".join('<button data-size="%s">%s</button>' % item for item in sizes),
-        '<span>Fit <i class="sm-heat"></i> cold to hot</span>%s<span>A ring is a reason to call</span></div></div>'
-        % ("" if share else "<span>Solid is in the pipeline</span>"),
+        '<div class="sm-legend">%s' % size_by,
+        '<span>Fit <i class="sm-heat"></i> cold to hot</span>%s<span>A ring is a reason to %s</span></div></div>'
+        % ("" if share else "<span>Solid is in the pipeline</span>", "move" if people else "call"),
         '<aside id="sm-side" aria-live="polite"></aside></div>',
         '<div class="sm-what"><h2>What matters</h2><p id="sm-weighnote" class="sm-sub"></p><div id="sm-weights"></div></div></div>' if summary["market"]["requirements"] else
         '<div class="sm-what" hidden><p id="sm-weighnote"></p><div id="sm-weights"></div></div></div>',
@@ -151,12 +155,13 @@ def _initials(name: str) -> str:
     return (words[0][0] + (words[1][0] if len(words) > 1 else words[0][1:2])).upper()
 
 
-def _sky(segments: list, share: bool) -> str:
-    """The bubble map: one cluster per segment, each company sized by fit, filled once it is in the pipeline."""
+def _sky(segments: list, share: bool, people: bool = False) -> str:
+    """The bubble map: one cluster per segment, each company (or candidate) sized by fit, filled once it is in the pipeline."""
     count = max(1, len(segments))
     width, height, slot = 1000, 330, 1000 / count
     golden = math.pi * (3 - math.sqrt(5))
-    out = ['<svg viewBox="0 0 %d %d" role="img" aria-label="Market map">' % (width, height)]
+    one, many = ("CANDIDATE", "CANDIDATES") if people else ("COMPANY", "COMPANIES")
+    out = ['<svg viewBox="0 0 %d %d" role="img" aria-label="%s">' % (width, height, "Candidate map" if people else "Market map")]
     for si, seg in enumerate(segments):
         cx, cy = slot * (si + 0.5), 138
         rows = sorted(seg["companies"], key=lambda c: -c["fit"])[:14]
@@ -183,7 +188,7 @@ def _sky(segments: list, share: bool) -> str:
         out.append('<text class="seg" x="%.1f" y="%d" text-anchor="middle">%s</text>'
                    % (cx, height - 26, esc(seg["segment"].upper()[:max(10, int(slot / 9))])))
         out.append('<text x="%.1f" y="%d" text-anchor="middle">%d %s</text>'
-                   % (cx, height - 8, seg["count"], "COMPANY" if seg["count"] == 1 else "COMPANIES"))
+                   % (cx, height - 8, seg["count"], one if seg["count"] == 1 else many))
     out.append("</svg>")
     return "".join(out)
 
@@ -209,13 +214,22 @@ def _link(url: str, text: str = "") -> str:
 def render(summary: dict, terms: dict, share: bool = False) -> str:
     market, numbers = summary["market"], summary["numbers"]
     date = (market.get("updated_at") or "")[:10]
-    stats = [(numbers["companies"], "Companies"), (numbers["segments"], "Segments"), (numbers["with_signal"], "With a signal"),
-             (numbers["avg_fit"], "Average fit")]
-    if not share:
-        stats += [(numbers["buyers_named"], "Buyers named"), (numbers["in_pipeline"], "In the pipeline")]
+    people = summary.get("rows") == "people"                # a candidate map, for one role: every row is one person
+    kind = "Candidate map" if people else "Market map"
+    if people:
+        employers = {str(c.get("uses") or "").strip().lower() for seg in summary["segments"] for c in seg["companies"]} - {""}
+        stats = [(numbers["companies"], "Candidates"), (numbers["segments"], "Pools"), (numbers["with_signal"], "With a reason to move"),
+                 (numbers["avg_fit"], "Average fit"), (len(employers), "Employers")]
+        if not share:
+            stats += [(numbers["in_pipeline"], "In the pipeline")]
+    else:
+        stats = [(numbers["companies"], "Companies"), (numbers["segments"], "Segments"), (numbers["with_signal"], "With a signal"),
+                 (numbers["avg_fit"], "Average fit")]
+        if not share:
+            stats += [(numbers["buyers_named"], "Buyers named"), (numbers["in_pipeline"], "In the pipeline")]
     out = ['<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">',
-           "<title>%s · Market map</title><style>%s</style></head><body>" % (esc(market["name"]), CSS),
-           '<div class="eyebrow">Market map%s</div><h1>%s</h1>' % (" // " + esc(date) if date else "", esc(market["name"]))]
+           "<title>%s · %s</title><style>%s</style></head><body>" % (esc(market["name"]), kind, CSS),
+           '<div class="eyebrow">%s%s</div><h1>%s</h1>' % (kind, " // " + esc(date) if date else "", esc(market["name"]))]
     if market.get("brief"):
         out.append("<p>%s</p>" % esc(market["brief"]))
     out.append('<div class="stats">%s</div><div class="rule"></div>' % "".join(
@@ -229,44 +243,47 @@ def render(summary: dict, terms: dict, share: bool = False) -> str:
             for i, x in enumerate(market.get("implications") or [])))
 
     if summary["segments"]:
-        out.append('<section><h2>The map</h2><div id="sm-static">%s</div>%s</section>' % (_sky(summary["segments"], share), _live(summary, share)))
+        out.append('<section><h2>The map</h2><div id="sm-static">%s</div>%s</section>' % (_sky(summary["segments"], share, people), _live(summary, share)))
         rows = "".join(
             "<tr><td><strong>%s</strong><br>%s</td><td>%d (%d%%)</td><td>%s</td><td>%s</td><td>%s</td></tr>"
             % (esc(s["segment"]), esc(s["description"]), s["count"], s["share"], esc(str(s["avg_fit"])),
                esc(", ".join(s["regions"])), esc(", ".join(s["uses"])))
             for s in summary["segments"])
-        out.append("<section><h2>The segments</h2><table><tr><th>Segment</th><th>Share</th><th>Avg fit</th><th>Where</th>"
-                   "<th>Use today</th></tr>%s</table></section>" % rows)
+        out.append("<section><h2>The %s</h2><table><tr><th>%s</th><th>Share</th><th>Avg fit</th><th>Where</th>"
+                   "<th>%s</th></tr>%s</table></section>" % ((("pools", "Pool", "Work at") if people else ("segments", "Segment", "Use today")) + (rows,)))
 
     panels = []
     checked = [r for r in summary["requirements"] if r["of"]]
     if checked:
-        panels.append("<div><h2>How rare each requirement is</h2><p>Share of the companies checked for each one that show it.</p>%s</div>"
-                      % _bars(checked, lambda r: r["label"], lambda r: r["rate"],
-                              note=lambda r: "%d of %d checked" % (r["shown"], r["of"]), total=100))
+        panels.append("<div><h2>How rare each requirement is</h2><p>Share of the %s checked for each one that show it.</p>%s</div>"
+                      % ("candidates" if people else "companies", _bars(checked, lambda r: r["label"], lambda r: r["rate"],
+                              note=lambda r: "%d of %d checked" % (r["shown"], r["of"]), total=100)))
     if summary["holds"]:
-        panels.append("<div><h2>Who holds this market today</h2><p>What the %d companies we could place use now.</p>%s</div>"
+        panels.append(("<div><h2>Where they work today</h2><p>The employers of the %d candidates whose employer is known.</p>%s</div>" if people else
+                       "<div><h2>Who holds this market today</h2><p>What the %d companies we could place use now.</p>%s</div>")
                       % (summary["holds_of"], _bars(summary["holds"], lambda r: r["name"], lambda r: r["share"],
                                                     note=lambda r: ", ".join(r["companies"][:4]), total=100)))
     if summary["regions"]:
         panels.append("<div><h2>Where they are</h2>%s</div>" % _bars(summary["regions"], lambda r: r["name"], lambda r: r["count"]))
-    if summary["sizes"]:
+    if summary["sizes"] and not people:
         panels.append("<div><h2>How big they are</h2>%s</div>" % _bars(summary["sizes"], lambda r: r["band"] + " people", lambda r: r["count"]))
     for i in range(0, len(panels), 2):
         out.append('<section class="two">%s</section>' % "".join(panels[i:i + 2]))
 
     if summary["bridges"]:
-        out.append("<section><h2>Where the segments meet</h2><p>Companies that could sit in two segments: the natural second pool "
-                   "when one segment runs thin.</p><table><tr><th>Between</th><th>Companies</th></tr>%s</table></section>" % "".join(
+        out.append(("<section><h2>Where the pools meet</h2><p>Candidates who could sit in two pools: the natural second pool "
+                    "when one runs thin.</p><table><tr><th>Between</th><th>Candidates</th></tr>%s</table></section>" if people else
+                    "<section><h2>Where the segments meet</h2><p>Companies that could sit in two segments: the natural second pool "
+                    "when one segment runs thin.</p><table><tr><th>Between</th><th>Companies</th></tr>%s</table></section>") % "".join(
                        "<tr><td><strong>%s ↔ %s</strong></td><td>%s</td></tr>"
                        % (esc(b["between"][0]), esc(b["between"][1]), esc(", ".join(b["companies"]))) for b in summary["bridges"]))
 
     calls = summary["first_calls"]
     if calls:
-        out.append('<section><h2>First calls</h2><ol class="calls">%s</ol></section>' % "".join(
+        out.append('<section><h2>%s</h2><ol class="calls">%%s</ol></section>' % ("Who to approach first" if people else "First calls") % "".join(
             "<li><div><strong>%s</strong> <span class=\"mono\">%s</span><br>%s%s</div></li>"
             % (esc(c["company"]), esc(c["segment"]), esc(c["why"]),
-               "<br><span class=\"mono\">Buyer: %s</span>" % esc(c["buyer"]) if c.get("buyer") and not share else "")
+               "<br><span class=\"mono\">Buyer: %s</span>" % esc(c["buyer"]) if c.get("buyer") and not share and not people else "")
             for c in calls))
 
     for seg in summary["segments"]:
@@ -275,9 +292,9 @@ def render(summary: dict, terms: dict, share: bool = False) -> str:
             tags = "".join('<span class="tag%s">%s</span>' % (" on" if r["shown"] else "", esc(r["label"])) for r in c.get("requirements") or [])
             if c.get("status") == "tracked" and not share:
                 tags += '<span class="tag on">In the pipeline</span>'
-            people = ""
+            named = ""                                # the people named at a company; a candidate map has none
             if not share and c.get("people"):
-                people = "<br>".join(esc(" · ".join(b for b in (p.get("name"), p.get("title")) if b)) for p in c["people"][:3])
+                named = "<br>".join(esc(" · ".join(b for b in (p.get("name"), p.get("title")) if b)) for p in c["people"][:3])
             also = "<br><span class=\"mono\">Also fits %s</span>" % esc(c["also"]) if c.get("also") else ""
             rows.append(
                 "<tr><td><strong>%s</strong><br>%s%s</td><td class=\"fit f%d\">%s</td><td>%s%s</td><td>%s%s</td><td>%s</td></tr>"
@@ -285,16 +302,18 @@ def render(summary: dict, terms: dict, share: bool = False) -> str:
                    "■" * c["fit"] + "<s>%s</s>" % ("■" * (5 - c["fit"])),
                    esc(c.get("why", "")), "<br>" + tags if tags else "",
                    esc(" · ".join(b for b in (c.get("size"), c.get("location")) if b)),
-                   "<br><span class=\"mono\">Uses %s</span>" % esc(c["uses"]) if c.get("uses") else "",
+                   "<br><span class=\"mono\">%s %s</span>" % ("At" if people else "Uses", esc(c["uses"])) if c.get("uses") else "",
                    "<br>".join(x for x in (
                        esc(c.get("signal", "")),
                        _link(c["source"], "Source") if str(c.get("source", "")).startswith(("http://", "https://")) else esc(c.get("source", "")),
-                       people) if x)))
-        out.append("<section><h2>%s · %d</h2><table class=\"co\"><tr><th>Company</th><th>Fit</th><th>Why it fits</th><th>Size and place</th>"
-                   "<th>Signal%s</th></tr>%s</table></section>"
-                   % (esc(seg["segment"]), seg["count"], "" if share else " and buyers", "".join(rows)))
+                       named) if x)))
+        out.append("<section><h2>%s · %d</h2><table class=\"co\"><tr><th>%s</th><th>Fit</th><th>%s</th><th>%s</th>"
+                   "<th>%s</th></tr>%s</table></section>"
+                   % ((esc(seg["segment"]), seg["count"]) + (("Candidate", "Why they fit", "Title and place", "Why now") if people else
+                                                             ("Company", "Why it fits", "Size and place", "Signal" + ("" if share else " and buyers")))
+                      + ("".join(rows),)))
 
     out.append("<footer>Compiled with Stoa for Hermes Agent%s from public sources. Fit is a judgement against the brief above, "
-               "and each row carries the evidence for it. This is a picture of a market, not a census of it; nobody on it was "
-               "contacted to make it.</footer></body></html>" % (" on " + esc(date) if date else ""))
+               "and each row carries the evidence for it. This is a picture of %s, not a census of it; nobody on it was "
+               "contacted to make it.</footer></body></html>" % (" on " + esc(date) if date else "", "who could fill a role" if people else "a market"))
     return "".join(out)

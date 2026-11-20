@@ -138,6 +138,8 @@ class Database:
 
         def account(name: str) -> dict:
             key = st.org_key(name)
+            if key in accounts and accounts[key]["name"] != name and accounts[key]["name"].islower() and not name.islower():
+                accounts[key]["name"] = name           # typed two ways: the one written as a name, whichever record is read first
             return accounts.setdefault(key, {
                 "key": key, "name": name, "group": "", "domain": "", "open": 0, "open_value": 0.0, "won": 0, "won_value": 0.0, "lost": 0,
                 "deals": 0, "people": 0, "owners": [], "sources": [], "last_touch": "", "next_due": "", "next_step": "", "created_at": "",
