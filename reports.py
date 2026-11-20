@@ -367,8 +367,8 @@ class Reports:
                 part = self._part(playbook, deal, spec["split"])
                 if part in parts:
                     parts[part].append(deal)
-            size = (lambda group: st.total(group)) if spec["count"] == "value" else len
-            row = {"key": key, "label": bucket["label"], "order": bucket["order"], "n": size(mine), "count": len(mine), "value": st.total(mine),
+            size = (lambda group: self.desk.sum(group)) if spec["count"] == "value" else len
+            row = {"key": key, "label": bucket["label"], "order": bucket["order"], "n": size(mine), "count": len(mine), "value": self.desk.sum(mine),
                    "parts": [{"k": k, "n": size(parts[k]), "count": len(parts[k])} for k in legend]}
             if full:
                 row["records"] = [self._brief(playbook, deal, self._part(playbook, deal, spec["split"]))
@@ -441,7 +441,7 @@ class Reports:
         line, made = self._words(playbook, spec, win)
         unit = "money" if spec["count"] == "value" else "records"
         out = {"draw": "bars", "unit": unit, "rows": rows, "legend": self._legend(playbook, spec["split"]), "line": line, "made": made,
-               "total": {"count": len(mine), "value": st.total(mine)}, "squares": unit == "records" and max([r["count"] for r in rows] or [0]) <= 60,
+               "total": {"count": len(mine), "value": self.desk.sum(mine)}, "squares": unit == "records" and max([r["count"] for r in rows] or [0]) <= 60,
                "period": win if timed else None, "before": {"label": before["label"]} if before else None,
                "says": self._says_groups(playbook, spec, rows, mine, win, fell_back)}
         if not mine:
@@ -506,7 +506,7 @@ class Reports:
                     tail or ("None has reached %s yet." % mid if not any(reached(row) for row in named) else "")]
         top = max(named, key=lambda row: row["n"]) if spec["by"] in ("stage", "month") else named[0]
         if spec["count"] == "value":
-            whole = st.total(deals)
+            whole = self.desk.sum(deals)
             return ["%s holds the most: %s of %s." % (top["label"], self._money(playbook, top["n"]), self._money(playbook, whole)),
                     "%s in all." % _count(len(deals), playbook.terms["deal"], playbook.terms["deals"])]
         return ["%s has the most: %d of %d." % (top["label"], top["count"], len(deals)), tail]
@@ -518,11 +518,11 @@ class Reports:
         rows = []
         for index, stage in enumerate(playbook.stages):
             here = [deal for deal in live if deal["stage"] == stage["id"]]
-            row = {"key": stage["id"], "label": stage["label"], "n": len(here), "count": len(here), "value": st.total(here), "parts": [], "heat": index}
+            row = {"key": stage["id"], "label": stage["label"], "n": len(here), "count": len(here), "value": self.desk.sum(here), "parts": [], "heat": index}
             if full:
                 row["records"] = [self._brief(playbook, deal) for deal in sorted(here, key=lambda d: (-d["value"], d["name"]))[:200]]
             rows.append(row)
-        total, count = st.total(live), len(live)
+        total, count = self.desk.sum(live), len(live)
         deals = playbook.terms["deals"]
         point = "%d open%s." % (count, ", %s in play" % self._money(playbook, total) if total else "")
         rest = ""
@@ -573,21 +573,21 @@ class Reports:
                 earlier_words = "%s: %d%% (%d of %d)." % (before["label"][:1].upper() + before["label"][1:], was, earlier_won, len(earlier))
                 if rate is not None and rate != was:
                     change = "%s %d point%s" % ("up" if rate > was else "down", abs(rate - was), "" if abs(rate - was) == 1 else "s")
-        rows = [{"key": "won", "label": playbook.won["label"], "n": len(won), "count": len(won), "value": st.total(won), "parts": []},
-                {"key": "lost", "label": playbook.lost["label"], "n": len(lost), "count": len(lost), "value": st.total(lost), "parts": []}]
+        rows = [{"key": "won", "label": playbook.won["label"], "n": len(won), "count": len(won), "value": self.desk.sum(won), "parts": []},
+                {"key": "lost", "label": playbook.lost["label"], "n": len(lost), "count": len(lost), "value": self.desk.sum(lost), "parts": []}]
         if full:
             rows[0]["records"] = [self._brief(playbook, deal, "won") for deal in won[:200]]
             rows[1]["records"] = [self._brief(playbook, deal, "lost") for deal in lost[:200]]
         money = ""
-        if st.total(won) or st.total(lost):
-            money = "%s %s, %s %s." % (playbook.won["label"], self._money(playbook, st.total(won)), playbook.lost["label"].lower(), self._money(playbook, st.total(lost)))
+        if self.desk.sum(won) or self.desk.sum(lost):
+            money = "%s %s, %s %s." % (playbook.won["label"], self._money(playbook, self.desk.sum(won)), playbook.lost["label"].lower(), self._money(playbook, self.desk.sum(lost)))
         return {"draw": "rate", "unit": "records", "rows": rows, "legend": [], "months": months[-12:],
                 "line": "%s closed in %s · the share that were %s" % (playbook.terms["deals"], win["words"], playbook.won["label"].lower()),
                 "made": [["Counts", "%s closed as %s, out of all that closed" % (playbook.terms["deals"].capitalize(), playbook.won["label"].lower())],
                          ["Which", "Closed in %s" % win["words"]], ["Period", win["label"] + (", against " + before["label"] if before else "")]],
                 "figure": {"text": "%d%%" % rate if rate is not None else "–", "label": "%d of %d closed" % (len(won), len(mine)) if mine else "nothing closed",
                            "change": change, "up": change.startswith("up")},
-                "total": {"count": len(mine), "value": st.total(mine)}, "period": win, "before": {"label": before["label"]} if before else None,
+                "total": {"count": len(mine), "value": self.desk.sum(mine)}, "period": win, "before": {"label": before["label"]} if before else None,
                 "says": [money, earlier_words], **({} if mine else {"empty": "Nothing closed in %s." % win["words"]})}
 
     def stays(self, win: Optional[dict] = None) -> dict:
@@ -619,7 +619,7 @@ class Reports:
             quiet = [deal for deal in here if cards.is_stale(playbook, deal, touches.get(deal["id"], ""))]
             gone = left.get(stage["id"]) or []
             row = {"key": stage["id"], "label": stage["label"], "n": round(average, 1) if average is not None else None, "count": len(here),
-                   "value": st.total(here), "parts": [], "mark": mark, "quiet": len(quiet), "tone": "bad" if average is not None and average > mark else "",
+                   "value": self.desk.sum(here), "parts": [], "mark": mark, "quiet": len(quiet), "tone": "bad" if average is not None and average > mark else "",
                    "left": {"count": len(gone), "days": round(sum(gone) / len(gone), 1)} if gone else None}
             if full:
                 row["records"] = [dict(self._brief(playbook, deal), days=int(st.days_since(deal["stage_at"]) or 0))
@@ -641,7 +641,7 @@ class Reports:
                 "made": [["Counts", "Days since each open %s reached its stage, averaged" % playbook.terms["deal"]], ["Grouped by", "Stage"],
                          ["The mark", "Each stage's quiet-after days, from the playbook"],
                          ["Left after", "From the ledger: the stays that ended in %s. A move made within a minute is left out" % win["words"]]],
-                "total": {"count": len(live), "value": st.total(live)}, "squares": False, "period": None, "before": None, "says": [point, rest],
+                "total": {"count": len(live), "value": self.desk.sum(live)}, "squares": False, "period": None, "before": None, "says": [point, rest],
                 **({} if live else {"empty": "Nothing is open."})}
 
     def _map(self, entry: dict, win: dict, compare: bool, full: bool) -> dict:
@@ -664,17 +664,17 @@ class Reports:
         late = [deal for deal in records if self._far(playbook, deal) >= mid]
         won = [deal for deal in records if deal["status"] == "won"]
         rows = [{"key": "mapped", "label": "Companies mapped", "n": mapped, "count": mapped, "value": 0, "parts": [], "heat": 0},
-                {"key": "pipeline", "label": "In the pipeline", "n": len(records), "count": len(records), "value": st.total(records), "parts": [], "heat": 1}]
+                {"key": "pipeline", "label": "In the pipeline", "n": len(records), "count": len(records), "value": self.desk.sum(records), "parts": [], "heat": 1}]
         if mid < len(playbook.stages):
             rows.append({"key": "late", "label": "Reached %s" % playbook.stages[mid]["label"].lower(), "n": len(late), "count": len(late),
-                         "value": st.total(late), "parts": [], "heat": 3})
-        rows.append({"key": "won", "label": playbook.won["label"], "n": len(won), "count": len(won), "value": st.total(won), "parts": [], "heat": 6})
+                         "value": self.desk.sum(late), "parts": [], "heat": 3})
+        rows.append({"key": "won", "label": playbook.won["label"], "n": len(won), "count": len(won), "value": self.desk.sum(won), "parts": [], "heat": 6})
         if full:
             for row, group in zip(rows[1:], [records] + ([late] if mid < len(playbook.stages) else []) + [won]):
                 row["records"] = [self._brief(playbook, deal) for deal in sorted(group, key=lambda d: (-self._far(playbook, d), -d["value"]))[:200]]
         figures = []
-        if st.total(won):
-            figures.append({"text": self._money(playbook, st.total(won)), "label": "%s from the map" % playbook.won["label"].lower()})
+        if self.desk.sum(won):
+            figures.append({"text": self._money(playbook, self.desk.sum(won)), "label": "%s from the map" % playbook.won["label"].lower()})
         if priced:
             figures.append({"text": "$%.2f" % (cost / 1_000_000), "label": "Hermes's research, estimated"})
         if lookups:
@@ -696,7 +696,7 @@ class Reports:
                 "made": [["Counts", "Companies on every map of this pipeline, not the dismissed ones"],
                          ["Then", "The ones put in the pipeline, how far each got, and which were %s" % playbook.won["label"].lower()],
                          ["Cost", "What Hermes estimates its own work on the maps cost, as on Map facts. Not an invoice"], ["Which", "All time"]],
-                "total": {"count": mapped, "value": st.total(won)}, "squares": mapped <= 60, "period": None, "before": None, "says": [point, rest],
+                "total": {"count": mapped, "value": self.desk.sum(won)}, "squares": mapped <= 60, "period": None, "before": None, "says": [point, rest],
                 **({} if maps else {"empty": "No market map yet. Make one on the Market map tab."})}
 
     @staticmethod

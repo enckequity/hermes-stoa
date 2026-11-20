@@ -336,6 +336,37 @@ def total(deals: Iterable[dict]) -> float:
     return sum(int(deal.get("value_cents") or 0) for deal in deals) / 100
 
 
+def once(deals: Iterable[dict], seats: Optional[dict] = None) -> float:
+    """What some records come to where a group's amount is counted ONCE FOR EACH SEAT STILL TO FILL among the open
+    ones: how a contingent recruiting pipeline counts what is in play. A role is filled once, so six open candidates
+    in a $30,000 search are $30,000 in play, not $180,000; a search hiring for two seats has two fees in play, if it
+    has two candidates to fill them; one whose seat is filled, or that is done, has nothing in play however many are
+    still open in it. Every candidate carries the fee they would bring; a search counts its largest. An open record in
+    no group counts by itself. What is no longer open (placed, passed) is a plain sum: each placement was paid for.
+    ``seats``: the seats still to fill, by group key, wherever that is not one."""
+    fees: dict = {}
+    rest = 0
+    for deal in deals:
+        cents = int(deal.get("value_cents") or 0)
+        key = group_key(deal.get("grp"))
+        if deal.get("status") == "open" and key:
+            fees.setdefault(key, []).append(cents)
+        else:
+            rest += cents
+    seats = seats or {}
+    return (rest + sum(sum(sorted(mine, reverse=True)[:max(0, int(seats.get(key, 1)))]) for key, mine in fees.items())) / 100
+
+
+def filled(chances: list, openings: int) -> float:
+    """How many of a group's openings its open records are expected to fill: each is won or not with its own chance,
+    and no more are won than there are openings. With one opening this is the chance that at least one is."""
+    spread = [1.0]                      # spread[n]: the chance that exactly n are won
+    for chance in chances:
+        chance = min(1.0, max(0.0, chance))
+        spread = [(spread[n] if n < len(spread) else 0.0) * (1 - chance) + (spread[n - 1] * chance if n else 0.0) for n in range(len(spread) + 1)]
+    return sum(min(openings, n) * share for n, share in enumerate(spread))
+
+
 def flat(deal: Optional[dict]) -> dict:
     """A deal as the ledger keeps it: tracked columns, and each custom field as ``fields.<key>``."""
     if not deal:

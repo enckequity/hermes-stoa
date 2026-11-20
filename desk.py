@@ -132,6 +132,12 @@ AUTONOMY = {
 # or one button click, so everything beneath reads and writes that pipeline's file with that pipeline's playbook.
 PIPELINE: contextvars.ContextVar = contextvars.ContextVar("stoa_pipeline", default="")
 MAIN = "main"                       # the first pipeline: desk.db, on the playbook in the plugin's settings
+# How a recruiting pipeline is paid for (kept with the pipeline, in pipelines.json): "contingent", a fee for each
+# placement, so the pipeline counts in money; or "contract", by the hour for one company, billed each month, so nothing
+# on the pipeline is money and the hours are on the money tab. One that has not been told is contingent.
+BILL_CONTRACT, BILL_CONTINGENT = "contract", "contingent"
+OPENINGS = "openings"               # kept with a search's own facts: how many seats it is hiring for (nothing kept = one)
+MOST_OPENINGS = 50
 PIPELINES_FILE = "pipelines.json"   # the others, and what the first is called
 MOST_PIPELINES = 6
 NOTES_MAX = 4000                    # a record's notes: a few lines to know, not a document
@@ -420,6 +426,188 @@ class Desk:
             data["more"] = [dict(entry, removed=st.now()) if isinstance(entry, dict) and entry.get("id") == found else entry for entry in data.get("more") or []]
             self._pipes_write(data)
         return {"ok": True, "removed": found, "pipelines": [entry["name"] for entry in self.pipelines()]}
+
+    # -- how a recruiting pipeline is paid for -----------------------------------------------------
+    def _billing_kept(self) -> dict:
+        entry = self._pipe()
+        kept = (entry if entry else self._pipes()).get("billing")
+        return kept if isinstance(kept, dict) else {}
+
+    def billing_kind(self) -> str:
+        """"contract" or "contingent" for the pipeline in hand if its playbook is recruiting; "" for any other."""
+        if self.playbook().shape != "roles":
+            return ""
+        if self.tour():
+            return BILL_CONTINGENT
+        return BILL_CONTRACT if self._billing_kept().get("type") == BILL_CONTRACT else BILL_CONTINGENT
+
+    def billing(self) -> dict:
+        """How the pipeline in hand is paid for, for the page and the agent: ``{}`` unless it is a recruiting one. A
+        contract's company, rate and hours are that client's own billing terms (``client_terms``), which is what the
+        months are billed from; with them comes the month in progress, since a month is only billed once it has ended."""
+        kind = self.billing_kind()
+        if not kind:
+            return {}
+        kept = self._billing_kept()
+        out = {"type": kind, "client": str(kept.get("client") or ""), "fee_pct": kept.get("fee_pct") or 0, "rate": 0, "hours_week": 0, "fixed": bool(self.tour())}
+        if out["client"]:
+            terms = self.terms_of(out["client"])
+            if terms.get("kind") == "hourly":
+                out.update(rate=terms.get("rate") or 0, hours_week=terms.get("hours_week") or 0, start=terms.get("start") or "")
+                if kind == BILL_CONTRACT:
+                    today = dt.date.today()
+                    period = today.isoformat()[:7]
+                    after = (today.replace(day=28) + dt.timedelta(days=4)).replace(day=1)
+                    hours = self._suggest_hours(terms, period)
+                    out.update(start_label=self._month_label(terms.get("start") or ""), to_bill=len(self.to_bill(out["client"])),
+                               month={"period": period, "label": self._month_label(period), "hours": hours, "amount": round(hours * float(terms.get("rate") or 0), 2),
+                                      "bills_from": "%s %d" % (after.strftime("%B"), after.day),
+                                      "running": not (terms.get("start") and period < terms["start"]) and not (terms.get("end") and period > terms["end"])})
+        return out
+
+    def set_billing(self, args: dict, actor: str = "") -> dict:
+        """A person saying how a recruiting pipeline is paid for. Contract needs the company, the hourly rate and the
+        hours a week; they are saved as that client's billing terms. ``clear_fees`` also takes the fees already on its
+        candidates and searches away (asked for in so many words, never done by itself)."""
+        args = args if isinstance(args, dict) else {}
+        if self.tour():
+            return {"ok": False, "error": "the sample desk is as it is; leave the tour to set up your own pipeline"}
+        if self.playbook().shape != "roles":
+            return {"ok": False, "error": "only a recruiting pipeline is contract or contingent"}
+        kind = str(args.get("type") or "").strip().lower()
+        if kind not in (BILL_CONTRACT, BILL_CONTINGENT):
+            return {"ok": False, "error": "a recruiting pipeline is contract (by the hour) or contingent (a fee for each placement)"}
+        was = self._billing_kept()
+        if kind == BILL_CONTRACT:
+            client = " ".join(str(args.get("client") or "").split())[:120]
+            if not client:
+                return {"ok": False, "error": "say which company the contract is with"}
+            try:
+                rate, hours = float(args.get("rate") or 0), float(args.get("hours_week") or 0)
+            except (TypeError, ValueError):
+                return {"ok": False, "error": "the hourly rate and the hours a week are numbers"}
+            if rate <= 0:
+                return {"ok": False, "error": "the hourly rate is a number above zero"}
+            if not 0 < hours <= 80:
+                return {"ok": False, "error": "hours a week is between 1 and 80"}
+            now = self.terms_of(client)         # what is already agreed beside the rate stays: the month it started, who the bill goes to
+            terms = dict({key: now[key] for key in ("bill_to", "start", "end", "due_days", "skipped") if key in now}, kind="hourly", rate=rate, hours_week=hours)
+            if str(args.get("start") or "").strip():
+                terms["start"] = str(args.get("start")).strip()[:7]
+            saved = self.client_terms(client, terms, actor=actor)
+            if not saved.get("ok"):
+                return {"ok": False, "error": saved.get("error") or "the hourly terms could not be saved"}
+            if args.get("clear_fees"):
+                with self.store.operation():
+                    for deal in self.store.list(status="all"):
+                        if deal.get("value_cents"):
+                            self.store.update(deal["id"], actor=actor, value=0)
+                    for group in self.store.grps():
+                        if group.get("value_cents"):
+                            self.store.grp_put(group["name"], actor=actor, value=0)
+            new = {"type": BILL_CONTRACT, "client": self._client_name(client), "fee_pct": was.get("fee_pct") or 0}
+        else:
+            try:
+                pct = float(args.get("fee_pct") or 0)
+            except (TypeError, ValueError):
+                return {"ok": False, "error": "the fee is a percentage, such as 20"}
+            if not 0 <= pct <= 100:
+                return {"ok": False, "error": "the fee is a percentage between 0 and 100"}
+            new = {"type": BILL_CONTINGENT, "client": was.get("client") or "", "fee_pct": int(pct) if pct == int(pct) else round(pct, 2)}
+        want = PIPELINE.get()
+        with self._pipes_lock:
+            data = dict(self._pipes())
+            if not want or want == MAIN:
+                data["billing"] = new
+            else:
+                data["more"] = [dict(entry, billing=new) if isinstance(entry, dict) and entry.get("id") == want else entry for entry in data.get("more") or []]
+            self._pipes_write(data)
+        self._seats_seen = {}
+        return dict(self.billing(), ok=True)
+
+    def seats(self) -> dict:
+        """The seats still to fill in each search of the pipeline in hand, wherever that is not one: its openings (kept
+        with the search's own facts; one unless said) less those already placed in it, and none for a search marked
+        done or closed. Kept for a moment: everything added up for one page asks."""
+        here = PIPELINE.get() or MAIN
+        kept = getattr(self, "_seats_seen", {}).get(here)
+        if kept and time.time() - kept[1] < 0.5 and kept[2] is self.store:
+            return kept[0]
+        placed: dict = {}
+        for deal in self.store.list(status="all"):
+            if deal["status"] == "won" and st.group_key(deal.get("grp")):
+                placed[st.group_key(deal["grp"])] = placed.get(st.group_key(deal["grp"]), 0) + 1
+        rows = {row["key"]: row for row in self.store.grps()}
+        out = {}
+        for key in set(rows) | set(placed):
+            row = rows.get(key) or {}
+            left = 0 if (row.get("status") or "open") in ("done", "closed") else max(0, self.openings_of(row) - placed.get(key, 0))
+            if left != 1:
+                out[key] = left
+        if not hasattr(self, "_seats_seen"):
+            self._seats_seen = {}
+        self._seats_seen[here] = (out, time.time(), self.store)
+        return out
+
+    @staticmethod
+    def openings_of(group: dict) -> int:
+        try:
+            return max(1, min(MOST_OPENINGS, int(float((group.get("fields") or {}).get(OPENINGS) or 1))))
+        except (TypeError, ValueError):
+            return 1
+
+    def set_openings(self, group: Any, openings: Any, actor: str = "") -> dict:
+        """How many seats a search is hiring for. Counts toward what is in play on a contingent pipeline."""
+        try:
+            count = int(float(openings))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "openings is a whole number, such as 2"}
+        if not 1 <= count <= MOST_OPENINGS:
+            return {"ok": False, "error": "openings is between 1 and %d" % MOST_OPENINGS}
+        if self.billing_kind() != BILL_CONTINGENT:
+            return {"ok": False, "error": "openings count toward what is in play on a contingent recruiting pipeline"}
+        name = next((row["name"] for row in self.groups() if st.group_key(row["name"]) == st.group_key(group)), "")
+        if not name:
+            return {"ok": False, "error": "there is no %s called '%s'" % (self.playbook().terms["group"], str(group or "")[:80])}
+        with self.store.operation():
+            self.store.grp_put(name, actor=actor or self.actor(), fields={OPENINGS: str(count) if count > 1 else ""})
+        self._seats_seen = {}
+        return {"ok": True, "group": name, OPENINGS: count}
+
+    def sum(self, deals: Any) -> float:
+        """What some records come to, the way the pipeline in hand counts: on a contingent recruiting pipeline a search's
+        fee once for each seat still to fill (``store.once``); on any other, the plain sum."""
+        rows = list(deals)
+        if rows and self.billing_kind() == BILL_CONTINGENT:
+            return st.once(rows, self.seats())
+        return st.total(rows)
+
+    def production(self) -> dict:
+        """The money side of every pipeline in one view: a contract's month of hours beside the others' fees. For each:
+        this month (a contract's month in progress at the hours agreed; otherwise what was won since the first), what
+        came in, what is owed and overdue, what is waiting to be billed, and what the open pipeline is likely to bring.
+        Totals only where every pipeline is in the same currency."""
+        if self.tour():
+            return {"pipelines": [], "totals": None}
+        rows = []
+        for entry in self.pipelines():
+            with self.on(entry["id"]):
+                playbook, cash, billing = self.playbook(), self.cash(limit=1), self.billing()
+            strip, forecast, month = cash.get("strip") or {}, cash.get("forecast") or {}, billing.get("month") or {}
+            hourly = billing.get("type") == BILL_CONTRACT
+            amount = lambda key: float((strip.get(key) or {}).get("value") or 0)        # noqa: E731
+            won = strip.get("won_month") or {}
+            rows.append({
+                "id": entry["id"], "name": entry["name"], "currency": playbook.currency, "billing": billing.get("type") or "", "client": billing.get("client") or "",
+                "this_month": float(month.get("amount") or 0) if hourly and month.get("running") else 0.0 if hourly else amount("won_month"),
+                "this_month_note": ("about %d hours" % month["hours"] if month.get("running") else "") if hourly
+                else ("%d %s" % (won.get("count") or 0, playbook.won["label"].lower()) if won.get("count") else ""),
+                "collected": amount("collected_month"), "owed": amount("owed"), "overdue": amount("overdue"), "to_bill": amount("to_bill"),
+                "likely": 0.0 if hourly else float(forecast.get("weighted") or 0)})
+        keys = ("this_month", "collected", "owed", "overdue", "to_bill", "likely")
+        same = len({row["currency"] for row in rows}) == 1
+        return {"pipelines": rows, "month": dt.date.today().strftime("%B"), "currency": rows[0]["currency"] if rows and same else "",
+                "totals": {key: round(sum(row[key] for row in rows), 2) for key in keys} if rows and same else None}
 
     # -- the tour: sample data, in a file of its own ----------------------------------------------
     def tour(self) -> dict:
@@ -741,9 +929,9 @@ class Desk:
             deals = sorted([d for d in deals if cards.is_due(d, playbook)], key=cards.due_date)
         limit = _int(args.get("limit") or 60, 60, 1, 500)
         out = {"ok": True, "view": view, "playbook": playbook.name, "count": len(deals),
-               "open_value": st.total(d for d in deals if d["status"] == "open")}
+               "open_value": self.sum(d for d in deals if d["status"] == "open")}
         if view == "board":
-            out["board"] = cards.board_text(playbook, deals)
+            out["board"] = cards.board_text(playbook, deals, total=self.sum)
             out["by_stage"] = self._by_stage(playbook, deals)
             if status == "open":         # the board is what is still in play; say what else is on the desk, so its absence is not read as not there
                 closed = [d for d in self.store.list(status="all") if d["status"] != "open"]
@@ -763,12 +951,11 @@ class Desk:
                            "gtm_export(action='import'), or load sample data with `hermes stoa demo`.")
         return out
 
-    @staticmethod
-    def _by_stage(playbook: Playbook, deals: list) -> list:
+    def _by_stage(self, playbook: Playbook, deals: list) -> list:
         rows = []
         for stage in playbook.stages:
             here = [d for d in deals if d["stage"] == stage["id"] and d["status"] == "open"]
-            rows.append({"stage": stage["id"], "label": stage["label"], "count": len(here), "value": st.total(here)})
+            rows.append({"stage": stage["id"], "label": stage["label"], "count": len(here), "value": self.sum(here)})
         return rows
 
     def brief(self) -> dict:
@@ -794,7 +981,7 @@ class Desk:
         return {
             "ok": True, "view": "brief", "playbook": playbook.name, "date": st.today(),
             "terms": playbook.terms,
-            "open": len(open_deals), "open_value": st.total(open_deals),
+            "open": len(open_deals), "open_value": self.sum(open_deals),
             "by_stage": self._by_stage(playbook, open_deals),
             "due": sorted(due, key=lambda d: d.get("next_due", ""))[:15],
             "stale": sorted(stale, key=lambda d: -d["quiet_days"])[:15],
@@ -1321,6 +1508,7 @@ class Desk:
         won = from_map = 0
         won_value = 0          # money is added up in cents and turned into an amount at the end
         value = [0] * count
+        at: list = [[] for _ in stages]            # the open records at each stage, for a pipeline that counts a search at a time
         for deal in (deals if deals is not None else self.store.list(status="all")):
             if deal["status"] == "open":
                 far = playbook.position(deal["stage"])
@@ -1328,6 +1516,7 @@ class Desk:
                     continue
                 here[far] += 1
                 value[far] += deal["value_cents"]
+                at[far].append(deal)
             elif deal["status"] == "won":
                 far = count - 1
                 won += 1
@@ -1339,6 +1528,8 @@ class Desk:
                 from_map += 1
             for index in range(far + 1):
                 reached[index] += 1
+        if self.billing_kind() == BILL_CONTINGENT:
+            value = [round(self.sum(mine) * 100) for mine in at]
         return {"stages": [{"id": s["id"], "label": s["label"], "reached": reached[i], "here": here[i], "lost": lost[i],
                             "value": value[i] / 100} for i, s in enumerate(stages)],
                 "won": won, "won_value": won_value / 100, "won_label": playbook.won["label"], "lost": sum(lost),
@@ -1353,8 +1544,15 @@ class Desk:
             return self.undo(args.get("deal"), actor=actor)
         if action == "restore":
             return self.restore(args.get("deal"), actor=actor)
+        dropped = False
+        if args.get("value") not in (None, "") and self.billing_kind() == BILL_CONTRACT:
+            args, dropped = {key: value for key, value in args.items() if key != "value"}, True      # contract work: no candidate carries a fee
         with self.store.operation():
-            return self._deal(args, actor)
+            out = self._deal(args, actor)
+        if dropped and isinstance(out, dict):
+            out["fee_not_kept"] = ("This pipeline is contract work, paid by the hour and billed each month, so no fee is kept on a %s. "
+                                   "Everything else was saved." % self.playbook().terms["deal"])
+        return out
 
     def undo(self, ref: Any, op: str = "", actor: str = "") -> dict:
         """Take back the last action on a record (and the one before it, if asked again), or the action
@@ -2445,7 +2643,7 @@ class Desk:
             open_here = [deal for deal in here if deal["status"] == "open"]
             searches.append({"name": names.get(row["key"], row["name"]), "status": row.get("status") or "open",
                              "status_label": self.GROUP_LABELS.get(row.get("status") or "open", "Open"),
-                             "open": len(open_here), "open_value": st.total(open_here), "won": len([d for d in here if d["status"] == "won"]),
+                             "open": len(open_here), "open_value": self.sum(open_here), "won": len([d for d in here if d["status"] == "won"]),
                              "facts": [{"label": field["label"], "value": (row.get("fields") or {}).get(field["key"], "")}
                                        for field in playbook.group_fields if (row.get("fields") or {}).get(field["key"])],
                              "last_touch": max([touches.get(d["id"], "") for d in here] or [""])})
@@ -2466,7 +2664,7 @@ class Desk:
         recent = [a for a in self.store.activities(limit=400) if a["deal_id"] in ids][:20]
         open_deals, won = [d for d in deals if d["status"] == "open"], [d for d in deals if d["status"] == "won"]
         return {"ok": True, "client": {"name": display, "key": key, "domain": org.get("domain") or "", "note": org.get("note") or ""},
-                "searches": searches, "open": len(open_deals), "open_value": st.total(open_deals), "won": len(won), "won_value": st.total(won),
+                "searches": searches, "open": len(open_deals), "open_value": self.sum(open_deals), "won": len(won), "won_value": self.sum(won),
                 "lost": len([d for d in deals if d["status"] == "lost"]),
                 "last_touch": max([touches.get(d["id"], "") for d in deals] or [""]),
                 "records": [self._brief(deal, playbook) for deal in sorted(deals, key=lambda d: (d["status"] != "open", -playbook.position(d["stage"]), d["name"].lower()))],
@@ -2518,7 +2716,7 @@ class Desk:
         unbilled = [(d, self.money(d, per.get(d["id"], []))["uninvoiced"]) for d in won] if playbook.billing != "none" else []
         unbilled = [(d, amount) for d, amount in unbilled if amount > 0]
         strip = {
-            "won_month": {"count": len(won_now), "value": st.total(won_now)},
+            "won_month": {"count": len(won_now), "value": self.sum(won_now)},
             "owed": {"count": len(owing), "value": sum(i["owed_cents"] for i in owing) / 100},
             "collected_month": {"value": self.store.collected(month) / 100},
             "overdue": {"count": len(late), "value": sum(i["owed_cents"] for i in late) / 100},
@@ -2539,6 +2737,26 @@ class Desk:
             bucket["count"] += 1
             bucket["cents"] += deal["value_cents"]
             bucket["weighted"] += deal["value_cents"] * odds["by_stage"].get(deal["stage"], 0) / 100
+        if self.billing_kind() == BILL_CONTINGENT:
+            # Each open candidate weighed by the odds of their stage and added up would count a fee for every one of them.
+            # A search brings its fee once for each opening: here it counts the fee times the openings its open
+            # candidates are expected to fill, in the month its soonest one is expected.
+            order, seats, searches = list(buckets), self.seats(), {}
+            when = lambda d: ("none" if not (d.get("close_on") or "") else "past" if d["close_on"] < today.isoformat() else "this" if d["close_on"][:7] == month     # noqa: E731
+                              else "next" if d["close_on"][:7] == nxt else "later")
+            for bucket in buckets.values():
+                bucket["cents"], bucket["weighted"] = 0, 0.0
+            for deal in deals:
+                if deal["status"] == "open" and playbook.position(deal["stage"]) >= 0:
+                    searches.setdefault(st.group_key(deal.get("grp")) or "\x00" + deal["id"], []).append(deal)
+            for key, mine in searches.items():
+                fee = max(int(deal.get("value_cents") or 0) for deal in mine)
+                openings = min(len(mine), max(0, seats.get(key, 1)))
+                if not openings:
+                    continue
+                bucket = buckets[min((when(deal) for deal in mine), key=order.index)]
+                bucket["cents"] += fee * openings
+                bucket["weighted"] += fee * st.filled([odds["by_stage"].get(deal["stage"], 0) / 100 for deal in mine], openings)
         forecast = [{"key": b["key"], "label": b["label"], "count": b["count"], "value": b["cents"] / 100, "weighted": round(b["weighted"] / 100, 2)}
                     for b in buckets.values()]
         lane = []
@@ -2841,8 +3059,8 @@ class Desk:
         return {"ok": True,
                 "company": {"name": display, "key": key, "domain": org.get("domain") or (max(guesses, key=guesses.get) if guesses else ""),
                             "note": org.get("note") or "", "website": org.get("website") or ""},
-                "open": len(open_here), "open_value": st.total(open_here),
-                "won": len(won), "won_value": st.total(won),
+                "open": len(open_here), "open_value": self.sum(open_here),
+                "won": len(won), "won_value": self.sum(won),
                 "lost": len([deal for deal in here if deal["status"] == "lost"]),
                 "last_touch": max([touches.get(deal["id"], "") for deal in here] or [""]),
                 "records": [self._brief(deal, playbook) for deal in sorted(here, key=lambda d: (d["status"] != "open", -d["value"]))],
@@ -2885,7 +3103,7 @@ class Desk:
         return {"ok": True, "via": "group", "groups": sorted(names.get(group["key"], group["name"]) for group in mine),
                 "company": {"name": display, "key": key, "domain": org.get("domain") or (max(guesses, key=guesses.get) if guesses else ""),
                             "note": org.get("note") or "", "website": org.get("website") or ""},
-                "open": len(open_here), "open_value": st.total(open_here), "won": len(won), "won_value": st.total(won),
+                "open": len(open_here), "open_value": self.sum(open_here), "won": len(won), "won_value": self.sum(won),
                 "lost": len([deal for deal in here if deal["status"] == "lost"]),
                 "last_touch": max([touches.get(deal["id"], "") for deal in here] or [""]),
                 "records": [self._brief(deal, playbook) for deal in sorted(here, key=lambda d: (d["status"] != "open", -d["value"]))],
@@ -2960,8 +3178,8 @@ class Desk:
             status = row.get("status") or "open"
             out.append({"name": name, "key": key, "client": row.get("client") or "", "status": status, "status_label": self.GROUP_LABELS[status],
                         "value": row.get("value") or 0, "note": row.get("note") or "", "fields": row.get("fields") or {},
-                        "records": len(here), "open": len(open_here), "open_value": st.total(open_here), "won": len(won),
-                        "won_value": st.total(won), "lost": len([d for d in here if d["status"] == "lost"]), "people": people.get(key, 0),
+                        "records": len(here), "open": len(open_here), "open_value": self.sum(open_here), "won": len(won),
+                        "won_value": self.sum(won), "lost": len([d for d in here if d["status"] == "lost"]), "people": people.get(key, 0),
                         "last_touch": max([touches.get(d["id"], "") or d["updated_at"] for d in here] or [row.get("updated_at") or ""])})
         order = {"open": 0, "hold": 1, "done": 2, "closed": 3}
         out.sort(key=lambda group: (order[group["status"]], -group["open_value"], group["name"].lower()))
@@ -3010,7 +3228,7 @@ class Desk:
                           "value": row.get("value") or 0, "note": row.get("note") or "", "fields": row.get("fields") or {},
                           "facts": [{"key": field["key"], "label": field["label"], "value": (row.get("fields") or {}).get(field["key"], "")}
                                     for field in playbook.group_fields]},
-                "open": len(open_here), "open_value": st.total(open_here), "won": len(won), "won_value": st.total(won),
+                "open": len(open_here), "open_value": self.sum(open_here), "won": len(won), "won_value": self.sum(won),
                 "lost": len([d for d in deals if d["status"] == "lost"]),
                 "last_touch": max([touches.get(d["id"], "") for d in deals] or [""]),
                 "records": [self._brief(deal, playbook) for deal in
@@ -3877,7 +4095,7 @@ class Desk:
             if not self.store.count():
                 return ("The desk is empty. Tell me about a %s to add it, or run `hermes stoa demo` for sample data."
                         % playbook.terms["deal"])
-            return cards.board_text(playbook, self.store.list(status="open"))
+            return cards.board_text(playbook, self.store.list(status="open"), total=self.sum)
         if word == "help":
             return ("/gtm — the pipeline board\n/gtm today — what needs you, most pressing first\n/gtm cash — won, invoiced, collected, overdue, and the forecast\n/gtm brief — the morning brief\n/gtm stale — records gone quiet\n"
                     "/gtm due — next steps due\n/gtm map [market] — a market map\n/gtm <name> — one record's card\n"

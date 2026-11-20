@@ -1143,6 +1143,120 @@ class CandidateMapTests(unittest.TestCase):
         self.assertFalse(desk.markets.set_rows("Fintechs", "people")["ok"])
 
 
+class RecruitingBillingTests(unittest.TestCase):
+    """A recruiting pipeline is contingent (a fee for each placement) or contract (by the hour, billed monthly)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.desk = make_desk(self.tmp.name)
+        self.first = self.desk.playbook().first_stage()
+
+    def add(self, name, group="", value=0):
+        return self.desk.store.add(name, self.first, actor="tester", grp=group, value=value)
+
+    def test_in_play_counts_a_search_once_for_each_seat_still_to_fill(self):
+        self.assertEqual(self.desk.billing()["type"], "contingent")                       # what a recruiting pipeline is until told
+        made = [self.add("A %d" % n, "VP Finance", 30000) for n in range(3)] + [self.add("B", "Head of Risk", 45000), self.add("C", "", 10000)]
+        open_ = [d for d in self.desk.store.list(status="all") if d["status"] == "open"]
+        self.assertEqual((st.total(open_), self.desk.sum(open_)), (145000.0, 85000.0))    # 30k + 45k + 10k
+        self.assertEqual(self.desk.pipeline({"action": "board"})["open_value"], 85000.0)
+        self.assertEqual({g["name"]: g["open_value"] for g in self.desk.groups()}, {"VP Finance": 30000.0, "Head of Risk": 45000.0})
+        self.assertEqual(sum(stage["value"] for stage in self.desk.flow()["stages"]), 85000.0)
+        forecast = self.desk.cash()["forecast"]
+        chance = {row["stage"]: row["odds"] / 100 for row in forecast["odds"]}[self.first]
+        self.assertEqual(forecast["value"], 85000.0)
+        self.assertAlmostEqual(forecast["weighted"], 30000 * (1 - (1 - chance) ** 3) + 45000 * chance + 10000 * chance, delta=1)
+        # Two openings: two fees, where it has two candidates to fill them. Three openings and one candidate: one fee.
+        self.assertTrue(self.desk.set_openings("vp finance", 2)["ok"])
+        self.assertEqual(self.desk.sum(self.desk.store.list(status="open")), 115000.0)
+        self.assertEqual(next(g for g in self.desk.groups() if g["name"] == "VP Finance")["fields"]["openings"], "2")
+        self.assertAlmostEqual(self.desk.cash()["forecast"]["weighted"], 30000 * st.filled([chance] * 3, 2) + 45000 * chance + 10000 * chance, delta=1)
+        self.assertTrue(self.desk.set_openings("Head of Risk", 3)["ok"])
+        self.assertEqual(self.desk.sum(self.desk.store.list(status="open")), 115000.0)
+        for wrong in (0, "many", 51):
+            self.assertFalse(self.desk.set_openings("VP Finance", wrong)["ok"])
+        self.assertFalse(self.desk.set_openings("Nobody's search", 2)["ok"])
+        # One of the three is placed: one seat is left. Back to one opening: the search is filled, and nothing of it is in play
+        # though two candidates are still open in it. A search marked done counts for nothing either.
+        won = self.desk.playbook().won
+        self.desk.store.move(made[0]["id"], won["id"], status="won", actor="tester", label=won["label"])
+        self.desk._seats_seen = {}
+        self.assertEqual(self.desk.sum(self.desk.store.list(status="open")), 85000.0)
+        self.desk.set_openings("VP Finance", 1)
+        self.assertEqual(self.desk.sum(self.desk.store.list(status="open")), 55000.0)
+        self.assertEqual(next(g for g in self.desk.groups() if g["name"] == "VP Finance")["open_value"], 0)
+        self.assertEqual(self.desk.sum(self.desk.store.list(status="all")), 85000.0)      # with the 30k that was placed: what is won is a plain sum
+        self.desk.group({"action": "set", "group": "Head of Risk", "status": "done"})
+        self.desk._seats_seen = {}
+        self.assertEqual(self.desk.sum(self.desk.store.list(status="open")), 10000.0)
+        self.assertEqual((st.filled([0.5, 0.5], 1), st.filled([0.5, 0.5], 2), st.filled([], 3)), (0.75, 1.0, 0))
+
+    def test_a_contract_pipeline_is_paid_by_the_hour_and_keeps_no_fees(self):
+        for wrong in ({"type": "contract", "client": "", "rate": 85, "hours_week": 20}, {"type": "contract", "client": "Halden Group", "rate": 0, "hours_week": 20},
+                      {"type": "contract", "client": "Halden Group", "rate": 85, "hours_week": 200}, {"type": "retainer"}):
+            self.assertFalse(self.desk.set_billing(wrong)["ok"], wrong)
+        kept = self.add("Fee Carrier", "Plant Manager", 30000)
+        saved = self.desk.set_billing({"type": "contract", "client": "Halden Group", "rate": 85, "hours_week": 20})
+        self.assertEqual((saved["ok"], saved["type"], saved["client"], saved["rate"], saved["hours_week"]), (True, "contract", "Halden Group", 85, 20))
+        month = saved["month"]
+        self.assertTrue(month["running"] and month["hours"] > 0 and month["amount"] == month["hours"] * 85 and month["bills_from"], month)
+        self.assertEqual((saved["to_bill"], saved["start"]), (0, dt.date.today().isoformat()[:7]))
+        terms = self.desk.terms_of("Halden Group")                                        # the terms the months are billed from are the client's own
+        self.assertEqual((terms["kind"], terms["rate"], terms["hours_week"]), ("hourly", 85, 20))
+        earlier = self.desk.set_billing({"type": "contract", "client": "Halden Group", "rate": 90, "hours_week": 25, "start": "2026-01"})
+        self.assertTrue(earlier["to_bill"] > 0 and self.desk.terms_of("Halden Group")["start"] == "2026-01")
+        again = self.desk.set_billing({"type": "contract", "client": "Halden Group", "rate": 95, "hours_week": 25})
+        self.assertEqual((again["rate"], again["start"]), (95, "2026-01"))                 # a new rate keeps the month it started
+        # No candidate is given a fee here, by a person or by the agent; what was there is kept until it is cleared by name.
+        made = self.desk.deal({"action": "add", "name": "Ada Quill", "group": "Plant Manager", "company": "Harrow Mills", "value": 40000})
+        self.assertFalse(made["deal"].get("value"))
+        self.assertIn("contract work", made["fee_not_kept"])
+        self.assertEqual(self.desk.store.get(kept["id"])["value"], 30000)
+        self.desk.set_billing({"type": "contract", "client": "Halden Group", "rate": 95, "hours_week": 25, "clear_fees": True})
+        self.assertEqual(self.desk.store.get(kept["id"])["value"], 0)
+        self.assertFalse(self.desk.set_openings("Plant Manager", 2)["ok"])                 # openings mean nothing on contract work
+        # Back to contingent, with the usual share of the salary; the company and its terms are kept for another time.
+        back = self.desk.set_billing({"type": "contingent", "fee_pct": 20})
+        self.assertEqual((back["type"], back["fee_pct"], back["client"], back["rate"]), ("contingent", 20, "Halden Group", 95))
+        self.assertNotIn("month", back)
+        self.assertFalse(self.desk.set_billing({"type": "contingent", "fee_pct": 140})["ok"])
+
+    def test_each_pipeline_keeps_its_own_and_production_shows_them_together(self):
+        made = self.desk.pipeline_add("Contract work", "recruiting")
+        self.assertTrue(made["ok"], made)
+        with self.desk.on(made["added"]["id"]):
+            self.assertTrue(self.desk.set_billing({"type": "contract", "client": "Halden Group", "rate": 85, "hours_week": 20})["ok"])
+            self.assertEqual(self.desk.billing()["type"], "contract")
+            month = self.desk.billing()["month"]
+        self.assertEqual(self.desk.billing()["type"], "contingent")                       # the first pipeline is as it was
+        won = self.desk.playbook().won
+        placed = self.add("Placed One", "VP Finance", 30000)
+        self.desk.store.move(placed["id"], won["id"], status="won", actor="tester", label=won["label"])
+        self.add("Open One", "Head of Risk", 45000)
+        across = self.desk.production()
+        rows = {row["name"]: row for row in across["pipelines"]}
+        mine, theirs = rows["Contract work"], next(row for row in across["pipelines"] if row["id"] == "main")
+        self.assertEqual((mine["billing"], mine["client"], mine["this_month"], mine["likely"]), ("contract", "Halden Group", month["amount"], 0))
+        self.assertTrue(mine["this_month_note"].startswith("about "))
+        self.assertEqual((theirs["billing"], theirs["this_month"], theirs["this_month_note"]), ("contingent", 30000, "1 placed"))
+        self.assertGreater(theirs["likely"], 0)
+        self.assertEqual(across["totals"]["this_month"], 30000 + month["amount"])
+        self.assertTrue(across["month"] and across["currency"] == "USD")
+
+    def test_a_sales_pipeline_adds_up_as_it_always_did(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        desk = make_desk(tmp.name, playbook="b2b-sales")
+        stage = desk.playbook().first_stage()
+        for n in range(3):
+            desk.store.add("Deal %d" % n, stage, actor="tester", grp="Acme", value=10000)
+        self.assertEqual((desk.billing(), desk.billing_kind()), ({}, ""))
+        self.assertEqual(desk.sum(desk.store.list(status="open")), 30000.0)
+        self.assertFalse(desk.set_billing({"type": "contract", "client": "X", "rate": 80, "hours_week": 20})["ok"])
+        self.assertFalse(desk.set_openings("Acme", 2)["ok"])
+
+
 class SampleDataTests(unittest.TestCase):
     """The two worked examples people see: a recruiting agency and a company selling a fraud prevention tool."""
 
@@ -2352,7 +2466,8 @@ class GroupTests(unittest.TestCase):
         self.assertEqual((made["value"], made["client"]), (60000.0, "Kestrel Labs"))
         own = self.desk.deal({"action": "add", "name": "Bo Lindqvist", "group": "VP Sales · Kestrel", "value": 45000})["deal"]
         self.assertEqual(own["value"], 45000.0)                                   # a record that brings its own keeps it
-        self.assertEqual(self.desk.group({"action": "get", "group": "VP Sales · Kestrel"})["open_value"], 105000.0)
+        # A recruiting pipeline counts a search's fee once (a role is filled once): the larger of the two, not their sum.
+        self.assertEqual(self.desk.group({"action": "get", "group": "VP Sales · Kestrel"})["open_value"], 60000.0)
         several = self.desk.group({"action": "set", "group": "Kestrel", "new": True, "client": "Kestrel Labs"})   # a name that is part of another's
         self.assertEqual((several["created"], several["group"]["name"]), (True, "Kestrel"))
         self.assertEqual(self.desk.group({"action": "get", "group": "VP Sales"})["group"]["name"], "VP Sales · Kestrel")
@@ -5468,11 +5583,13 @@ class ReportTests(unittest.TestCase):
         result = self.reports.run("stages", full=True)
         self.assertEqual([(row["label"], row["count"]) for row in result["rows"]],
                          [("Sourced", 1), ("Contacted", 2), ("Screened", 1), ("Submitted", 1), ("Client interview", 1), ("Offer", 1)])
-        self.assertEqual(result["total"], {"count": 7, "value": 299000.0})
+        # Seven candidates in three searches whose fees are 45k, 55k and 30k: each search once, not 299k for all seven.
+        self.assertEqual(result["total"], {"count": 7, "value": 130000.0})
         self.assertEqual(self.row(result, "Contacted")["value"], 97000.0)
         self.assertEqual(sorted(r["name"] for r in self.row(result, "Contacted")["records"]), ["Callum Reyes", "Marcus Oyelaran"])
-        self.assertEqual(result["says"][0], "7 open, $299k in play.")
-        self.assertEqual(result["says"][1], "Just over half of the money ($172k) is in the 4 candidates at screened or later.")
+        self.assertEqual(result["says"][0], "7 open, $130k in play.")
+        # Priya Raman (45k, at client interview) and Wei-Lin Chao (55k, at offer) are the furthest along in two of the three searches.
+        self.assertEqual(result["says"][1], "Most of the money ($100k) is in the 2 candidates at client interview or later.")
         self.desk.deal({"action": "close", "deal": self.id("Wei-Lin Chao"), "outcome": "won"})
         self.assertEqual(self.reports.run("stages")["total"]["count"], 6)      # a closed record is no longer in play
 

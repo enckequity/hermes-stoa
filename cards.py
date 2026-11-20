@@ -215,11 +215,13 @@ def card_blocks(playbook, deal: dict, activities: Optional[list] = None, last_to
     return blocks + status
 
 
-def board_text(playbook, deals: list, title: str = "") -> str:
-    """The whole pipeline as a compact text board."""
+def board_text(playbook, deals: list, title: str = "", total=None) -> str:
+    """The whole pipeline as a compact text board. ``total``: how the pipeline adds records up (the desk's ``sum``, which
+    counts a search once on a contingent recruiting pipeline); the plain sum if not given."""
     lines = [title or playbook.title]
     open_deals = [d for d in deals if d["status"] == "open"]
-    total = st.total(open_deals)
+    add = total or st.total
+    total = add(open_deals)
     summary = "%d open %s" % (len(open_deals), playbook.terms["deals"])
     if total:
         summary += " · %s" % money(total, playbook.currency)
@@ -227,7 +229,7 @@ def board_text(playbook, deals: list, title: str = "") -> str:
     known = set(playbook.stage_ids())
     for stage in playbook.stages:
         here = [d for d in open_deals if d["stage"] == stage["id"]]
-        value = st.total(here)
+        value = add(here)
         lines.append("")
         lines.append("%s (%d)%s" % (stage["label"], len(here), "  " + money(value, playbook.currency) if value else ""))
         for deal in here[:12]:
