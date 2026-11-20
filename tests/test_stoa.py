@@ -1488,6 +1488,35 @@ class RecruitingBillingTests(unittest.TestCase):
         open_ = self.desk.store.list(status="open")
         self.assertEqual((self.desk.sum(open_), self.desk.cash()["forecast"]["value"]), (70000.0, 70000.0))
 
+    def test_the_stages_add_up_to_what_is_in_play(self):
+        stages = [stage["id"] for stage in self.desk.playbook().stages]
+        put = lambda name, group, value, at: self.desk.store.add(name, stages[at], actor="tester", grp=group, value=value)      # noqa: E731
+        put("A1", "VP Finance", 30000, 0), put("A2", "VP Finance", 30000, 2), put("A3", "VP Finance", 30000, 4)
+        put("B1", "Head of Risk", 45000, 1), put("Alone", "", 10000, 3)
+        open_ = self.desk.store.list(status="open")
+        sums = self.desk.stage_sums(open_)
+        # VP Finance once, where its furthest-along candidate is; Head of Risk where its only one is; the one in no search where it is.
+        self.assertEqual({stage: sums.get(stage, 0) for stage in stages[:5]}, dict(zip(stages[:5], [0, 45000.0, 0, 10000.0, 30000.0])))
+        self.assertEqual(sum(sums.values()), self.desk.sum(open_))
+        self.assertEqual([row["value"] for row in self.desk.pipeline({"action": "board"})["by_stage"]][:5], [0, 45000.0, 0, 10000.0, 30000.0])
+        self.assertEqual([stage["value"] for stage in self.desk.flow()["stages"]][:5], [0, 45000.0, 0, 10000.0, 30000.0])
+        # Two openings: the two furthest along each carry a fee, the largest furthest; a third candidate behind them none.
+        self.desk.store.update(next(d["id"] for d in open_ if d["name"] == "A2"), actor="tester", value=20000)
+        self.desk.set_openings("VP Finance", 2)
+        sums = self.desk.stage_sums(self.desk.store.list(status="open"))
+        self.assertEqual((sums.get(stages[4]), sums.get(stages[2]), sums.get(stages[0], 0)), (30000.0, 30000.0, 0))
+        self.assertEqual(sum(sums.values()), self.desk.sum(self.desk.store.list(status="open")))
+        # One of them placed: one seat is left, and it sits with whoever is now furthest along.
+        won = self.desk.playbook().won
+        self.desk.store.move(next(d["id"] for d in open_ if d["name"] == "A3"), won["id"], status="won", actor="tester", label=won["label"])
+        sums = self.desk.stage_sums(self.desk.store.list(status="open"))
+        self.assertEqual((sums.get(stages[2]), sums.get(stages[0], 0), sum(sums.values())), (30000.0, 0, self.desk.sum(self.desk.store.list(status="open"))))
+        # A stage that is not the playbook's is behind them all, and what is no longer open is a plain sum where it is.
+        self.assertEqual(st.by_stage([{"status": "open", "stage": "odd", "grp": "S", "value_cents": 500}, {"status": "open", "stage": "sourced", "grp": "S", "value_cents": 900}],
+                                     {}, self.desk.playbook().position), {"sourced": 900})
+        everything = self.desk.stage_sums(self.desk.store.list(status="all"))
+        self.assertEqual(everything.get(won["id"]), 30000.0)
+
     def test_a_sales_pipeline_adds_up_as_it_always_did(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -1497,6 +1526,7 @@ class RecruitingBillingTests(unittest.TestCase):
             desk.store.add("Deal %d" % n, stage, actor="tester", grp="Acme", value=10000)
         self.assertEqual((desk.billing(), desk.billing_kind()), ({}, ""))
         self.assertEqual(desk.sum(desk.store.list(status="open")), 30000.0)
+        self.assertEqual(desk.stage_sums(desk.store.list(status="open")), {stage: 30000.0})    # a plain sum of what is at the stage
         self.assertFalse(desk.set_billing({"type": "contract", "client": "X", "rate": 80, "hours_week": 20})["ok"])
         self.assertFalse(desk.set_openings("Acme", 2)["ok"])
 
@@ -5866,7 +5896,11 @@ class ReportTests(unittest.TestCase):
                          [("Sourced", 1), ("Contacted", 2), ("Screened", 1), ("Submitted", 1), ("Client interview", 1), ("Offer", 1)])
         # Seven candidates in three searches whose fees are 45k, 55k and 30k: each search once, not 299k for all seven.
         self.assertEqual(result["total"], {"count": 7, "value": 130000.0})
-        self.assertEqual(self.row(result, "Contacted")["value"], 97000.0)
+        # A stage's amount is the fee of each search whose furthest-along candidate is there, so the stages add up to what
+        # is in play: Halcyon's 30k at Submitted (Ingrid), Northwind's 45k at Client interview (Priya), Ostrava's 55k at
+        # Offer (Wei-Lin). The two at Contacted are behind someone in their own searches.
+        self.assertEqual([row["value"] for row in result["rows"]], [0, 0, 0, 30000.0, 45000.0, 55000.0])
+        self.assertEqual(sum(row["value"] for row in result["rows"]), result["total"]["value"])
         self.assertEqual(sorted(r["name"] for r in self.row(result, "Contacted")["records"]), ["Callum Reyes", "Marcus Oyelaran"])
         self.assertEqual(result["says"][0], "7 open, $130k in play.")
         # Priya Raman (45k, at client interview) and Wei-Lin Chao (55k, at offer) are the furthest along in two of the three searches.
@@ -6149,7 +6183,8 @@ class ReportTests(unittest.TestCase):
         self.assertIn(["field:location", "Location"], data["choices"]["by"])
         one = api.report("stages")
         self.assertEqual(one["csv"]["header"], ["", "Records", "Value"])
-        self.assertEqual(one["csv"]["rows"][1], ["Contacted", 2, 97000.0])
+        self.assertEqual(one["csv"]["rows"][1], ["Contacted", 2, 0])                     # both are behind someone in their own search
+        self.assertEqual(sum(row[2] for row in one["csv"]["rows"]), 130000.0)
         self.assertTrue(one["rows"][1]["records"])
         with self.assertRaises(fastapi.HTTPException):
             api.report("nope")

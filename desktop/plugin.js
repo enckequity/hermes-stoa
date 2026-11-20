@@ -625,6 +625,31 @@ function inPlay(deals, from) {
   for (const [search, mine] of fees) alone += mine.sort((a, b) => b - a).slice(0, search in seats ? seats[search] : 1).reduce((sum, fee) => sum + fee, 0)
   return alone
 }
+/** What some OPEN records have in play, a stage at a time, as a Map from stage id to amount. On a contingent recruiting
+    pipeline a search counts once, in the stage of its furthest-along candidate (the next seat's in the stage of the
+    next furthest), so the board's columns add up to the number at the head of the page and a search with people at three
+    stages is not counted three times (the desk does the same for the funnel: `store.by_stage`). On any other pipeline a
+    stage is the plain sum of what is in it. */
+function stageSums(deals, from) {
+  const list = (deals || []).filter(deal => !deal.status || deal.status === 'open'), out = new Map()
+  const add = (stage, amount) => out.set(stage, (out.get(stage) || 0) + (amount || 0))
+  if (((from && from.billing) || billingNow()).type !== 'contingent') { list.forEach(deal => add(deal.stage, deal.value)); return out }
+  const seats = SEATS[pipeKey(from && from.pipeline !== undefined ? from.pipeline : $pipe.get())] || {}
+  const order = new Map((((from && from.playbook) || {}).stages || []).map((stage, index) => [stage.id, index]))
+  const far = deal => (order.has(deal.stage) ? order.get(deal.stage) : -1)
+  const searches = new Map()
+  for (const deal of list) {
+    const search = groupName(deal.group)
+    if (!search) add(deal.stage, deal.value)
+    else searches.set(search, (searches.get(search) || []).concat([deal]))
+  }
+  for (const [search, mine] of searches) {
+    const take = Math.max(0, Math.min(mine.length, search in seats ? seats[search] : 1))
+    const fees = mine.map(deal => deal.value || 0).sort((a, b) => b - a).slice(0, take)
+    mine.map((deal, index) => [deal, index]).sort((a, b) => far(b[0]) - far(a[0]) || a[1] - b[1]).slice(0, take).forEach((pair, index) => add(pair[0].stage, fees[index]))
+  }
+  return out
+}
 const AMOUNT = /(^|_)value$/
 function withoutFees(node, depth) {
   if (Array.isArray(node)) return node.map(item => withoutFees(item, depth + 1))
@@ -2622,7 +2647,7 @@ function Pane() {
       pb.stages.map(stage => {
         const here = open.filter(deal => deal.stage === stage.id)
         if (!here.length) return null
-        const value = inPlay(here, state)
+        const value = stageSums(open, state).get(stage.id) || 0
         return h('div', { className: 'stoa-sec', key: stage.id },
           h('div', { className: 'stoa-sechead' }, h('span', { className: 'stoa-eyebrow' }, stage.label),
             h('span', { className: 'stoa-num' }, here.length + (value ? ' · ' + money(value, pb.currency) : ''))),
@@ -5011,10 +5036,11 @@ function Board({ state, openId, setOpenId }) {
     .sort((a, b) => (a.stage_at < b.stage_at ? 1 : -1))
   const known = new Set(pb.stages.map(stage => stage.id))
   const strays = open.filter(deal => !known.has(deal.stage))
+  const staged = stageSums(open, state)          // each search once, in the column of its furthest-along candidate
   const columns = pb.stages.map(stage => ({ ...stage, here: open.filter(deal => deal.stage === stage.id) }))
     .concat(strays.length ? [{ id: '~other', label: 'Other stages', other: true, here: strays }] : [])
     .concat([{ id: '~won', label: pb.won.label, won: true, here: won.slice(0, 8) }])
-    .map(column => ({ ...column, value: inPlay(column.here, state) }))
+    .map(column => ({ ...column, value: column.won ? inPlay(column.here, state) : column.other ? [...new Set(strays.map(deal => deal.stage))].reduce((sum, id) => sum + (staged.get(id) || 0), 0) : staged.get(column.id) || 0 }))
   const most = Math.max(1, ...columns.filter(column => !column.won).map(column => column.value))
   const drop = (event, column) => {
     const id = event.dataTransfer.getData(DRAG)

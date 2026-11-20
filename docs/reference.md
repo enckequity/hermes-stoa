@@ -464,7 +464,8 @@ tab says which and changes it. Each pipeline keeps its own.
 
 - **Contingent**: a fee for each placement. What is in play counts each search's fee once for
   each opening still to fill, however many candidates are in it: six candidates in a $30k search
-  are $30k in play, not $180k. A search hiring for more than one seat has **Openings** on its
+  are $30k in play, not $180k. On the board, in the funnel and on Today that fee sits in the
+  stage of the search's furthest-along candidate, so the stages add up to what is in play. A search hiring for more than one seat has **Openings** on its
   page; a seat that is filled, and a search marked done or closed, stop counting. The forecast
   works the same way, a search at a time.
 - **Contract**: paid by the hour by one company, on any number of searches, and billed each

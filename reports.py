@@ -360,6 +360,7 @@ class Reports:
             bucket = buckets.setdefault(label.lower(), {"label": label, "order": order, "deals": []})
             bucket["deals"].append(deal)
         rows = []
+        staged = self.desk.stage_sums(deals) if spec["by"] == "stage" else None      # by stage: each search once, where it has got to
         for key, bucket in buckets.items():
             mine = bucket["deals"]
             parts = {k: [] for k in legend}
@@ -367,8 +368,9 @@ class Reports:
                 part = self._part(playbook, deal, spec["split"])
                 if part in parts:
                     parts[part].append(deal)
-            size = (lambda group: self.desk.sum(group)) if spec["count"] == "value" else len
-            row = {"key": key, "label": bucket["label"], "order": bucket["order"], "n": size(mine), "count": len(mine), "value": self.desk.sum(mine),
+            worth = sum(staged.get(stage, 0) for stage in {deal["stage"] for deal in mine}) if staged is not None else self.desk.sum(mine)
+            size = (lambda group: worth if group is mine else self.desk.sum(group)) if spec["count"] == "value" else len
+            row = {"key": key, "label": bucket["label"], "order": bucket["order"], "n": size(mine), "count": len(mine), "value": worth,
                    "parts": [{"k": k, "n": size(parts[k]), "count": len(parts[k])} for k in legend]}
             if full:
                 row["records"] = [self._brief(playbook, deal, self._part(playbook, deal, spec["split"]))
@@ -515,10 +517,10 @@ class Reports:
     def _stages(self, entry: dict, win: dict, compare: bool, full: bool) -> dict:
         playbook = self.desk.playbook()
         live = self.store.list(status="open")
-        rows = []
+        rows, staged = [], self.desk.stage_sums(live)
         for index, stage in enumerate(playbook.stages):
             here = [deal for deal in live if deal["stage"] == stage["id"]]
-            row = {"key": stage["id"], "label": stage["label"], "n": len(here), "count": len(here), "value": self.desk.sum(here), "parts": [], "heat": index}
+            row = {"key": stage["id"], "label": stage["label"], "n": len(here), "count": len(here), "value": staged.get(stage["id"], 0), "parts": [], "heat": index}
             if full:
                 row["records"] = [self._brief(playbook, deal) for deal in sorted(here, key=lambda d: (-d["value"], d["name"]))[:200]]
             rows.append(row)
@@ -610,7 +612,7 @@ class Reports:
         playbook = self.desk.playbook()
         live, touches = self.store.list(status="open"), self.store.touches()
         left = self.stays(win)
-        rows, worst = [], None
+        rows, worst, staged = [], None, self.desk.stage_sums(live)
         for index, stage in enumerate(playbook.stages):
             here = [deal for deal in live if deal["stage"] == stage["id"]]
             waits = [days for days in (st.days_since(deal["stage_at"]) for deal in here) if days is not None]
@@ -619,7 +621,7 @@ class Reports:
             quiet = [deal for deal in here if cards.is_stale(playbook, deal, touches.get(deal["id"], ""))]
             gone = left.get(stage["id"]) or []
             row = {"key": stage["id"], "label": stage["label"], "n": round(average, 1) if average is not None else None, "count": len(here),
-                   "value": self.desk.sum(here), "parts": [], "mark": mark, "quiet": len(quiet), "tone": "bad" if average is not None and average > mark else "",
+                   "value": staged.get(stage["id"], 0), "parts": [], "mark": mark, "quiet": len(quiet), "tone": "bad" if average is not None and average > mark else "",
                    "left": {"count": len(gone), "days": round(sum(gone) / len(gone), 1)} if gone else None}
             if full:
                 row["records"] = [dict(self._brief(playbook, deal), days=int(st.days_since(deal["stage_at"]) or 0))

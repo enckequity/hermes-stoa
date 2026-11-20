@@ -357,6 +357,32 @@ def once(deals: Iterable[dict], seats: Optional[dict] = None) -> float:
     return (rest + sum(sum(sorted(mine, reverse=True)[:max(0, int(seats.get(key, 1)))]) for key, mine in fees.items())) / 100
 
 
+def by_stage(deals: Iterable[dict], seats: Optional[dict] = None, position: Any = None) -> dict:
+    """What some OPEN records have in play, a stage at a time, on a pipeline that counts a group's amount once for each
+    seat still to fill (``once``): a group's amount sits in the stage of its furthest-along record, the next seat's in
+    the stage of the next furthest, and so on, so the stages add up to ``once`` of the same records and a search with
+    people at three stages is not counted three times. The furthest along carries the group's largest amount. An open
+    record in no group counts by itself, where it is. ``position``: how far along a stage id is (larger is further; a
+    stage that is not the playbook's is behind them all). Returns cents by stage id."""
+    how_far = position or (lambda stage: 0)
+    seats, groups, out = seats or {}, {}, {}
+    for deal in deals:
+        if deal.get("status", "open") != "open":
+            continue
+        key = group_key(deal.get("grp"))
+        if key:
+            groups.setdefault(key, []).append(deal)
+        else:
+            out[deal["stage"]] = out.get(deal["stage"], 0) + int(deal.get("value_cents") or 0)
+    for key, mine in groups.items():
+        take = max(0, min(len(mine), int(seats.get(key, 1))))
+        fees = sorted((int(deal.get("value_cents") or 0) for deal in mine), reverse=True)[:take]
+        ahead = sorted(mine, key=lambda deal: how_far(deal["stage"]), reverse=True)[:take]         # stable: among equals, as they came
+        for deal, cents in zip(ahead, fees):
+            out[deal["stage"]] = out.get(deal["stage"], 0) + cents
+    return out
+
+
 def filled(chances: list, openings: int) -> float:
     """How many of a group's openings its open records are expected to fill: each is won or not with its own chance,
     and no more are won than there are openings. With one opening this is the chance that at least one is."""

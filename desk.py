@@ -604,6 +604,23 @@ class Desk:
             return st.once(rows, self.seats())
         return st.total(rows)
 
+    def stage_sums(self, deals: Any) -> dict:
+        """What some records come to, a stage at a time, as an amount by stage id. On a contingent recruiting pipeline
+        an open search counts once, in the stage of its furthest-along candidate (one for each seat still to fill:
+        ``store.by_stage``), so the stages add up to what is in play; on any other pipeline, and for what is no
+        longer open, each stage is the plain sum of what is in it."""
+        rows = list(deals)
+        out: dict = {}
+        contingent = self.billing_kind() == BILL_CONTINGENT
+        for deal in rows:
+            if not contingent or deal["status"] != "open":
+                out[deal["stage"]] = out.get(deal["stage"], 0) + int(deal.get("value_cents") or 0)
+        if contingent:
+            ahead = st.by_stage(rows, self.seats(), self.playbook().position)
+            for stage, cents in ahead.items():
+                out[stage] = out.get(stage, 0) + cents
+        return {stage: cents / 100 for stage, cents in out.items()}
+
     def production(self) -> dict:
         """The money side of every pipeline in one view: a contract's month of hours beside the others' fees. For each:
         this month (a contract's month in progress at the hours agreed; otherwise what was won since the first), what
@@ -958,7 +975,9 @@ class Desk:
                                                     "contract work keeps its own). Speak of %s and where they stand, not of money in play."
                                                     % (playbook.terms["deal"], playbook.terms["deals"])}
         elif kind:
-            out["billing"] = {"type": kind, "note": "Contingent: a fee for each placement. What is in play counts each %s's fee once for each seat still to fill, "
+            out["billing"] = {"type": kind, "note": "Contingent: a fee for each placement. A stage's amount is the fees of the %s whose furthest-along %s is there. "
+                                                    % (playbook.terms["groups"], playbook.terms["deal"])
+                                                    + "What is in play counts each %s's fee once for each seat still to fill, "
                                                     "not once for every %s in it." % (playbook.terms["group"], playbook.terms["deal"])}
         if view == "board":
             out["board"] = cards.board_text(playbook, deals, total=self.sum)
@@ -982,10 +1001,10 @@ class Desk:
         return out
 
     def _by_stage(self, playbook: Playbook, deals: list) -> list:
-        rows = []
+        rows, sums = [], self.stage_sums(d for d in deals if d["status"] == "open")
         for stage in playbook.stages:
             here = [d for d in deals if d["stage"] == stage["id"] and d["status"] == "open"]
-            rows.append({"stage": stage["id"], "label": stage["label"], "count": len(here), "value": self.sum(here)})
+            rows.append({"stage": stage["id"], "label": stage["label"], "count": len(here), "value": sums.get(stage["id"], 0)})
         return rows
 
     def brief(self) -> dict:
@@ -1558,8 +1577,9 @@ class Desk:
                 from_map += 1
             for index in range(far + 1):
                 reached[index] += 1
-        if self.billing_kind() == BILL_CONTINGENT:
-            value = [round(self.sum(mine) * 100) for mine in at]
+        if self.billing_kind() == BILL_CONTINGENT:      # each search once, where its furthest-along candidate is: the stages add up to what is in play
+            sums = self.stage_sums(deal for mine in at for deal in mine)
+            value = [round(sums.get(stage["id"], 0) * 100) for stage in stages]
         return {"stages": [{"id": s["id"], "label": s["label"], "reached": reached[i], "here": here[i], "lost": lost[i],
                             "value": value[i] / 100} for i, s in enumerate(stages)],
                 "won": won, "won_value": won_value / 100, "won_label": playbook.won["label"], "lost": sum(lost),
