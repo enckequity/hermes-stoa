@@ -17,7 +17,7 @@ hermes plugins doctor . --ci
 | `cards.py` | Block Kit cards and their text twins |
 | `slackdesk.py` | Posting cards and answering button clicks |
 | `reports.py` | Reports: what the desk's records add up to, counted here with no model |
-| `database.py` | The Database tab: accounts, deals and people as rows, and the views a person saves |
+| `database.py` | The Data tab: accounts, deals and people as rows, and the views a person saves |
 | `intake.py` | Lists sent in: matching rows to records, the review, and applying what was approved |
 | `market.py` | Market maps: segments, requirements, what the map adds up to, and the step into the pipeline |
 | `page.py` | A market map as one self-contained web page |

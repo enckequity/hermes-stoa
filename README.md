@@ -1,4 +1,4 @@
-![Stoa. The CRM for Hermes.](docs/banner.png)
+![Stoa. The CRM for Hermes.](docs/banner.jpg)
 
 # Stoa
 
@@ -9,9 +9,9 @@ the pipeline kept honest, the follow-ups written, and the calls turned into next
 places the team already works. Tell it what happened, send it a list, or press a button, and it
 keeps the pipeline. Stoa is that, in one plugin:
 
-**Map the market → find the leads → run the pipeline → see what is working.**
+**Map the market → plan the motions → run the pipeline → see what is working.**
 
-![The market map: each ring a segment that would get a different pitch, each mark a company, the best fit in the middle](docs/desktop-market.png)
+![The market map as a dial: a slice for each segment, who to call now in the middle, and who to call first beside it](docs/gtm-dial.jpg)
 
 ```
 hermes plugins install jarrett-del/hermes-stoa
@@ -22,147 +22,126 @@ hermes gateway restart
 Then switch it on under **Capabilities → Plugins** in the Hermes Desktop app or Webapp, and open
 **Stoa** in the sidebar. [Set up in five minutes](#set-up-in-five-minutes) has the rest.
 
-**On this page:** [The market map](#the-market-map) · [The pipeline](#the-pipeline) ·
-[Reports](#reports) · [The database](#the-database) · [Hermes proposes, you approve](#hermes-proposes-you-approve) ·
+**On this page:** [The GTM tab](#the-gtm-tab) · [The pipeline](#the-pipeline) ·
+[The dashboard](#the-dashboard) · [Data](#data) · [Hermes proposes, you approve](#hermes-proposes-you-approve) ·
 [The rest of the desk](#the-rest-of-the-desk) · [Set up](#set-up-in-five-minutes) · [Read more](#read-more) ·
 [Disclosure](#disclosure)
 
 Every picture here shows the sample data that comes with the tour. Every person and company in it
 is made up.
 
-## The market map
+## The GTM tab
+
+How you sell, in one place: **Maps** (who to sell to, and why now), **Motions** (the plays under
+way, and what each brought in) and **Assets** (the deck, the case studies, the links). Pin the
+view you want the tab to open on.
+
+### Maps
 
 Say what you sell and who you are after. Hermes names the market, splits it into segments that
 would each get a different pitch, researches the companies, checks every one against your
-requirements with the evidence and its source, and saves the map. Then it is yours to work.
+requirements with the evidence and its source, and saves the map. Above it, the map reads itself
+back in three columns: **where we play**, **how we win** and **what has to be true**. A map keeps
+two notes: the brief, which is printed on the map when you share it, and internal notes (pricing,
+positioning, what to leave out) that are never printed or sent, and that Hermes works from.
 
-### Read it three ways
+![A map's head: its numbers, then where we play, how we win, and what has to be true](docs/gtm-map.jpg)
 
-- **Segments** shows who is where: a ring for each segment, the best fit in the middle.
-- **Priority** puts fit against how fresh the reason to call is, so the top right is who to call
-  first.
-- **Held by** groups companies by what they use today, so you can see who you would be replacing.
+**The dial.** Each slice is a segment, or with **Held by**, what the companies use today. The
+nearer the centre, the sooner to call: **Call now** in the middle, **Line up** round it, **Watch**
+at the rim. A mark's colour is how well the company fits, a solid one is already in your pipeline,
+a ring round one is a reason to call, and a dashed one is new since you last looked. Click a
+company to open it beside the map with its evidence. Under the map, **What matters** weighs each
+requirement and the map re-scores on the spot.
 
-Click a company and it opens beside the map: why it fits, each requirement with its evidence,
-headcount, what it uses today, the buyer, the source. Under the map, **What matters** weighs each
-requirement (off, nice to have, matters, must) and the map re-scores on the spot.
+**Act on what you see.** Shift-click or drag across the dial to pick several. One press adds them
+to the pipeline, names a buyer at each, or has Hermes draft the first note from the evidence.
+Grow the map with **+ Grow** under a segment, **More like these**, or **+ A neighbouring segment**.
 
-![Priority: fit across, how fresh the reason to call is up the page, with one company open beside it and the requirements weighed underneath](docs/desktop-market-priority.png)
+![Three companies picked: add them to the pipeline, draft outreach, find more like them, or dismiss them](docs/gtm-picked.jpg)
 
-### Act on what you see
+**Manage your maps.** The map's name is a menu: switch maps, start a **New map**, rename one,
+**archive** one (out of every list with everything on it kept, to put back later) or delete it.
+**Research:** sets the model Hermes researches maps on, apart from the one the talk box runs on.
+**Map facts** shows how complete the map is, where its evidence came from and what Hermes's work
+on it has cost, with limits you can set.
 
-Shift-click, drag across the map, or tick rows in the table to pick several. One press adds them
-to the pipeline, names a buyer at each, or has Hermes draft the first note from the evidence. A
-company that is already in your pipeline is filled in from the map, not added a second time.
+![Map facts: what is on the map, where it came from, what it has cost, and the limits set on it](docs/map-facts.jpg)
 
-Grow the map the same way: **+ Grow** under a segment, **More like these** on the companies you
-picked, or the faint ring beside the map for a neighbouring segment. Hermes finds more and checks
-each one against the same requirements.
-
-![Three companies picked: add them to the pipeline, draft outreach, find more like them, or dismiss them](docs/desktop-market-picked.png)
-
-### Manage your maps
-
-The map's name is a list. Press it to switch maps, start a **New map** (say what you sell and who
-to, and Hermes goes and maps it), **Rename** this one, or **Delete** it. Only a person at the page
-can delete a map; Hermes has no way to.
-
-![The map's own menu: switch to another map, start a new one, rename this one or delete it](docs/desktop-map-menu.png)
-
-**Pick the model that researches it.** **Research:** sets the model Hermes uses to start a map,
-grow it and fill in what is missing. It runs in a conversation of its own, apart from the model
-the talk box at the foot of the page runs on, so the desk can run on a small model while maps are
-researched on a large one, or the other way round. The list is every model your Hermes can use.
-
-![The research model menu on the market map, with the talk box on a different model](docs/desktop-map-model.png)
-
-**Know what a map holds and what it cost.** **Map facts** shows how complete the map is, where
-its evidence came from, and what Hermes's work on it has cost by Hermes's own estimate, with paid
-lookups and searches beside it. Set limits there: companies, dollars a month, lookups, searches.
-At a limit Stoa refuses the next step and tells Hermes to stop and tell you.
-
-![Map facts: what is on the map, where it came from, what it has cost, and the limits set on it](docs/desktop-map-facts.png)
-
-**Hand it to a client.** **Download a copy to share** saves the whole map as one web page with
-the same working map at its head, without buyers' names or your pipeline. Host it or send it.
+**Hand it to a client.** **Download a copy to share** saves the map as one web page, without
+buyers' names or your pipeline.
 
 ![The copy to share, as a client sees it: the working map, with no buyers' names and nothing about your pipeline](docs/page-market.png)
 
+### Motions
+
+A motion is one play to break into a market: an outbound push, an event, a run of ads, a piece of
+content, a partnership. Aim it at a map or some of its segments, and Stoa credits it with the
+records it brought in or helped along, across every pipeline, and says why for each one: the
+record's Source names it, a note mentions it, or the company is in its audience and came in while
+it ran. A lead and the deal it became count once. Log what it costs and what it reached, and the
+tab shows what came back. Press **Suggest motions** and Hermes reads the map and proposes some as
+ideas.
+
+![Motions: one running with its figures, one planned, and ideas, with totals across them](docs/motions.jpg)
+
+**Assets** keeps the deck, the one-pager, the case studies and the links worth having to hand, as
+files kept with the desk or links to where they live. Hermes reads the list, so a follow-up it
+drafts points at the real booking page.
+
 ## The pipeline
 
-A funnel that says how many records got as far as each stage and what share went on to the next,
-over a board you work by hand or by talking. Drag a card to move it, or press its button: the
-stage changes at once, with no model in the loop, no waiting and no wrong stage. The same click
-can hand the follow-up (the outreach note, the proposal email, the decline) to Hermes to write.
+Every pipeline on the desk is at the head of the tab, with what each holds, beside a picker for
+its searches or accounts. A **lead pipeline** hands a lead over to a **deal pipeline** by itself:
+when a lead reaches the last stage, a deal opens there, with the lead on it as a person and where
+it came from, and a second lead at the same company joins that deal instead of opening another.
 
-![The pipeline for the software example: the funnel with its conversion rates over the board](docs/desktop-saas.png)
+Under it, a funnel that says how many records got as far as each stage and what share went on to
+the next, over a board you work by hand or by talking. Drag a card to move it, or press its
+button: the stage changes at once, with no model in the loop. The same click can hand the
+follow-up (the outreach note, the proposal email, the decline) to Hermes to write.
+
+![The pipeline for the software example: the pipeline at its head, the funnel with its conversion rates, and the board](docs/pipeline.jpg)
 
 **A card says what you need to know.** The contact, the next step in full, when it is due or how
-far overdue, how long the record has sat in its stage, whether it has gone quiet, and who owns it.
-A card that is due has a coloured edge. Rest the pointer on one and a panel opens beside it: the
-people on it, the notes, and the last few things logged.
-
-![Resting on a card: its stage, next step, people and latest note, without opening it](docs/desktop-board.png)
+far overdue, how long it has sat in its stage, whether it has gone quiet, and who owns it. Rest
+the pointer on one and its people, notes and latest activity open beside it.
 
 **A page for each record.** Press a record anywhere and it opens laid out the way a CRM is read:
-the stages as one bar (press a stage to move it there), the next step with **Done**, **Change**,
-**Draft follow-up** and **Snooze**, every fact on the left, notes, people and activity in the
-middle, and what it is connected to on the right.
+the stages as one bar, the next step with **Done**, **Change**, **Draft follow-up** and
+**Snooze**, every fact on the left, notes, people and activity in the middle.
 
-![One record's page: stages across the top, the next step and its moves, details, notes, people and activity](docs/desktop-record.png)
+![One record's page: stages across the top, the next step and its moves, details, notes, people and activity](docs/record.png)
 
 **Today is the list you start with.** What is waiting for your approval, what is overdue and due
 today, invoices gone late, wins nobody has billed, records gone quiet and new ones with nothing
 planned. Each row has one move.
 
-![Today: everything that needs you, in groups that open, most pressing first](docs/desktop-today.png)
+![Today: everything that needs you, in groups that open, most pressing first](docs/today.jpg)
 
-## Reports
+## The dashboard
 
 The desk added up. Stoa counts every figure itself from your records, so a report costs nothing
 to open, reads the same each time, and never depends on a model getting a sum right.
 
-Seven are on the dashboard to begin with: pipeline by stage, win rate, time in stage, where
-records come from, why they were lost, what the market map turned into, and what Hermes proposed
-and what you did with it. Each card carries one sentence on what its figures say. Pick a period
-and set it against the one before.
+Seven are on it to begin with: pipeline by stage, win rate, time in stage, where records come
+from, why they were lost, what the market map turned into, and what Hermes proposed and what you
+did with it. Pick a period and set it against the one before. Open one to see the records behind
+a bar. Make your own with **+ New report**, or ask in plain words (*"win rate by owner this
+quarter"*) and Hermes saves it as a draft for you to keep or discard.
 
-![The Reports dashboard: seven reports counted from the desk's own records, each with one line on what it shows](docs/desktop-reports.png)
+![The dashboard: seven reports counted from the desk's own records, each with one line on what it shows](docs/dashboard.png)
 
-Open a report to see it large. Press a bar and the records behind it are listed, each a press
-away. **How this report is made** says in plain lines what it counts. Make your own from a few
-choices with **+ New report**, or ask in plain words (*"win rate by owner this quarter"*) and
-Hermes saves it as a draft for you to keep or discard. Hermes is used once, to make the report.
-After that Stoa works it out.
+## Data
 
-![One report opened: where deals come from, with the ten records behind one bar](docs/desktop-report-open.png)
+Everything the desk keeps, as tables: **Accounts** (every company with a record, and every company
+on a market map), **Deals** and **People** (each person once, however many records they are on).
+Search, filter, sort, group and choose the columns; **Save as a view** keeps them. Press a cell to
+change it, with **Undo** offered. Tick rows and one bar changes all of them at once. **Copy
+emails** and **Export CSV** take the ticked rows. *On a map, not in the pipeline* lists the
+companies you have mapped and not yet worked.
 
-## The database
-
-The pipeline shows work by stage. The database is everything the desk keeps, as tables to look
-through: **Accounts** (every company with a record, and every company on a market map), **Deals**
-(every record, open, won or lost) and **People** (each person once, however many records they
-are on).
-
-Search, filter, sort, group, and choose the columns. The boxes above the table count the rows by
-stage and narrow to one when pressed. A handful of views come with it (*Open*, *Due this week*,
-*No next step*, *Quiet for two weeks*, *After the win*, *Customers*); **Save as a view** keeps
-the filters, sort and columns in front of you as a view of your own.
-
-![The database: every deal as a row, with views, filters, grouping and a choice of columns](docs/desktop-database.png)
-
-**Change it where it is.** Press a cell (an owner, a deal size, a next step and its date, a
-stage, a person's title or email) and type. Each change is logged on its record with **Undo**
-offered, as if made on the record's own page. Tick rows and one bar makes the same change to all
-of them: set the owner, move the stage, set the next step, close them as lost. **Copy emails**
-and **Export CSV** take the ticked rows, or every row shown.
-
-![Deals grouped by stage with three rows ticked, and the bar that changes all of them at once](docs/desktop-database-bulk.png)
-
-**The map and the pipeline meet here.** *On a map, not in the pipeline* lists the companies you
-have mapped and not yet worked, with their fit and signal. Tick the ones you want and add them.
-
-![Accounts that are on a market map and not yet in the pipeline, three ticked and ready to add](docs/desktop-database-map.png)
+![Data: every deal as a row, with views, filters, grouping and a choice of columns](docs/data.jpg)
 
 ## Hermes proposes, you approve
 
@@ -177,7 +156,7 @@ no, with the evidence beside it in their words.
   there. It starts on **Ask me first**, it is enforced in the plugin and not in a prompt, and
   only you can change it.
 
-![Waiting for your approval: three suggestions from an activity sweep, each with its evidence, and a list to review](docs/desktop-approvals.png)
+![Waiting for your approval: three suggestions from an activity sweep, each with its evidence](docs/approvals.jpg)
 
 ## The rest of the desk
 
@@ -187,8 +166,9 @@ no, with the evidence beside it in their words.
 - **Send it anything.** A PDF of leads, a spreadsheet, a photo of a sign-up sheet. Hermes reads
   it, Stoa shows what it would add and what it would change, and nothing is written until you
   press Apply.
-- **Cash.** Invoices on a record, what is owed and overdue, won work that was never billed, a
-  delivery lane after the win, clients billed by the month, and a forecast weighted by stage.
+- **Production.** Invoices on a record, what is owed and overdue, won work that was never billed,
+  a delivery lane after the win, clients billed by the month, every pipeline side by side, and a
+  forecast weighted by stage.
 - **Talk to it on the page.** A talk box at the foot of the desk takes plain sentences and any
   file, runs on the model you pick for it, and folds away when you are done.
 - **Drawn in the conversation.** Ask *"show me Dana"*, *"what needs me today?"* or *"how's our
@@ -197,26 +177,23 @@ no, with the evidence beside it in their words.
 - **Slack.** Records post as cards whose buttons move the pipeline, and `!gtm` shows the board.
 - **Three shapes, your stages.** A pipeline is for closing deals, filling roles or generating
   leads. You set its stages in your own words, up to seven, and one desk holds up to six
-  pipelines side by side: your own sales beside the work you do for clients.
-- **Searches, accounts and clients.** The group a record is in is a thing of its own: who the
-  client is, its terms, and the people on the client's side.
+  pipelines side by side.
 - **Seven automations.** A morning brief, sweeps of your email, calls and notes, a weekly market
   watch, a Friday review, and a mirror to a Google Sheet. What they find waits for your approval.
 - **Make it yours.** Type your business name under Setup and it is drawn in dots at the head of
   the desk, lit the way the stoa is.
-- **Yours to keep.** One SQLite file on your machine, a daily copy, a CSV export, no telemetry
-  and no Python dependencies.
+- **Yours to keep.** SQLite files on your machine, a daily copy, a CSV export, no telemetry and no
+  Python dependencies.
 
-![What Stoa would pick up from a notes folder: six notes waiting, four already matched to a record](docs/desktop-notes.png)
+![A list dropped on the page: three new, three to update, and nothing written until you press Apply](docs/intake.jpg)
 
-![A list dropped on the page: three new, three to update, and nothing written until you press Apply](docs/desktop-intake.png)
-
-![Cash: what came in, what is owed, what is likely to come in, and where each won deal stands](docs/desktop-cash.png)
+![Production: what came in, what is owed, what is likely to come in, and where each won deal stands](docs/production.png)
 
 It grew out of a setup a recruiting agency runs its searches on every day, and the recruiting
-shape is still first-class: candidates in searches, for clients, with fees and placements.
+shape is still first-class: candidates in searches, for clients, with fees or hourly contracts,
+openings and placements, and maps whose dots are the candidates themselves.
 
-![The recruiting example: 24 open candidates across eight searches](docs/desktop-pipeline.png)
+![The recruiting example: candidates across searches, with the search picker at the head](docs/pipeline-recruiting.jpg)
 
 ## Set up in five minutes
 
@@ -244,7 +221,7 @@ Stoa needs Hermes Agent 0.23.0 or later.
    the way to do it one press away: keys for company search and enrichment, your call notes,
    Slack, and the scheduled jobs that keep the desk current.
 
-![The first screen: say what the pipeline is for, or look around a worked example first](docs/desktop-welcome.png)
+![The first screen: say what the pipeline is for, or look around a worked example first](docs/welcome.jpg)
 
 **[Setting up Stoa](docs/setup.md)** walks through every step with pictures.
 
@@ -261,9 +238,9 @@ In Slack the command is `!gtm` (Slack keeps the slash for its own commands), and
 - **[Setting up Stoa](docs/setup.md)**: one pass from install to keys, call notes, Slack and
   scheduled jobs.
 - **[Using Stoa](docs/guide.md)**: a day on the desk, tab by tab, with two worked examples.
-- **[What is in the plugin](docs/reference.md)**: the tools, market maps, intake, the pipeline,
-  approvals and undo, reports, the database, cash, people, searches and accounts, playbooks, and
-  every setting.
+- **[What is in the plugin](docs/reference.md)**: the tools, market maps, motions, intake, the
+  pipeline, approvals and undo, the dashboard, data, production, people, searches and accounts,
+  playbooks, and every setting.
 - **[The web dashboard tab](docs/dashboard.md)**.
 - **[Limits](docs/limits.md)**: what it does not do yet.
 - **[Development](docs/development.md)**: tests, and how it is put together.
@@ -273,7 +250,7 @@ In Slack the command is `!gtm` (Slack keeps the slash for its own commands), and
 What the plugin does that you would want to know before installing it.
 
 In short: it calls four outside services, each only once you add that service's key. It keeps your
-records unencrypted in one SQLite file in Hermes's own plugin-data folder. It sends no telemetry.
+records unencrypted in SQLite files in Hermes's own plugin-data folder. It sends no telemetry.
 It runs no shell commands and no background processes. The detail follows.
 
 - **Network calls.** Only when you add the matching key, and only to four hosts:
@@ -354,7 +331,7 @@ It runs no shell commands and no background processes. The detail follows.
   the page in the Desktop app and Webapp, which is what reads and changes the pipeline. They call no
   model and no outside service, except **Test** beside a key (above) and the paid lookups described
   above.
-- **Reports.** Every figure on the Reports tab is counted by the plugin from its own database: no
+- **The dashboard.** Every figure on the Dashboard tab is counted by the plugin from its own database: no
   model is called to make one and nothing is sent anywhere. The reports you make, and which are on
   the dashboard, are kept per pipeline in that pipeline's file. Three presses on the tab send words
   to Hermes, in the talk box where you can read them: **Ask for a report** and **Change it in
@@ -364,12 +341,21 @@ It runs no shell commands and no background processes. The detail follows.
   cannot add or remove one. A report saved as a page is one file with no script that asks nothing
   of the network; it carries figures and the names of sources, owners, stages and groups, and names
   no record. A row saved as a spreadsheet does list its records.
-- **The database.** The tables on the Database tab are worked out by the plugin from its own
+- **Data.** The tables on the Data tab are worked out by the plugin from its own
   database each time the tab is opened: no model is called and nothing is sent anywhere. The views
   you save are kept in that pipeline's file, up to 40. A change made in a cell or to ticked rows
   goes through the same routes as the record's own page, so it is logged on the record and can be
   taken back. **Copy emails** puts the addresses of the rows shown on your clipboard, and **Export
   CSV** hands the rows shown to your browser as a download; neither goes anywhere else.
+- **The GTM tab.** Motions are kept in `motions.db`, the assets and links and each map's internal
+  notes in `hub.json`, files you add as assets in `assets/` (up to 250 MB each), and lead-to-deal
+  hand-overs in `handoffs.db`, all in the plugin's own data folder. They belong to the desk as a
+  whole, so they are shown during a tour too. A motion's figures are counted by the plugin from
+  your records; nothing is sent anywhere to work them out. The agent can read the motions, the
+  links, the list of assets and the maps' notes (`gtm_context`, `gtm_motion`), so the internal
+  notes go to the model you use whenever it reads them; it is told not to quote them, and they are
+  never printed on a map, exported or posted. It never reads or sends an asset's file: a file
+  travels only between your browser and the plugin, in pieces, when you add it or save a copy.
 - **The Setup tab.** It shows, to anyone signed in to your Hermes, which chats and Slack members
   the desk is limited to, the folders it reads and writes, where its database file is, and whether
   each key is set. It never shows a key or a token.

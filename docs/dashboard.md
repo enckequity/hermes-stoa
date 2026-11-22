@@ -6,7 +6,7 @@ worked in the Hermes Desktop app or Webapp (Stoa in the sidebar), in Slack, and 
 `/gtm`. If the dashboard was already running when you installed Stoa, restart it once and the tab
 appears.
 
-![The Stoa tab in the dashboard: what the desk holds, this month's paid work, and the set-up steps](dashboard-setup.png)
+![The Stoa tab in the dashboard: what the desk holds, this month's paid work, and the set-up steps](dashboard-setup.jpg)
 
 From the top of the page down:
 

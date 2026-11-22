@@ -51,7 +51,7 @@ restarted: go back to step 1.
 
 The first screen asks what kind of work your pipeline is for.
 
-![The first screen: three kinds of pipeline, or a look around a worked example first](desktop-welcome.png)
+![The first screen: three kinds of pipeline, or a look around a worked example first](welcome.jpg)
 
 - **Close deals**, **Fill roles** or **Generate leads.** Pick the one that fits. It decides what
   a record is called (a deal, a candidate, a lead) and how work is billed.
@@ -61,8 +61,6 @@ The first screen asks what kind of work your pipeline is for.
 
 Then name the pipeline and set its stages in your own words: rename them, reorder them, add or
 take away, from two to seven. Not sure? Describe your business and Hermes sets the stages for you.
-
-![Name the pipeline and set its stages: rename, reorder, add or remove, and say what a win and a loss are called](desktop-stages.png)
 
 You can change the stages later under **Setup → Edit stages**, and add a second pipeline there.
 
@@ -76,7 +74,7 @@ Any of these works:
   what it would change, and nothing is written until you press **Apply**.
 - **Add one by hand.** **+ New** at the top of the page.
 - **Map a market.** *"We sell a fraud prevention tool to fintechs and marketplaces. Who should
-  we go after?"* Hermes researches it and the map appears on the **Market map** tab, where one
+  we go after?"* Hermes researches it and the map appears on the **GTM** tab, where one
   press puts a company in your pipeline.
 
 That is a working desk. Everything below makes it do more.
@@ -86,7 +84,7 @@ That is a working desk. Everything below makes it do more.
 Steps 5 to 8 are on **Stoa → Setup**, under **Make it do more**. Each is one line that says where
 it stands. Press it and it opens onto the way to do it.
 
-![The Setup tab: the two steps a desk needs, the four optional ones, and your desk's own settings](desktop-setup.png)
+![The Setup tab: the two steps a desk needs, the four optional ones, and your desk's own settings](setup.jpg)
 
 ### 5. Find companies and fill in people
 
@@ -96,8 +94,6 @@ Stoa works without any key. Two outside services each add something:
 |---|---|---|
 | **Exa** | A market map searches for companies directly, from a plain description of who you are after | Exa bills each search |
 | **People Data Labs** | **Enrich** fills in a person's title, company and LinkedIn, and a map can name the buyers at a company | Bills each match. Stoa stops at a monthly cap you set (50 to begin with) |
-
-![The keys step: what each key adds, what it costs, and where to get one](desktop-setup-keys.png)
 
 To add one:
 
@@ -119,8 +115,6 @@ Each note is filed on the record it is about, with the next step it implies. Sto
 recorder wrote (the summary, the transcript). It does not record or transcribe anything itself.
 
 Open the step and pick where your notes live. It shows the way in for that tool.
-
-![Pick where your notes live, and the step shows the way in for that tool](desktop-notes-where.png)
 
 | Your notes are in | How they reach the desk |
 |---|---|
@@ -144,8 +138,6 @@ Open the step and pick where your notes live. It shows the way in for that tool.
 notes waiting and the record each one looks to be about. **Have Hermes file them now** hands them
 to Hermes there and then. To have it happen without asking, switch on *File meeting notes* in
 step 8.
-
-![What Stoa would pick up: the notes waiting, and the record each looks to be about](desktop-notes.png)
 
 Worth knowing:
 
@@ -186,7 +178,7 @@ Seven jobs Hermes can run on a schedule: a morning brief, filing meeting notes, 
 call and Slack activity, a weekly market watch, a mirror to a Google Sheet, bringing Sheet edits
 back, and a Friday review.
 
-![The scheduled jobs, and what a scheduled job may change without asking](desktop-autonomy.png)
+![The scheduled jobs, and what a scheduled job may change without asking](autonomy.jpg)
 
 Press **Switch on…** beside one. A chat opens with the command typed. Press Enter, and Hermes
 asks when it should run and where to report. Back on Setup, the job shows as on, with when it
@@ -206,7 +198,7 @@ Both lists are Hermes's own: every model your Hermes can use.
 
 - **The talk box**, at the foot of every tab. The model's name sits under the box. Press it to
   change it.
-- **Map research**, on the Market map tab. **Research:** beside **Map facts** sets the model
+- **Map research**, on the GTM tab. **Research:** beside **Map facts** sets the model
   Hermes uses to start a map, grow it and fill in what is missing.
 
 They are independent, so the desk can run on a small model while maps are researched on a large
@@ -217,7 +209,7 @@ one, or the other way round. Slack, scheduled jobs and other chats stay on Herme
 - **Stoa → Setup** shows where things stand, and under **Your desk** the name on the page, your
   pipelines, the rules in force and your data with a CSV export.
 - **Settings → Plugins → Stoa** is where every setting and key is changed.
-- **Market map → Map facts** shows what a map holds and what it has cost, and is where you set
+- **GTM → Map facts** shows what a map holds and what it has cost, and is where you set
   limits on it: companies, dollars of Hermes's work a month, lookups and searches.
 - **[Using Stoa](guide.md)** goes through a day on the desk, tab by tab.
 
