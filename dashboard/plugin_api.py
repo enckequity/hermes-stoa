@@ -1127,6 +1127,153 @@ def maps_destroy(body: dict = Body(...)) -> dict:
     return result
 
 
+# -- the desk as a whole: the GTM tab (motions, assets, a map's notes) and every pipeline at once ---------------
+# None of these is about the pipeline the page is showing: motions and assets belong to the whole desk, and the
+# overview reads every pipeline. Each answers a refusal as a 400 with its words.
+def _whole(work):
+    d = desk()
+    with d.on(""):
+        try:
+            out = work(d)
+        except Exception as exc:
+            if type(exc).__name__ == "Refused":
+                raise HTTPException(400, str(exc))
+            raise
+    return d, out
+
+
+def _changed(work):
+    d, out = _whole(work)
+    d.announce()
+    return out
+
+
+@router.get("/motions")
+def motions_list() -> dict:
+    return _whole(lambda d: d.motions.listing())[1]
+
+
+@router.post("/motions")
+def motion_add(body: dict = Body(...)) -> dict:
+    return _changed(lambda d: d.motions.view(d.motions.add(body or {}), detail=True))
+
+
+@router.get("/motions/{motion_id}")
+def motion_get(motion_id: str) -> dict:
+    return _whole(lambda d: d.motions.view(d.motions.find(motion_id), detail=True))[1]
+
+
+@router.post("/motions/{motion_id}")
+def motion_update(motion_id: str, body: dict = Body(...)) -> dict:
+    return _changed(lambda d: d.motions.view(d.motions.update(motion_id, body or {}), detail=True))
+
+
+@router.post("/motions/{motion_id}/remove")
+def motion_remove(motion_id: str) -> dict:
+    return _changed(lambda d: {"ok": True, "removed": d.motions.remove(motion_id)["name"]})
+
+
+@router.post("/motions/{motion_id}/results")
+def motion_results(motion_id: str, body: dict = Body(...)) -> dict:
+    def work(d):
+        if body.get("remove"):
+            return d.motions.view(d.motions.unlog(motion_id, body["remove"]), detail=True)
+        return d.motions.view(d.motions.log(motion_id, body.get("metric"), body.get("value"), body.get("on"), body.get("note")), detail=True)
+    return _changed(work)
+
+
+@router.post("/motions/{motion_id}/records")
+def motion_records(motion_id: str, body: dict = Body(...)) -> dict:
+    def work(d):
+        if body.get("remove"):
+            return d.motions.view(d.motions.unlink(motion_id, body.get("deal"), body.get("pipeline")), detail=True)
+        return d.motions.view(d.motions.link(motion_id, body.get("deal"), body.get("how"), body.get("pipeline"))[0], detail=True)
+    return _changed(work)
+
+
+def _paid(d, seen: dict) -> dict:
+    """Each recruiting pipeline on the overview with how it is paid for, and what it has in play counted that way."""
+    for card in seen.get("pipelines") or []:
+        if card.get("shape") != "roles" or seen.get("tour"):
+            continue
+        with d.on(card["id"]):
+            card["billing"] = d.billing()
+            card["value"] = d.sum(d.store.list(status="open"))
+    return seen
+
+
+@router.get("/pipelines/overview")
+def pipelines_overview() -> dict:
+    return _whole(lambda d: _paid(d, d.handoffs.overview()))[1]
+
+
+@router.post("/pipelines/handover")
+def pipelines_handover(body: dict = Body(...)) -> dict:
+    return _changed(lambda d: _paid(d, d.handoffs.set_target(body.get("pipeline"), body.get("to"))))
+
+
+@router.post("/pipelines/hand")
+def pipelines_hand(body: dict = Body(...)) -> dict:
+    def work(d):
+        lead = d.handoffs._find(body.get("pipeline"))
+        return d.handoffs.hand_over(lead["id"], str(body.get("deal") or ""), str(body.get("to") or ""), actor="dashboard")
+    return _changed(work)
+
+
+@router.post("/maps/brief")
+def maps_brief(body: dict = Body(...)) -> dict:
+    return _changed(lambda d: d.gtm.set_brief(body.get("map"), body.get("text")))
+
+
+@router.get("/maps/notes")
+def maps_notes() -> dict:
+    return _whole(lambda d: d.gtm.notes())[1]
+
+
+@router.post("/maps/notes")
+def maps_notes_set(body: dict = Body(...)) -> dict:
+    return _changed(lambda d: (d.gtm.set_notes(body.get("map"), body.get("text")), d.gtm.notes())[1])
+
+
+@router.get("/hub")
+def hub_view() -> dict:
+    return _whole(lambda d: d.assets.view())[1]
+
+
+@router.post("/hub/links")
+def hub_link(body: dict = Body(...)) -> dict:
+    return _changed(lambda d: d.assets.add_link(body.get("label"), body.get("url")))
+
+
+@router.post("/hub/assets")
+def hub_asset(body: dict = Body(...)) -> dict:
+    return _changed(lambda d: d.assets.add_asset_link(body.get("label"), body.get("url"), body.get("kind")))
+
+
+@router.post("/hub/files")
+def hub_file(body: dict = Body(...)) -> dict:
+    """A file kept with the desk, sent by the page in pieces (each base64, in order; ``upload`` names the file being
+    sent, ``last`` closes it). The plugin's requests carry JSON, so a deck travels this way."""
+    return _changed(lambda d: d.assets.receive(body.get("upload"), body.get("name"), body.get("data"), int(body.get("part") or 0),
+                                               bool(body.get("last")), body.get("label") or "", body.get("kind") or ""))
+
+
+@router.post("/hub/items/{item_id}")
+def hub_change(item_id: str, body: dict = Body(...)) -> dict:
+    return _changed(lambda d: d.assets.change(item_id, body.get("label"), body.get("kind")))
+
+
+@router.post("/hub/items/{item_id}/remove")
+def hub_remove(item_id: str) -> dict:
+    return _changed(lambda d: d.assets.remove(item_id))
+
+
+@router.get("/hub/assets/{asset_id}/file")
+def hub_file_get(asset_id: str, part: int = 0) -> dict:
+    """A kept file, a piece at a time (base64), for the page to save: ``{name, size, part, parts, data}``."""
+    return _whole(lambda d: d.assets.piece(asset_id, part))[1]
+
+
 @router.post("/targets")
 def targets(body: dict = Body(...)) -> dict:
     """One thing done to the companies picked on the map: add them to the pipeline, dismiss them, put dismissed ones

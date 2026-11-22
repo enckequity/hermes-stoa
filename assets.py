@@ -187,6 +187,50 @@ class Assets:
                                                                     "pricing" if re.search(r"pric", original, re.I) else "other")
         return self._asset({"label": title, "kind": guessed, "file": stored, "name": original})
 
+    # The page's requests carry JSON, so a file comes in pieces: each base64, in order, under an id the page made up.
+    # The pieces gather in a scratch file; the last one hands it to ``add_asset_file``. Saving a copy goes the other way.
+    PIECE = 2 * 1024 * 1024
+
+    def receive(self, upload: Any, name: Any, data: Any, part: int, last: bool, label: Any = "", kind: Any = "") -> dict:
+        import base64
+        key = str(upload or "")
+        if not re.fullmatch(r"[a-f0-9]{8,32}", key):
+            raise Refused("That upload has no proper id.")
+        try:
+            chunk = base64.b64decode(str(data or ""), validate=True)
+        except ValueError:
+            raise Refused("A piece of the file did not arrive whole. Try again.")
+        self.folder.mkdir(parents=True, exist_ok=True)
+        scratch = self.folder / (".upload-%s.part" % key)
+        if part == 0:
+            scratch.unlink(missing_ok=True)
+        elif not scratch.exists():
+            raise Refused("The start of that file did not arrive. Try again.")
+        if scratch.exists() and scratch.stat().st_size + len(chunk) > ASSET_BYTES or len(chunk) > ASSET_BYTES:
+            scratch.unlink(missing_ok=True)
+            raise Refused("That file is larger than 250 MB. Keep it where it is and add a link to it instead.")
+        with open(scratch, "ab") as out:
+            out.write(chunk)
+        if not last:
+            return {"ok": True, "part": part}
+        try:
+            with open(scratch, "rb") as stream:
+                return self.add_asset_file(name, stream, label, kind)
+        finally:
+            scratch.unlink(missing_ok=True)
+
+    def piece(self, asset_id: str, part: int = 0) -> dict:
+        import base64
+        path, name = self.path_of(asset_id)
+        size = path.stat().st_size
+        parts = max(1, -(-size // self.PIECE))
+        if not 0 <= int(part) < parts:
+            raise Refused("There is no such piece of that file.")
+        with open(path, "rb") as stream:
+            stream.seek(int(part) * self.PIECE)
+            data = stream.read(self.PIECE)
+        return {"name": name, "size": size, "part": int(part), "parts": parts, "data": base64.b64encode(data).decode("ascii")}
+
     def change(self, item_id: str, label: Any = None, kind: Any = None) -> dict:
         with self._lock:
             for key in ("links", "assets"):

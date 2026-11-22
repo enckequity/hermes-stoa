@@ -836,6 +836,1413 @@ function ProductionHead({ state, openClient, showPipe }) {
   return [across, contract]
 }
 
+// ==================================================================================================================
+// The desk as a whole: the GTM tab (Maps, Motions, Assets), the map drawn as a dial, and every pipeline at once at the
+// head of the Pipeline tab. These came from the Stoa Mac app, where they were first built, and are the plugin's own
+// now: the backend is motions.py, assets.py, gtm.py and handoff.py, and the routes are the dashboard's. Each part is
+// kept in a scope of its own (DIAL, GTM) so its small helpers never meet the page's.
+// ==================================================================================================================
+
+// The words a market map is spoken in, and what a dot on it is.
+//
+// A map kept with a sales pipeline is about companies to sell to: where we play, how we win, who to call first.
+//
+// A map kept with a recruiting pipeline (the "roles" shape) is a map for one role, and each dot on it is a
+// CANDIDATE: a person, with their own fit for the role, their own checks against what it needs, and their own
+// reason to be open to a move. The map's rows are the plugin's, which calls every row a company; on a candidate map
+// the row's name is the person's, its `size` is their title, and its `uses` is where they work now (the desk and the
+// agent's instructions put them there). So the "Held by" view is by employer, for nothing.
+//
+// A recruiting map made before that (companies, with people named under them) is still read as what it is: a talent
+// map of companies. Which a map is, is WRITTEN ON THE MAP (market.py) and reaches the page with the map's
+// numbers, as `numbers.rows`: "people" or "companies". It is never worked out from what is on the map, so a
+// headcount on one row changes nothing. A person changes it from the map's menu.
+//
+// Everything that says any of this is here, so the three never drift: the answers above the map, the dial, its key,
+// the numbers, the panel for one dot, and what Stoa is asked to go and find.
+//
+//   mapWords(shape, market)    the words for that map on a pipeline of that shape
+const GTM_COMPANIES = { people: false, thing: 'company', things: 'companies', thingCap: 'Company', find: 'Find a company', next: '+ A neighbouring segment', tab: 'Where we play, how we win, and what has to be true.' }
+const GTM_ROW = 'Every row on this map is one candidate: `company` = their full name, `size` = their current title, `uses` = the company they work at now by name alone, `location`, `segment` = their pool, `fit` 1 to 5 for the role, `why` = the evidence, `requirements` checked for that person, `signal` and `signal_date` = why they would move now, and `source` = the public page you found them on. No `people`, `domain` or headcount. Only people a source shows.'
+
+const GTM_SALES = {
+  ...GTM_COMPANIES, recruiting: false,
+  play: 'Where we play', win: 'How we win', needs: 'What has to be true',
+  needsLead: 'For a company to be worth the call. Each is checked against the map, with the evidence.',
+  noNeeds: 'This map has no requirements yet. Add one under “What matters” below, in your own words, and Hermes checks every company against it.',
+  noWin: 'Nothing is written yet about how to win this market. Hermes can read the map and say what it means.',
+  readAsk: name => 'Read my market map “' + name + '” with gtm_market. Then save a reading of it and up to four implications: what the map says about how to win this market. '
+    + 'Both are printed on the map when I share it, so write them as observations about the market that a client could read, with nothing internal. Tell me them in a line each.',
+  readShort: name => 'Read my ' + name + ' map in Stoa and save what it means for how we win.',
+  uses: 'Who you would be replacing', usesTitle: (count, of) => count + ' of ' + of + ' use it today. Press to light them up on the map.',
+  now: count => count + ' to call now',
+  bands: ['Call now', 'Line up', 'Watch'],
+  first: 'Who to call first', reason: 'a reason to call', reasons: 'reasons to call', reasonCap: 'With a reason to call',
+  nobody: 'Nobody to call yet', nobodyWhy: 'A company moves in here when it fits and something has happened there: funding, a hire, a launch.',
+  inPipe: 'In the pipeline', solid: 'Solid is in the pipeline', ring: 'A ring is a reason to call',
+  briefEmpty: '+  Say what you sell and who to', briefPlace: 'What you sell and who to, in a sentence or two.',
+  briefHint: 'This is the map’s brief. It is printed under the map’s name when you download, export or post the map, so write it for a client to read.',
+  briefNeeded: 'The external note cannot be left empty once it is written. Change the words instead.',
+  notesEmpty: '+  Add notes for Hermes: positioning, pricing, what to leave out', notesPlace: 'How you really win here, pricing, what to say and what to leave out.',
+  foot: 'Printed on the map when you download, export or post it: the brief, the points under “How we win”, and the requirements. Motions and your pipeline are not.',
+  motions: true,
+  lens: { seg: 'Segments', held: 'Held by' },
+  how: { seg: 'Each slice is a segment that would get a different pitch. Nearer the centre is who to call first.',
+    held: 'Sliced by what each company uses today: who you would be replacing. Nearer the centre is who to call first.' },
+  reasonsAsk: (here, names) => 'On' + here + ', look for a reason to call at each of these companies: ' + names + '. '
+    + 'A reason is something that has happened there lately that makes now a good time: new funding, a hire or a new executive for the problem we solve, a launch, a public incident. '
+    + 'Save each one you find on the map as that company\'s signal, with the date it happened and its source. Leave out what no source says, and tell me who you found nothing for.',
+  reasonsTitle: count => 'Hermes checks the ' + count + ' best fit for something that makes now a good time to call'
+}
+
+// A recruiting map of companies: where the people who could fill the role work.
+const GTM_RECRUITING = {
+  ...GTM_COMPANIES, recruiting: true, next: '+ A neighbouring pool', tab: 'Where to look, how to pitch the role, and what the role needs.',
+  suggestAsk: here => 'Suggest two neighbouring pools of talent for' + here + ': who is in them, and why they would be worth mapping for this role. Do not add anything yet; I will say which.',
+  play: 'Where to look', win: 'How to pitch the role', needs: 'What the role needs',
+  needsLead: 'What makes someone a fit. Each is checked against the companies on the map, with the evidence.',
+  noNeeds: 'This map has no requirements yet. Add what the role needs under “What matters” below, in your own words, and Hermes checks every company against it.',
+  noWin: 'Nothing is written yet about how to pitch this role. Hermes can read the map and say where the talent is and what would move it.',
+  readAsk: name => 'Read my talent map “' + name + '” with gtm_market. It is a map for a role I am recruiting for: the companies are where people who could fill it work today. '
+    + 'Then save a reading of it and up to four implications: where the strongest people are, what the role offers that their current seat does not, and how to pitch it to each pool. '
+    + 'Both are printed on the map when I share it with the hiring manager, so write them as observations a client could read, with nothing internal. Tell me them in a line each.',
+  readShort: name => 'Read my ' + name + ' talent map in Stoa and save what it means for how we pitch the role.',
+  uses: 'What they work with', usesTitle: (count, of) => count + ' of ' + of + ' work with it today. Press to light them up on the map.',
+  now: count => count + ' to approach now',
+  bands: ['Approach now', 'Line up', 'Watch'],
+  first: 'Who to approach first', reason: 'a reason to move', reasons: 'reasons to move', reasonCap: 'With a reason to move',
+  nobody: 'Nobody to approach yet', nobodyWhy: 'A company moves in here when its people fit the role and something has happened there: a layoff, a reorganisation, a leader leaving, an acquisition.',
+  inPipe: 'Already candidates', solid: 'Solid already has a candidate', ring: 'A ring is a reason to move',
+  briefEmpty: '+  Describe the role and who fits it', briefPlace: 'The role, its level, where it is based, what it pays, and what someone needs to have done to be a fit.',
+  briefHint: 'This is the map’s brief: the role, and who fits it. It is printed under the map’s name when you download, export or post the map, so write it for the hiring manager to read.',
+  briefNeeded: 'The role cannot be left empty once it is written. Change the words instead.',
+  notesEmpty: '+  Add notes for Hermes: the real pay range, who to leave alone, what the client will not say out loud', notesPlace: 'The real range, companies that are off limits, what the hiring manager really wants, what to say and what to leave out.',
+  foot: 'Printed on the map when you download, export or post it: the role’s brief, the points under “How to pitch the role”, and what the role needs. Your notes and your candidates are not.',
+  motions: false,
+  lens: { seg: 'Pools', held: 'Works with' },
+  how: { seg: 'Each slice is a pool of talent that would get a different pitch. Nearer the centre is who to approach first.',
+    held: 'Sliced by what each company’s people work with today. Nearer the centre is who to approach first.' },
+  reasonsAsk: (here, names) => 'On' + here + ', look for a reason people would be open to a move at each of these companies: ' + names + '. '
+    + 'A reason is something that has happened there lately that loosens people: a layoff or a hiring freeze, a reorganisation, a founder or a well-liked leader leaving, an acquisition, a down round, '
+    + 'an order back to the office, a product cancelled. Save each one you find on the map as that company\'s signal, with the date it happened and its source. '
+    + 'Leave out what no source says, and tell me who you found nothing for.',
+  reasonsTitle: count => 'Hermes checks the ' + count + ' best fit for something that would make people there open to a move'
+}
+
+// A candidate map: each dot is a person.
+const GTM_CANDIDATES = {
+  ...GTM_RECRUITING, people: true, thing: 'candidate', things: 'candidates', thingCap: 'Candidate', find: 'Find a candidate',
+  needsLead: 'What makes someone a fit. Each candidate is checked against it, with the evidence.',
+  noNeeds: 'This map has no requirements yet. Add what the role needs under “What matters” below, in your own words, and Hermes checks every candidate against it.',
+  noWin: 'Nothing is written yet about how to pitch this role. Hermes can read the map and say who is strongest and what would move them.',
+  readAsk: name => 'Read my candidate map “' + name + '” with gtm_market. It is a map for a role I am recruiting for, and each row on it is a candidate. '
+    + 'Then save a reading of it and up to four implications: where the strongest candidates are and what they have in common, what the role offers that their current seat does not, and how to pitch it to each pool. '
+    + 'Both are printed on the map when I share it with the hiring manager, so write them as observations a client could read, with nothing internal. Tell me them in a line each.',
+  readShort: name => 'Read my ' + name + ' candidate map in Stoa and save what it means for how we pitch the role.',
+  uses: 'Where they work now', usesTitle: (count, of) => count + ' of ' + of + ' work there today. Press to light them up on the map.',
+  nobodyWhy: 'A candidate moves in here when they fit the role and something makes now a good time: a layoff where they work, a leader they followed leaving, a long stretch in one seat.',
+  inPipe: 'In your pipeline', solid: 'Solid is already in your pipeline',
+  foot: 'Printed on the map when you download, export or post it: the role’s brief, the points under “How to pitch the role”, and what the role needs. Your notes are not.',
+  lens: { seg: 'Pools', held: 'Employer' },
+  how: { seg: 'Each dot is a candidate, and each slice a pool that would get a different pitch. Nearer the centre is who to approach first.',
+    held: 'Each dot is a candidate, sliced by where they work now. Nearer the centre is who to approach first.' },
+  reasonsAsk: (here, names) => 'On' + here + ', look for a reason each of these people would be open to a move now: ' + names + '. '
+    + 'A reason is something that loosens a person: a layoff, a freeze or a reorganisation where they work, a leader they followed leaving, an acquisition, an order back to the office, '
+    + 'a long stretch in one seat, or something they have said in public. Save each one you find on the map as that person\'s signal, with the date it happened and its source. '
+    + 'Leave out what no source says, and tell me who you found nothing for.',
+  reasonsTitle: count => 'Hermes checks the ' + count + ' best fit for something that would make them open to a move now',
+  // What the buttons on a candidate ask for. The page's own requests speak of companies and their buyers.
+  draftAsk: (here, names) => (names.length === 1
+    ? 'Draft a first approach to ' + names[0] + ', a candidate on' + here + ', about the role. Lead with why they in particular fit it, from the evidence on the map, and with their reason to move if the map has one. Show me the draft. Do not send anything.'
+    : 'Draft a first approach about the role to each of these candidates on' + here + ', each leading with why that person fits and their own reason to move: ' + names.join(', ') + '. Show me the drafts. Do not send anything.'),
+  moreAsk: (here, room, names) => 'Find up to ' + room + ' more ' + (room === 'one' ? 'candidate' : 'candidates') + ' like ' + names + ' for' + here + '. ' + GTM_ROW
+    + ' Keep to what the role needs and check each person against it with the evidence. Add them to the map, then tell me who you added and why.',
+  growAsk: (here, room, pool) => 'Find up to ' + room + ' more ' + (room === 'one' ? 'candidate' : 'candidates') + ' for the “' + pool + '” pool of' + here + '. ' + GTM_ROW
+    + ' Keep to what the role needs and check each person against it with the evidence. Add them to the map, then tell me who you added and why.',
+  requireAsk: (here, text) => 'Add this to what the role needs on' + here + ' and check every candidate on it against it, with the evidence: ' + text
+}
+
+
+
+const gtmWords = (shape, market) => (shape !== 'roles' ? GTM_SALES : rowsOf(market) === 'people' ? GTM_CANDIDATES : GTM_RECRUITING)
+
+
+
+const sampleName = example => ({ saas: 'B2B Sales Data', recruiting: 'Recruiting Data' }[example.id] || (example.title ? example.title.charAt(0).toUpperCase() + example.title.slice(1) : 'Sample data'))
+
+const DIAL = (() => {
+// The market map as a dial.
+//
+// One round face. Each slice is a group of companies: a segment that would get a different pitch, or what the
+// companies use today. How near a company sits to the centre is how soon to call it: the inner disc is "call now",
+// the ring round it "line up", the rim "watch". A mark's colour is how well the company fits, a solid mark is
+// already in the pipeline, and a ring round one is a reason to call.
+//
+// The Stoa page works out everything about the companies (fit, timing, rank, what is picked, what a filter hides)
+// and hands the drawing to `MapPicture` here, with exactly what it hands its own picture. So a pick, a lasso, a
+// filter and "Size by" all behave as they always did; only where the marks sit, and how they look, is new.
+
+/** The ways to slice the dial. The page's third view, Priority, is the dial itself, so it is not offered. */
+const MapLenses = [
+  ['seg', 'Segments', 'Each slice is a group that would get a different pitch. Nearer the centre is who to reach first.'],
+  ['held', 'Held by', 'Sliced by what each company uses or works with today. Nearer the centre is who to reach first.']]
+
+const CALL = 75, LINE = 50                      // a company's rank, out of about 100, at which it moves a band inward
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
+const heatOf = score => 1 + Math.min(6, Math.floor(score / 100 * 7))
+/** Fit in three words, which is as finely as a colour should be asked to say it. */
+const toneOf = score => { const k = heatOf(score); return k >= 6 ? 'good' : k >= 4 ? 'okay' : 'weak' }
+const bandOf = rank => (rank >= CALL ? 1 : rank >= LINE ? 2 : 3)
+const shortName = name => (String(name).length > 22 ? String(name).slice(0, 21).trimEnd() + '…' : String(name))
+const agoWords = days => (days === null || days === undefined ? '' : days === 0 ? 'today' : days === 1 ? 'yesterday' : days < 60 ? days + ' days ago' : Math.round(days / 30) + ' months ago')
+const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many)
+
+/** Where every mark sits at one width. The same companies and width always give the same picture. */
+function dialLayout(list, lens, W, segments, sizeBy, naming) {
+  const narrow = W < 620
+  const radius = c => (sizeBy === 'same' ? 12 : sizeBy === 'named' ? Math.min(26, 9 + (c.people || []).length * 3.4) : c.headcount ? clamp(6.5 + Math.sqrt(c.headcount) * 0.62, 8.5, 27) : 11)
+  const crowd = list.length > 70 ? 0.78 : list.length > 44 ? 0.88 : 1
+  const k = (narrow ? 0.6 * 0.74 : 0.72) * crowd
+  const ns = list.map(c => ({ c, id: c.id, r: radius(c) * k, show: false, band: bandOf(c.rank) }))
+  // Beside the dial there is room kept for a slice's name and its count, which is one unbroken line.
+  const R = Math.max(90, Math.min(W / 2 - (narrow ? 24 : 164), list.length > 44 ? 344 : 300))
+  const cx = W / 2
+  let top = narrow ? 30 : 58
+
+  let groups
+  if (lens === 'held') {
+    const by = new Map()
+    ns.forEach(n => { const key = n.c.uses || 'Not known yet'; if (!by.has(key)) by.set(key, []); by.get(key).push(n) })
+    groups = [...by.entries()].map(([name, m]) => ({ name, m })).sort((a, b) => (a.name === 'Not known yet') - (b.name === 'Not known yet') || b.m.length - a.m.length)
+  } else {
+    groups = (segments || []).map(segment => ({ name: segment.name, m: ns.filter(n => n.c.segment === segment.name) })).filter(g => g.m.length)
+    const placed = new Set(groups.flatMap(g => g.m))
+    const rest = ns.filter(n => !placed.has(n))
+    if (rest.length) groups.push({ name: 'No segment yet', m: rest })
+  }
+
+  // The gap at the top is where the three bands are named, so no company sits under the words.
+  const notch = (narrow ? 48 : 34) * Math.PI / 180, total = 2 * Math.PI - notch, even = 1.5
+  const names = groups.length > 5 || narrow ? 1 : 2
+  const rad = rank => R * (0.11 + 0.83 * Math.pow(1 - clamp((rank - 18) / 82, 0, 1), 0.75))
+  const r1 = rad(CALL), r2 = rad(LINE)
+  // A slice named above or below the dial needs room for its name, which may run to three lines, and what is under it.
+  const capTall = name => 14.5 * Math.ceil(String(name).length * 7.7 / 150) + 46       // long words break early, so count on a short line
+  let under = 0
+  if (!narrow) {
+    let at = -Math.PI / 2 + notch / 2
+    groups.forEach(g => {
+      const span = total * (g.m.length + even) / (ns.length + even * groups.length), mid = at + span / 2
+      at += span
+      if (Math.abs(Math.cos(mid)) > 0.3) return
+      if (Math.sin(mid) < 0) top = Math.max(top, capTall(g.name) + 14); else under = Math.max(under, capTall(g.name))
+    })
+  }
+  const cy = top + R
+  let a = -Math.PI / 2 + notch / 2
+  groups.forEach(g => {
+    const span = total * (g.m.length + even) / (ns.length + even * groups.length)
+    g.a0 = a; g.a1 = a + span; g.mid = a + span / 2; a += span
+    const pad = Math.min(0.1, span * 0.12), lo = g.a0 + pad, hi = g.a1 - pad
+    g.m.sort((x, y) => y.c.rank - x.c.rank)
+    g.m.forEach((n, i) => {
+      const an = lo + (hi - lo) * ((0.5 + i * 0.618034) % 1)
+      n.g = g; n.rr = rad(n.c.rank); n.lo = lo; n.hi = hi
+      n.ax = cx + Math.cos(an) * n.rr; n.ay = cy + Math.sin(an) * n.rr
+      if (i < names) n.show = true
+    })
+  })
+  // Whoever is worth a call now is named, whichever slice they are in: the centre is what the eye is sent to.
+  ns.filter(n => n.band === 1).sort((x, y) => y.c.rank - x.c.rank).slice(0, narrow ? 4 : 10).forEach(n => { n.show = true })
+  ns.forEach(n => {
+    n.cr = n.r + (n.show ? 11 : 3.5)
+    // A mark stays inside its own band, so the three rings can be trusted. Where a band is too thin for the mark
+    // (a narrow window), it sits on the band's middle.
+    const inner = n.band === 1 ? R * 0.1 : (n.band === 2 ? r1 : r2) + n.r + 2.5
+    const outer = (n.band === 1 ? r1 : n.band === 2 ? r2 : R) - n.r - 2.5
+    n.dlo = inner <= outer ? Math.max(inner, n.rr - 12) : (inner + outer) / 2
+    n.dhi = inner <= outer ? Math.max(n.dlo, Math.min(outer, n.rr + 12)) : n.dlo
+  })
+
+  ns.forEach((n, i) => { n.x = n.ax + ((i * 37) % 7 - 3) * 0.4; n.y = n.ay + ((i * 53) % 7 - 3) * 0.4 })
+  for (let step = 0; step < 240; step++) {
+    const pull = step < 170 ? 0.07 : 0.02
+    for (const n of ns) { n.x += (n.ax - n.x) * pull; n.y += (n.ay - n.y) * pull }
+    for (let i = 0; i < ns.length; i++) {
+      for (let j = i + 1; j < ns.length; j++) {
+        const p = ns[i], q = ns[j]
+        let dx = q.x - p.x, dy = q.y - p.y
+        const d = Math.hypot(dx, dy) || 0.01, min = p.cr + q.cr
+        if (d < min) { const o = (min - d) / 2; dx /= d; dy /= d; p.x -= dx * o; p.y -= dy * o; q.x += dx * o; q.y += dy * o }
+      }
+    }
+    for (const n of ns) {
+      let an = Math.atan2(n.y - cy, n.x - cx)
+      while (an < n.g.mid - Math.PI) an += 2 * Math.PI
+      while (an > n.g.mid + Math.PI) an -= 2 * Math.PI
+      an = clamp(an, n.lo, n.hi)
+      const d = clamp(Math.hypot(n.x - cx, n.y - cy), n.dlo, n.dhi)
+      n.x = cx + Math.cos(an) * d; n.y = cy + Math.sin(an) * d
+    }
+  }
+
+  // A name goes where it is clear of the marks and of the names already down: under its mark, or over it, or
+  // beside it. A name with nowhere clear to go is left off; pointing at the mark, or picking it, still shows it.
+  const spot = (n, where) => {
+    const w = Math.min(22, String(n.c.company).length) * 6.2 + 8, ring = n.c.reason ? 5 : 0
+    if (where === 'below') return { x: n.x - w / 2, y: n.y + n.r + ring + 3, w, h: 14, tx: n.x, ty: n.y + n.r + ring + 14, anchor: 'middle' }
+    if (where === 'above') return { x: n.x - w / 2, y: n.y - n.r - ring - 17, w, h: 14, tx: n.x, ty: n.y - n.r - ring - 6, anchor: 'middle' }
+    if (where === 'right') return { x: n.x + n.r + ring + 4, y: n.y - 7, w, h: 14, tx: n.x + n.r + ring + 6, ty: n.y + 4, anchor: 'start' }
+    return { x: n.x - n.r - ring - 4 - w, y: n.y - 7, w, h: 14, tx: n.x - n.r - ring - 6, ty: n.y + 4, anchor: 'end' }
+  }
+  const onMark = (b, self) => ns.some(m => {
+    if (m === self) return false
+    const reach = m.r + (m.c.reason ? 5.5 : 1.5), px = clamp(m.x, b.x, b.x + b.w), py = clamp(m.y, b.y, b.y + b.h)
+    return Math.hypot(m.x - px, m.y - py) < reach
+  })
+  // The three band names are written in the gap at the top; a company's name keeps off them.
+  const down = ns.length ? [r1, r2, R].map(r => ({ x: cx - 44, y: cy - r + 3, w: 88, h: 20 })) : []
+  const onName = b => down.some(q => b.x < q.x + q.w && q.x < b.x + b.w && b.y < q.y + q.h && q.y < b.y + b.h)
+  // A company's name stays on the face of the dial: off it are the slices' own names.
+  const offFace = b => [[b.x, b.y], [b.x + b.w, b.y], [b.x, b.y + b.h], [b.x + b.w, b.y + b.h]].some(corner => Math.hypot(corner[0] - cx, corner[1] - cy) > R - 3)
+  ns.filter(n => n.show).sort((x, y) => y.c.rank - x.c.rank).forEach(n => {
+    let found = null
+    for (const where of ['below', 'above', 'right', 'left']) {
+      const b = spot(n, where)
+      if (!onMark(b, n) && !onName(b) && !offFace(b)) { found = b; break }
+    }
+    if (found) { n.lbl = found; down.push(found) } else n.show = false
+  })
+  // A page that is read, not worked (a map sent to someone), names every company it has a clear place for, the
+  // nearest the centre first: there, nobody is pointing at marks to find out who they are.
+  if (naming === 'all') ns.filter(n => !n.show).sort((x, y) => y.c.rank - x.c.rank).forEach(n => {
+    for (const where of ['below', 'above', 'right', 'left']) {
+      const b = spot(n, where)
+      if (!onMark(b, n) && !onName(b) && !offFace(b)) { n.lbl = b; n.show = true; down.push(b); break }
+    }
+  })
+  ns.forEach(n => { if (!n.lbl) n.lbl = spot(n, 'below') })
+
+  // Each slice is named outside the rim, pushed out far enough that the corner of its caption clears the circle.
+  groups.forEach(g => {
+    const c = Math.cos(g.mid), s = Math.sin(g.mid), side = Math.abs(c) > 0.3
+    let d = R + 12
+    if (side) { const half = 26; while (Math.hypot(d * c, Math.max(0, d * Math.abs(s) - half)) < R + 12 && d < R + 80) d += 2 } else d = (R + 10) / Math.abs(s)
+    g.px = cx + c * d; g.py = cy + s * d; g.where = !side ? (s < 0 ? 'top' : 'bottom') : c > 0 ? 'right' : 'left'
+    g.avg = g.m.length ? Math.round(g.m.reduce((sum, n) => sum + n.c.score, 0) / g.m.length) : 0
+  })
+  return { W, H: Math.round(2 * R + top + (narrow ? 30 + groups.length * 21 : Math.max(66, under + 18))), narrow, ns, groups, cx, cy, R, r1, r2 }
+}
+
+const brackets = s => { const q = 5; return 'M' + -s + ',' + (-s + q) + 'V' + -s + 'H' + (-s + q) + 'M' + (s - q) + ',' + -s + 'H' + s + 'V' + (-s + q) + 'M' + s + ',' + (s - q) + 'V' + s + 'H' + (s - q) + 'M' + (-s + q) + ',' + s + 'H' + -s + 'V' + (s - q) }
+
+function Squares({ score }) {
+  const n = Math.max(1, Math.ceil(score / 20))
+  return h('span', { className: 'stoa-fit', 'data-fit': n, title: 'Fit ' + n + ' of 5' }, '■'.repeat(n), h('s', null, '■'.repeat(5 - n)))
+}
+
+/** The picture. It draws, and reports what was picked; what a pick means is the map's business. */
+function MapPicture({ market, list, lens, sizeBy, sel, shown, onPick, onLasso, onClear, onGrow, onSuggest, onReasons, shape }) {
+  const say = gtmWords(shape, market)
+  const box = useRef(null), drag = useRef(null), lassoed = useRef(false)
+  const [W, setW] = useState(0)
+  const [hover, setHover] = useState('')
+  const [lasso, setLasso] = useState(null)
+  useEffect(() => {
+    const el = box.current
+    if (!el) return undefined
+    const read = () => setW(el.clientWidth)
+    read()
+    const watcher = new ResizeObserver(read)
+    watcher.observe(el)
+    return () => watcher.disconnect()
+  }, [])
+  const L = useMemo(() => (W ? dialLayout(list, lens, W, market.segments, sizeBy) : null), [list, lens, W, market.segments, sizeBy])
+  const down = event => {
+    if (!L || event.pointerType !== 'mouse' || event.button !== 0 || event.target.closest('.stoa-mapco, button')) return
+    const b = box.current.getBoundingClientRect()
+    const d = drag.current = { x: event.clientX - b.left, y: event.clientY - b.top, add: event.shiftKey, moved: false, r: null }
+    const move = ev => {
+      const x = ev.clientX - b.left, y = ev.clientY - b.top
+      if (Math.abs(x - d.x) + Math.abs(y - d.y) > 6) d.moved = true
+      if (!d.moved) return
+      d.r = { l: Math.min(x, d.x), t: Math.min(y, d.y), w: Math.abs(x - d.x), h: Math.abs(y - d.y) }
+      setLasso(d.r)
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up)
+      drag.current = null; setLasso(null)
+      if (!d.moved || !d.r) return
+      lassoed.current = true; setTimeout(() => { lassoed.current = false }, 0)
+      onLasso(L.ns.filter(n => shown(n.c) && n.x >= d.r.l && n.x <= d.r.l + d.r.w && n.y >= d.r.t && n.y <= d.r.t + d.r.h).map(n => n.id), d.add)
+    }
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
+  }
+  const hovered = L && hover ? L.ns.find(n => n.id === hover) : null
+  // The centre is for a company that fits and has a reason to call; fit alone leaves it one ring out. So on a map
+  // where no reasons are recorded yet the centre is empty, and it says why and offers to go and look.
+  const nobody = L && L.ns.length && !L.ns.some(n => n.band === 1)
+  const toAsk = nobody ? list.filter(c => !c.reason && c.status !== 'tracked').sort((a, b) => b.score - a.score).slice(0, 6) : []
+  const kin = n => hovered && n.g === hovered.g
+  const f = v => Number(v.toFixed(1))
+  const at = (r, an) => [L.cx + Math.cos(an) * r, L.cy + Math.sin(an) * r]
+  const spoke = (an, key) => { const p = at(L.R * 0.1, an), q = at(L.R, an); return h('line', { key, className: 'sd-dial-line', x1: f(p[0]), y1: f(p[1]), x2: f(q[0]), y2: f(q[1]) }) }
+  const capStyle = g => (g.where === 'right' ? { left: f(g.px), top: f(g.py), width: f(Math.max(60, Math.min(L.W - g.px - 8, 200))), transform: 'translateY(-50%)', textAlign: 'left' }
+    : g.where === 'left' ? { right: f(L.W - g.px), top: f(g.py), width: f(Math.max(60, Math.min(g.px - 8, 200))), transform: 'translateY(-50%)', textAlign: 'right' }
+      : { left: f(g.px), top: f(g.py), width: 190, transform: 'translate(-50%,' + (g.where === 'top' ? '-100%' : '0') + ')', textAlign: 'center' })
+  // The note beside a mark stands clear of the mark and of its name, on whichever side has the room.
+  const tipLeft = n => {
+    const right = Math.max(n.x + n.r + 16, n.lbl.x + n.lbl.w + 8), left = Math.min(n.x - n.r - 16, n.lbl.x - 8) - 232
+    return Math.max(4, right + 236 > L.W ? left : right)
+  }
+  const count = g => plural(g.m.length, say.thing, say.things) + (lens === 'held' ? ' · ' + Math.round(100 * g.m.length / L.ns.length) + '%' : ' · fit ' + g.avg)
+
+  return h('div', { ref: box, className: 'stoa-map sd-dial', 'data-narrow': L && L.narrow ? '1' : '0', 'data-spot': hovered ? '1' : '0', style: { height: L ? L.H : 520 }, onPointerDown: down,
+    onClick: event => { if (lassoed.current || event.target.closest('.stoa-mapco, button')) return; onClear() } },
+  L ? h('svg', { className: 'stoa-mapsvg', width: L.W, height: L.H, viewBox: '0 0 ' + L.W + ' ' + L.H, role: 'group', 'aria-label': 'Market map: ' + market.name },
+    h('defs', null, h('radialGradient', { id: 'sd-dial-shade' },
+      h('stop', { offset: 0, style: { stopColor: 'var(--dial-face-hi)' } }), h('stop', { offset: 0.55, style: { stopColor: 'var(--dial-face)' } }), h('stop', { offset: 1, style: { stopColor: 'var(--dial-face-lo)' } }))),
+    h('circle', { className: 'sd-dial-rim', cx: f(L.cx), cy: f(L.cy), r: f(L.R), fill: 'url(#sd-dial-shade)' }),
+    h('circle', { className: 'sd-dial-zone', cx: f(L.cx), cy: f(L.cy), r: f(L.r1) }),
+    h('circle', { className: 'sd-dial-line', cx: f(L.cx), cy: f(L.cy), r: f(L.r2), fill: 'none' }),
+    L.groups.length ? [spoke(L.groups[0].a0, 's0')].concat(L.groups.map((g, index) => spoke(g.a1, 's' + (index + 1)))) : null,
+    L.ns.map((n, index) => {
+      const c = n.c, picked = sel.has(n.id)
+      return h('g', { key: n.id, className: 'stoa-mapco sd-dial-co', 'data-state': c.status === 'tracked' ? 'in' : c.fresh ? 'fresh' : 'on', 'data-sel': picked ? '1' : '0', 'data-dim': shown(c) ? '0' : '1',
+        'data-band': n.band, 'data-tone': toneOf(c.score), 'data-hot': c.reason && c.days !== null && c.days <= 16 ? '1' : '0', 'data-lit': !hovered ? '' : n === hovered ? 'hot' : kin(n) ? 'kin' : 'off',
+        style: { transform: 'translate(' + n.x.toFixed(1) + 'px,' + n.y.toFixed(1) + 'px)' }, tabIndex: 0, role: 'button', 'aria-pressed': picked,
+        'aria-label': c.company + ', fit ' + c.score + ' of 100, ' + say.bands[n.band - 1].toLowerCase() + (c.status === 'tracked' ? ', in the pipeline' : '') + (c.reason ? ', has ' + say.reason : ''),
+        onClick: event => { event.stopPropagation(); onPick(n.id, event.shiftKey || event.metaKey || event.ctrlKey) },
+        onKeyDown: event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onPick(n.id, event.shiftKey) } },
+        onPointerEnter: event => { if (event.pointerType !== 'touch') setHover(n.id) }, onPointerLeave: () => setHover(''), onFocus: () => setHover(n.id), onBlur: () => setHover('') },
+      h('g', { className: 'stoa-mappop', style: { animationDelay: Math.min(index * 12, 500) + 'ms' } },
+        h('circle', { className: 'sd-dial-base', r: f(n.r + (c.reason ? 6.6 : 2.6)) }),
+        c.reason ? h('circle', { className: 'sd-dial-sig', r: f(n.r + 4) }) : null,
+        h('circle', { className: 'sd-dial-disc', r: f(n.r) }),
+        h('circle', { className: 'sd-dial-edge', r: f(n.r) }),
+        h('path', { className: 'stoa-mapbrk', d: brackets(Math.round(n.r + (c.reason ? 9 : 5))) })))
+    }),
+    L.ns.map(n => h('text', { key: 'l' + n.id, className: 'sd-dial-lbl', textAnchor: n.lbl.anchor, 'data-band': n.band,
+      'data-on': (n.show || sel.has(n.id) || n === hovered) && shown(n.c) ? '1' : '0', 'data-sel': sel.has(n.id) ? '1' : '0', 'data-lit': !hovered ? '' : n === hovered ? 'hot' : 'off',
+      style: { transform: 'translate(' + n.lbl.tx.toFixed(1) + 'px,' + n.lbl.ty.toFixed(1) + 'px)' } }, shortName(n.c.company)))) : null,
+  L ? h('div', { className: 'stoa-mapover' },
+    h('div', { className: 'stoa-maphint' }, 'Click to open · shift-click or drag to pick several'),
+    L.ns.length ? [
+      h('div', { key: 'b1', className: 'stoa-mapq sd-dial-band', style: { left: f(L.cx), top: f(L.cy - L.r1 + 8) } }, h('strong', null, say.bands[0])),
+      h('div', { key: 'b2', className: 'stoa-mapq sd-dial-band', style: { left: f(L.cx), top: f(L.cy - L.r2 + 8) } }, say.bands[1]),
+      h('div', { key: 'b3', className: 'stoa-mapq sd-dial-band', style: { left: f(L.cx), top: f(L.cy - L.R + 9) } }, say.bands[2])]
+      : h('div', { className: 'stoa-mapq sd-dial-band', style: { left: f(L.cx), top: f(L.cy - 8) } }, 'No ' + say.things + ' on this map yet'),
+    nobody ? h('div', { className: 'sd-dial-none', style: { left: f(L.cx), top: f(L.cy + 6), width: f(Math.max(96, 2 * L.r1 - 36)) } },
+      h('b', null, say.nobody),
+      L.r1 >= 96 ? h('span', null, say.nobodyWhy) : null,
+      L.r1 >= 70 && onReasons && toAsk.length ? h('button', { type: 'button', className: 'stoa-btn', title: say.reasonsTitle(toAsk.length),
+        onClick: () => onReasons(toAsk) }, 'Look for ' + say.reasons) : null) : null,
+    L.groups.map((g, index) => {
+      if (L.narrow) {
+        const q = at(L.R + 11, g.mid), letter = String.fromCharCode(65 + index)
+        return [h('div', { key: 'a' + g.name, className: 'sd-dial-cap', style: { left: f(q[0]), top: f(q[1]), transform: 'translate(-50%,-50%)' } }, h('b', null, letter)),
+          h('div', { key: 'k' + g.name, className: 'sd-dial-cap sd-dial-keyline', style: { left: 10, top: f(L.cy + L.R + 24 + index * 21), width: f(L.W - 20) } }, h('b', null, letter + ' · ' + g.name), ' ', h('span', null, count(g)))]
+      }
+      return h('div', { key: lens + g.name, className: 'sd-dial-cap', 'data-where': g.where, 'data-lit': hovered && hovered.g === g ? '1' : '0', style: capStyle(g) },
+        h('b', null, g.name), h('span', null, count(g)),
+        lens !== 'held' && onGrow && g.name !== 'No segment yet' ? h('button', { type: 'button', className: 'stoa-btn sd-dial-grow', 'data-kind': 'quiet', title: 'Ask Hermes to find more companies for this segment', onClick: () => onGrow(g.name) }, '+ Grow') : null)
+    }),
+    lens !== 'held' && onSuggest && !L.narrow ? h('button', { type: 'button', className: 'stoa-btn sd-dial-more', 'data-kind': 'quiet', title: 'Ask Hermes who else has this problem', onClick: onSuggest }, say.next) : null,
+    hovered ? h('div', { className: 'stoa-maptip', style: { left: tipLeft(hovered), top: Math.max(4, Math.min(L.H - 130, hovered.y - 24)) } },
+      h('b', null, hovered.c.company), h(Squares, { score: hovered.c.score }),
+      h('span', { className: 'stoa-sub' }, '  fit ' + hovered.c.score + (hovered.c.size ? ' · ' + hovered.c.size : '') + (say.people && hovered.c.uses ? ' at ' + hovered.c.uses : '')),
+      h('div', { className: 'sd-dial-tipband', 'data-band': hovered.band }, say.bands[hovered.band - 1], hovered.c.status === 'tracked' ? ' · in the pipeline' : ''),
+      hovered.c.signal ? h('div', null, h('span', { className: 'stoa-chip', 'data-tone': 'warn', 'data-wrap': '1' }, hovered.c.signal), agoWords(hovered.c.days) ? h('span', { className: 'stoa-sub' }, '  ' + agoWords(hovered.c.days)) : null) : null,
+      hovered.c.why ? h('div', { className: 'stoa-sub' }, hovered.c.why) : null) : null,
+    lasso ? h('div', { className: 'stoa-maplasso', style: { left: lasso.l, top: lasso.t, width: lasso.w, height: lasso.h } }) : null) : null)
+}
+
+/** The key to the marks, under the dial. */
+function MapLegend({ shape, market }) {
+  const say = gtmWords(shape, market)
+  const key = (props, words) => h('span', null, h('i', { className: 'sd-dial-key', ...props }), words)
+  return h('div', { className: 'sd-dial-legend' },
+    key({ 'data-tone': 'good' }, 'Good fit'), key({ 'data-tone': 'okay' }, 'Okay'), key({ 'data-tone': 'weak' }, 'Weak'),
+    key({ 'data-kind': 'in' }, say.solid), key({ 'data-kind': 'sig' }, say.ring), key({ 'data-kind': 'fresh' }, 'Dashed is new since you last looked'))
+}
+  return { MapLenses, MapPicture, MapLegend, dialLayout, toneOf }
+})()
+const DIAL_LENSES = DIAL.MapLenses, DialPicture = DIAL.MapPicture, MapLegend = DIAL.MapLegend
+const MAP_LENSES = DIAL_LENSES
+
+const GTM = (() => {
+// Motions: the campaigns and ideas that carry the go-to-market.
+//
+// A motion is a play to break into a market (an outbound push, an event, digital ads…). It is aimed at a market map
+// or some of its segments, and it is judged by what it brought into the pipeline. Everything about motions is this
+// app's own (stoadesk/motions.py); the GTM tab (gtm.js) draws this view beside the market maps.
+//
+// It is drawn inside the Stoa page, so it uses the page's own classes (stoa-box, stoa-btn, stoa-eyebrow…) for the
+// plain parts and its own (sd-mo-…, in gtm.css) for the rest.
+
+// What the GTM tab is showing. These are shared, so the map can open a motion and a motion can open its map.
+const $gtmView = atom('maps')                 // set from what was pinned when the page starts (register)
+const $motionOpen = atom('')             // the motion that is open, by id
+const $motionDraft = atom(null)          // a new motion being started: { market } when it was started from a map
+
+const KEY = ['stoa', 'gtm', 'motions']        // under ['stoa']: the page's refresh reaches it
+const again = () => queryClient.invalidateQueries({ queryKey: KEY })
+
+const today = () => new Date().toLocaleDateString('en-CA')
+
+/** Money as the rest of the desk writes it: $1,200 · $129k · $2.5M. */
+function gtmMoney(value, currency) {
+  const amount = Number(value || 0)
+  if (!amount) return '—'
+  let sign = '$'
+  try { sign = new Intl.NumberFormat(undefined, { style: 'currency', currency: currency || 'USD', maximumFractionDigits: 0 }).formatToParts(0).find(part => part.type === 'currency').value } catch { /* an unknown currency: the plain sign */ }
+  const short = (number, unit) => sign + (number >= 100 ? Math.round(number) : Math.round(number * 10) / 10) + unit
+  if (amount >= 1e6) return short(amount / 1e6, 'M')
+  if (amount >= 1e4) return short(amount / 1e3, 'k')
+  return sign + Math.round(amount).toLocaleString()
+}
+const count = value => (value ? Number(value).toLocaleString() : '—')
+const times = value => (value ? (value >= 10 ? Math.round(value) : value) + '×' : '—')
+const days = motion => [motion.start_on, motion.end_on].filter(Boolean).map(day => new Date(day + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })).join(' – ')
+const aimedAt = motion => (motion.market_name ? (motion.segments.length ? motion.segments.join(', ') : 'All of ' + motion.market_name) : 'No map yet')
+
+const usePath = () => (path => path)        // motions belong to the whole desk: the same whichever pipeline is showing
+// The desk's routes, as the app named them: the app's own words are kept beside them so the two stay easy to compare.
+const api = (path, options) => rest(path.replace(/^\/app/, ''), options)
+
+function Figure({ label, value, sub, tone }) {
+  return h('div', { className: 'sd-m-fig' }, h('div', { className: 'stoa-eyebrow' }, label), h('b', { 'data-tone': tone || '' }, value), sub ? h('small', null, sub) : null)
+}
+
+// -- the form for a new motion, or to change one -----------------------------------------------------------------
+function MotionForm({ data, motion, preset, path, done }) {
+  const [form, setForm] = useState(() => ({ name: '', kind: 'outbound', status: 'idea', goal: '', market: (preset && preset.market) || (data.maps[0] || {}).key || '', segments: [], owner: '', start_on: '', end_on: '', budget: '',
+    ...(motion ? { ...motion, market: motion.market_key || '', budget: motion.budget || '' } : {}), tags: motion ? (motion.tags || []).join(', ') : '' }))
+  const [busy, setBusy] = useState(false)
+  const set = patch => setForm(now => ({ ...now, ...patch }))
+  const map = data.maps.find(one => one.key === form.market)
+  const toggle = name => set({ segments: form.segments.includes(name) ? form.segments.filter(each => each !== name) : form.segments.concat([name]) })
+  const save = async () => {
+    setBusy(true)
+    const body = { name: form.name, kind: form.kind, status: form.status, goal: form.goal, market: form.market, segments: form.market ? form.segments : [], owner: form.owner,
+      start_on: form.start_on, end_on: form.end_on, budget: Number(form.budget) || 0, tags: form.tags.split(',').map(word => word.trim()).filter(Boolean) }
+    try {
+      const saved = await api(path(motion ? '/app/motions/' + motion.id : '/app/motions'), { method: 'POST', body })
+      again()
+      done(saved.id)
+    } catch (error) { host.notifyError(error, 'Not saved') }
+    setBusy(false)
+  }
+  const field = (label, props, wide) => h('label', { 'data-wide': wide ? '1' : '0' }, h('small', { className: 'stoa-eyebrow' }, label), h('input', { className: 'stoa-field', ...props }))
+  const pick = (label, value, options, onChange) => h('label', null, h('small', { className: 'stoa-eyebrow' }, label),
+    h('select', { className: 'stoa-field', value, onChange: event => onChange(event.target.value) }, options.map(([id, text]) => h('option', { key: id, value: id }, text))))
+  return h('div', { className: 'stoa-box sd-m-form' },
+    h('div', { className: 'stoa-eyebrow' }, motion ? 'Change this motion' : 'A new motion'),
+    h('div', { className: 'stoa-form' },
+      field('What is it called?', { value: form.name, autoFocus: true, placeholder: 'Outbound to neobanks, Fraud summit dinner…', onChange: event => set({ name: event.target.value }) }, true),
+      pick('Kind', form.kind, Object.entries(data.kinds), kind => set({ kind })),
+      pick('Where it stands', form.status, Object.entries(data.statuses), status => set({ status })),
+      pick('Aimed at', form.market, [['', 'No market map']].concat(data.maps.map(one => [one.key, one.name + (one.pipeline_name ? '  ·  ' + one.pipeline_name : '')])), market => set({ market, segments: [] })),
+      field('Owner', { value: form.owner, onChange: event => set({ owner: event.target.value }) }),
+      map && map.segments.length ? h('label', { 'data-wide': '1' }, h('small', { className: 'stoa-eyebrow' }, 'Which segments? None ticked means the whole map'),
+        h('div', { className: 'sd-m-segs' }, map.segments.map(segment => h('button', { type: 'button', key: segment.name, className: 'stoa-btn', 'aria-pressed': form.segments.includes(segment.name),
+          'data-on': form.segments.includes(segment.name) ? '1' : '0', onClick: () => toggle(segment.name) }, segment.name, h('small', null, ' ' + segment.companies))))) : null,
+      h('label', { 'data-wide': '1' }, h('small', { className: 'stoa-eyebrow' }, 'What is it for, and why should it work?'),
+        h('textarea', { className: 'stoa-field sd-m-area', rows: 2, value: form.goal, placeholder: 'What on the map led to it, and what you expect back.', onChange: event => set({ goal: event.target.value }) })),
+      h('label', { 'data-wide': '1' }, h('small', { className: 'stoa-eyebrow' }, 'Words to watch for, besides its name'),
+        h('input', { className: 'stoa-field', value: form.tags, placeholder: 'A campaign code, the event\'s name… separated by commas', onChange: event => set({ tags: event.target.value }) }),
+        h('small', { className: 'stoa-sub', style: { display: 'block', marginTop: 4 } }, 'Stoa credits a record to this motion when its Source or a note on it mentions one of these.')),
+      field('Starts', { type: 'date', value: form.start_on, onChange: event => set({ start_on: event.target.value }) }),
+      field('Ends', { type: 'date', value: form.end_on, onChange: event => set({ end_on: event.target.value }) }),
+      field('Budget (' + data.currency + ')', { type: 'number', min: 0, step: 'any', value: form.budget, onChange: event => set({ budget: event.target.value }) })),
+    h('div', { className: 'stoa-btns' },
+      h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'primary', disabled: busy || !form.name.trim(), onClick: save }, motion ? 'Save' : 'Add the motion'),
+      h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'quiet', onClick: () => done('') }, 'Cancel')))
+}
+
+// -- one motion, opened ---------------------------------------------------------------------------------------------
+function Results({ motion, data, path, set }) {
+  const [row, setRow] = useState({ metric: 'spend', value: '', on: today(), note: '' })
+  const post = async body => {
+    try { set(await api(path('/app/motions/' + motion.id + '/results'), { method: 'POST', body })); again() } catch (error) { host.notifyError(error, 'Not saved') }
+  }
+  const add = async () => { await post({ metric: row.metric, value: Number(row.value), on: row.on, note: row.note }); setRow({ ...row, value: '', note: '' }) }
+  const label = metric => data.metrics[metric] || metric
+  const shown = entry => (entry.metric === 'spend' ? gtmMoney(entry.value, data.currency) : Number(entry.value).toLocaleString())
+  const list = motion.impact.results || []
+  return h('div', { className: 'stoa-box' },
+    h('div', { className: 'stoa-eyebrow' }, 'Results, as it runs'),
+    h('div', { className: 'sd-m-addrow' },
+      h('select', { className: 'stoa-field', value: row.metric, 'aria-label': 'What the number is', onChange: event => setRow({ ...row, metric: event.target.value }) },
+        Object.entries(data.metrics).map(([id, text]) => h('option', { key: id, value: id }, text))),
+      h('input', { className: 'stoa-field', type: 'number', step: 'any', placeholder: row.metric === 'spend' ? 'Amount' : 'How many', value: row.value, 'aria-label': 'The number',
+        onChange: event => setRow({ ...row, value: event.target.value }), onKeyDown: event => { if (event.key === 'Enter' && row.value !== '') add() } }),
+      h('input', { className: 'stoa-field', type: 'date', value: row.on, 'aria-label': 'The day it is for', onChange: event => setRow({ ...row, on: event.target.value }) }),
+      h('input', { className: 'stoa-field', placeholder: 'A few words (optional)', value: row.note, 'aria-label': 'Note', onChange: event => setRow({ ...row, note: event.target.value }) }),
+      h('button', { type: 'button', className: 'stoa-btn', disabled: row.value === '', onClick: add }, 'Log')),
+    list.length ? list.map(entry => h('div', { key: entry.id, className: 'sd-m-line' },
+      h('span', { className: 'stoa-num' }, entry.on_date.slice(5)), h('span', { className: 'stoa-grow' }, label(entry.metric), entry.note ? h('span', { className: 'stoa-sub' }, '  ' + entry.note) : null),
+      h('b', { className: 'stoa-num' }, shown(entry)),
+      h('button', { type: 'button', className: 'sd-m-x', title: 'Remove this entry', 'aria-label': 'Remove this entry', onClick: () => post({ remove: entry.id }) }, '×')))
+      : h('p', { className: 'stoa-sub', style: { margin: '10px 0 0' } }, 'Nothing logged yet. Log what you spend, how many people it reaches, who answers and the meetings that come of it.'))
+}
+
+function Records({ motion, state, data, path, set, open }) {
+  const [who, setWho] = useState('')
+  const post = async body => {
+    try { set(await api(path('/app/motions/' + motion.id + '/records'), { method: 'POST', body })); again(); setWho('') } catch (error) { host.notifyError(error, 'Not saved') }
+  }
+  const impact = motion.impact, records = impact.records || [], aside = impact.aside || []
+  const names = [...new Set((state.deals || []).map(deal => deal.name).filter(Boolean))].sort()
+  const one = (data.terms && data.terms.deal) || 'record', many = (data.terms && data.terms.deals) || 'records'
+  return h('div', { className: 'stoa-box' },
+    h('div', { className: 'stoa-eyebrow' }, cap(many) + ' it is credited with'),
+    h('p', { className: 'stoa-sub', style: { margin: '6px 0 4px' } }, impact.tracking
+      ? 'Stoa works these out from the desk and says why. Confirm one to fix it in place, or set it aside if it is not this motion\'s.'
+      : 'Stoa is not looking yet: this motion has not started. Set it running or give it a start date, and records are credited as they come in.'),
+    records.map(record => h('div', { key: record.key, className: 'sd-m-rec' },
+      h('div', { className: 'sd-m-line' },
+        h('button', { type: 'button', className: 'sd-m-open stoa-grow', onClick: () => open(record.id, record.pipeline), title: 'Open this record' },
+          h('span', { className: 'stoa-name' }, record.name), record.company && record.company !== record.name ? h('span', { className: 'stoa-sub' }, '  ' + record.company) : null,
+          record.from_lead ? h('span', { className: 'stoa-sub' }, '  ·  was the lead ' + record.from_lead) : null),
+        record.pipeline_name ? h('span', { className: 'stoa-chip' }, record.pipeline_name) : null,
+        h('span', { className: 'stoa-chip', 'data-tone': record.how === 'sourced' ? 'good' : '' }, record.how),
+        h('span', { className: 'stoa-chip', 'data-tone': record.status === 'won' ? 'good' : record.status === 'lost' ? 'bad' : '' }, record.status === 'open' ? record.stage : record.status === 'won' ? record.won_label : record.status),
+        h('b', { className: 'stoa-num' }, gtmMoney(record.value, data.currency)),
+        record.auto ? h('button', { type: 'button', className: 'sd-m-x', 'data-kind': 'yes', title: 'Yes, this motion ' + record.how + ' it', 'aria-label': 'Confirm ' + record.name, onClick: () => post({ deal: record.key, how: record.how }) }, '✓') : null,
+        record.auto ? h('button', { type: 'button', className: 'sd-m-x', title: 'Not this motion\'s: set it aside', 'aria-label': 'Set aside ' + record.name, onClick: () => post({ deal: record.key, how: 'none' }) }, '×')
+          : h('button', { type: 'button', className: 'sd-m-x', title: 'Take back what was said by hand; Stoa judges it again', 'aria-label': 'Take back ' + record.name, onClick: () => post({ deal: record.key, remove: true }) }, '↺')),
+      h('div', { className: 'sd-m-why' }, record.auto ? null : h('b', null, 'Confirmed. '), record.auto ? record.why : record.why.replace(/^Confirmed by hand\.\s*/, '')))),
+    aside.length ? h('div', { className: 'stoa-sub', style: { marginTop: 8 } }, 'Set aside: ', aside.map((record, index) => [index ? ', ' : '',
+      h('button', { type: 'button', key: record.key, className: 'sd-m-back', title: 'Bring it back: Stoa judges it again', onClick: () => post({ deal: record.key, remove: true }) }, record.name)])) : null,
+    h('div', { className: 'sd-m-addrow', style: { gridTemplateColumns: 'minmax(0, 1fr) auto auto' } },
+      h('input', { className: 'stoa-field', list: 'sd-m-names', placeholder: 'One Stoa missed? Name the ' + one, value: who, 'aria-label': 'A record to put down to this motion',
+        onChange: event => setWho(event.target.value), onKeyDown: event => { if (event.key === 'Enter' && who.trim()) post({ deal: who.trim(), how: 'sourced' }) } }),
+      h('datalist', { id: 'sd-m-names' }, names.map(name => h('option', { key: name, value: name }))),
+      h('button', { type: 'button', className: 'stoa-btn', disabled: !who.trim(), onClick: () => post({ deal: who.trim(), how: 'sourced' }) }, 'Sourced'),
+      h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'quiet', disabled: !who.trim(), onClick: () => post({ deal: who.trim(), how: 'influenced' }) }, 'Influenced')))
+}
+
+function Audience({ motion, open, toMap }) {
+  const impact = motion.impact, companies = impact.companies || []
+  if (!motion.market) return h('div', { className: 'stoa-box' }, h('div', { className: 'stoa-eyebrow' }, 'Who it is for'),
+    h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'This motion is not aimed at a market map yet. Change it to pick a map and its segments, and Stoa will show who it is for and which of them have come into the pipeline.'))
+  return h('div', { className: 'stoa-box' },
+    h('div', { className: 'stoa-eyebrow' }, 'Who it is for'),
+    h('div', { className: 'stoa-name', style: { marginTop: 6 } }, aimedAt(motion)),
+    h('div', { className: 'stoa-sub' }, toMap ? h('button', { type: 'button', className: 'sd-m-back', title: 'Open this map', onClick: () => toMap(motion) }, motion.market_name) : motion.market_name,
+      ' · ' + companies.length + ' companies · ' + impact.audience_in_pipeline + ' in the pipeline'),
+    h('div', { className: 'sd-m-dots', role: 'img', 'aria-label': impact.audience_in_pipeline + ' of ' + companies.length + ' companies are in the pipeline' },
+      companies.map(company => h('i', { key: company.id, 'data-in': company.record ? '1' : '0', title: company.company }))),
+    h('div', { className: 'sd-m-cos' }, companies.map(company => (company.record
+      ? h('button', { type: 'button', key: company.id, className: 'stoa-chip sd-m-co', 'data-tone': 'good', title: 'In the pipeline: open it', onClick: () => open(company.record, company.record_pipeline) }, company.company)
+      : h('span', { key: company.id, className: 'stoa-chip', title: company.signal || company.segment }, company.company)))))
+}
+
+function MotionPage({ id, data, state, path, back, open, toMap }) {
+  const query = useQuery({ queryKey: KEY.concat(['one', id, state.pipeline || '']), queryFn: () => api(path('/app/motions/' + id)), staleTime: 1000 })
+  const [editing, setEditing] = useState(false)
+  const [sure, setSure] = useState(false)
+  const set = fresh => queryClient.setQueryData(KEY.concat(['one', id, state.pipeline || '']), fresh)
+  if (query.error) return h('div', null, h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'quiet', onClick: back }, '‹  All motions'), h('p', { className: 'stoa-sub' }, String(query.error.message || query.error)))
+  const motion = query.data
+  if (!motion) return h('p', { className: 'stoa-sub' }, 'Opening…')
+  const impact = motion.impact, cur = data.currency
+  const status = async value => { try { set(await api(path('/app/motions/' + id), { method: 'POST', body: { status: value } })); again() } catch (error) { host.notifyError(error, 'Not changed') } }
+  const remove = async () => {
+    if (!sure) { setSure(true); setTimeout(() => setSure(false), 3000); return }
+    try { await api(path('/app/motions/' + id + '/remove'), { method: 'POST', body: {} }); again(); back() } catch (error) { host.notifyError(error, 'Not removed') }
+  }
+  const most = Math.max(1, impact.won, ...impact.funnel.flatMap(group => group.stages.map(stage => stage.count)))
+  const several = impact.funnel.length > 1
+  return h('div', { className: 'sd-m-page' },
+    h('button', { type: 'button', className: 'stoa-btn sd-mo-back', 'data-kind': 'quiet', onClick: back }, '‹  All motions'),
+    h('div', { className: 'sd-m-title' },
+      h('div', { className: 'stoa-grow' },
+        h('div', { className: 'sd-mo-kind' }, h(KindMark, { kind: motion.kind }), motion.kind_label + (days(motion) ? ' · ' + days(motion) : '') + (motion.owner ? ' · ' + motion.owner : '')),
+        h('h2', null, motion.name),
+        motion.goal ? h('p', { className: 'sd-m-goal' }, motion.goal) : null,
+        h('p', { className: 'stoa-sub', style: { margin: '6px 0 0' } }, motion.window.from
+          ? 'Crediting ' + ((data.terms && data.terms.deals) || 'records') + ' that come in from ' + motion.window.from + (motion.window.to ? ' to ' + motion.window.to + ' (thirty days past its end)' : ' on')
+          : 'Not started: nothing is credited by timing yet', ' · watching for ', motion.watching.map(word => '“' + word + '”').join(', '))),
+      h('select', { className: 'stoa-select', value: motion.status, 'aria-label': 'Where this motion stands', onChange: event => status(event.target.value) },
+        Object.entries(data.statuses).map(([key, text]) => h('option', { key, value: key }, text))),
+      h('button', { type: 'button', className: 'stoa-btn', onClick: () => setEditing(!editing) }, editing ? 'Close' : 'Change'),
+      h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'quiet', onClick: remove }, sure ? 'Remove it?' : 'Remove')),
+    editing ? h(MotionForm, { data, motion, path, done: () => { setEditing(false); queryClient.invalidateQueries({ queryKey: KEY }) } }) : null,
+    h('div', { className: 'stoa-box sd-m-impact' },
+      h('div', { className: 'stoa-eyebrow' }, 'What it brought in'),
+      h('div', { className: 'sd-m-figs' },
+        h(Figure, { label: 'Sourced', value: count(impact.sourced), sub: [impact.leads ? impact.leads + ' still leads' : '', impact.handed_over ? impact.handed_over + ' handed over' : '',
+          impact.influenced ? impact.influenced + ' more influenced' : '', impact.found ? impact.found + ' found by Stoa' : ''].filter(Boolean).join(' · ') || 'brought into the pipeline' }),
+        h(Figure, { label: 'In the pipeline', value: gtmMoney(impact.pipeline_value, cur), sub: impact.open + ' open ' + (impact.open === 1 ? 'deal' : 'deals') }),
+        h(Figure, { label: 'Won', value: gtmMoney(impact.won_value, cur), sub: impact.won + ' won' + (impact.win_rate !== null ? ' · ' + Math.round(impact.win_rate * 100) + '% win rate' : ''), tone: impact.won ? 'good' : '' }),
+        h(Figure, { label: 'Spent', value: gtmMoney(impact.spend, cur), sub: impact.budget ? 'of ' + gtmMoney(impact.budget, cur) + ' budget' : 'no budget set', tone: impact.budget && impact.spend > impact.budget ? 'bad' : '' }),
+        h(Figure, { label: 'Cost for each', value: gtmMoney(impact.cost_per_record, cur), sub: impact.cost_per_win ? gtmMoney(impact.cost_per_win, cur) + ' for each win' : 'record sourced' }),
+        h(Figure, { label: 'Came back', value: times(impact.return), sub: impact.pipeline_return ? times(impact.pipeline_return) + ' counting the open pipeline' : 'won for each ' + cur + ' spent', tone: impact.return >= 1 ? 'good' : '' })),
+      impact.sourced ? h('div', { className: 'sd-m-stages' },
+        // where what it sourced sits now, a pipeline at a time: leads first become deals, deals are won
+        impact.funnel.slice().sort((a, b) => (a.kind === 'lead' ? 0 : 1) - (b.kind === 'lead' ? 0 : 1)).map(group => [
+          several ? h('div', { key: group.pipeline + ':name', className: 'stoa-sub sd-m-group' }, group.name) : null,
+          group.stages.map(stage => h('div', { key: group.pipeline + ':' + stage.id, className: 'sd-m-stage' },
+            h('span', { className: 'stoa-eyebrow' }, stage.label), h('span', { className: 'sd-m-bar' }, h('i', { style: { width: Math.round(100 * stage.count / most) + '%' } })),
+            h('b', { className: 'stoa-num' }, String(stage.count))))]),
+        h('div', { className: 'sd-m-stage' }, h('span', { className: 'stoa-eyebrow' }, 'Won'),
+          h('span', { className: 'sd-m-bar' }, h('i', { style: { width: Math.round(100 * impact.won / most) + '%' }, 'data-won': '1' })), h('b', { className: 'stoa-num' }, String(impact.won)))) : null,
+      h('div', { className: 'stoa-sub', style: { marginTop: 12 } }, 'Counted from the desk while it ran: ',
+        [[impact.counted.meetings, 'meeting'], [impact.counted.calls, 'call'], [impact.counted.emails, 'email']].map(([n, word]) => n + ' ' + word + (n === 1 ? '' : 's')).join(' · '),
+        impact.audience ? ' · ' + impact.counted.companies_reached + ' of ' + impact.audience + ' companies reached' : ''),
+      Object.keys(impact.totals).some(metric => metric !== 'spend') ? h('div', { className: 'stoa-sub', style: { marginTop: 4 } }, 'Logged by hand: ',
+        Object.entries(impact.totals).filter(([metric]) => metric !== 'spend').map(([metric, value]) => (data.metrics[metric] || cap(metric)) + ' ' + Number(value).toLocaleString()).join(' · '),
+        impact.response_rate !== null ? ' · ' + (impact.response_rate * 100).toFixed(1) + '% answered' : '') : null),
+    h('div', { className: 'sd-m-cols' },
+      h('div', null, h(Records, { motion, state, data, path, set, open }), h(Results, { motion, data, path, set })),
+      h(Audience, { motion, open, toMap })))
+}
+
+/** Every motion with its figures, and the maps one can be aimed at. One reading, shared by all who ask. */
+const useMotions = () => useQuery({ queryKey: KEY.concat(['list']), queryFn: () => api('/app/motions'), staleTime: 1500, refetchInterval: 30000 })
+
+/** Ask Hermes, in the page's conversation for map research (or the open chat, from a card). */
+function askStoa(words, working) {
+  if (toChat(words, null, 'maps') !== false) host.notify({ kind: 'info', message: working })
+}
+
+// A small drawing for each kind of play, in the line the rest of the page is drawn in.
+const MARKS = {
+  outbound: 'M3 11 11 3M5.5 3H11v5.5',
+  event: 'M2.5 4.5h9v7h-9zM2.5 7h9M5 2.5v3M9 2.5v3',
+  ads: 'M2.5 8.5v-3l6-2.5v8zM8.5 5.2c1.6.2 2.5.9 2.5 1.8s-.9 1.6-2.5 1.8M4.5 8.8v2.4',
+  content: 'M3.5 2.5h5l2 2v7h-7zM5.5 6.5h3M5.5 8.8h3',
+  partner: 'M5.3 9.6a2.6 2.6 0 1 1 0-5.2 2.6 2.6 0 0 1 0 5.2zM8.7 9.6a2.6 2.6 0 1 1 0-5.2 2.6 2.6 0 0 1 0 5.2z',
+  referral: 'M4 5.5a1.6 1.6 0 1 1 0-3.2 1.6 1.6 0 0 1 0 3.2zM10 11.7a1.6 1.6 0 1 1 0-3.2 1.6 1.6 0 0 1 0 3.2zM5.2 5.1 8.8 8.9',
+  community: 'M7 4.6a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM3.3 11a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM10.7 11a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM6.3 4.4 4 8.2M7.7 4.4 10 8.2M4.8 9.5h4.4',
+  other: 'M7 2.5 11.5 7 7 11.5 2.5 7z'
+}
+function KindMark({ kind }) {
+  return h('svg', { className: 'sd-mo-mark', width: 14, height: 14, viewBox: '0 0 14 14', 'aria-hidden': 'true' }, h('path', { d: MARKS[kind] || MARKS.other }))
+}
+
+/** Where a motion is in its dates: words, and how far through it is (0 to 1), when that can be said. */
+function timing(motion) {
+  if (!motion.start_on) return null
+  const day = 86400000, start = new Date(motion.start_on + 'T00:00:00'), now = new Date(), short = d => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  const into = Math.floor((now - start) / day) + 1
+  if (into < 1) return { words: 'Starts ' + short(start) + ' · in ' + (1 - into) + (into === 0 ? ' day' : ' days'), part: null }
+  if (!motion.end_on) return { words: 'Day ' + into + ' · no end date', part: null }
+  const end = new Date(motion.end_on + 'T00:00:00'), length = Math.max(1, Math.round((end - start) / day) + 1), left = length - into
+  return { words: left > 0 ? 'Day ' + into + ' of ' + length + ' · ' + left + (left === 1 ? ' day left' : ' days left') : left === 0 ? 'Day ' + into + ' of ' + length + ' · ends today' : 'Ended ' + short(end),
+    part: Math.max(0, Math.min(1, into / length)) }
+}
+
+function Aim({ motion, toMap }) {
+  if (!motion.market_name) return h('div', { className: 'sd-mo-aim', 'data-none': '1' }, h('span', { className: 'stoa-eyebrow' }, 'Aimed at'), h('span', null, 'No market map yet'))
+  const words = motion.segments.length ? motion.segments.join(' · ') : 'All of ' + motion.market_name
+  return h('div', { className: 'sd-mo-aim' }, h('span', { className: 'stoa-eyebrow' }, 'Aimed at'),
+    h('button', { type: 'button', className: 'sd-mo-map', title: 'Open the map: ' + motion.market_name, onClick: event => { event.stopPropagation(); toMap(motion) } }, words),
+    motion.impact.audience ? h('span', { className: 'sd-mo-reach' }, motion.impact.audience_in_pipeline + ' of ' + motion.impact.audience + ' in the pipeline') : null)
+}
+
+const Status = ({ motion }) => h('span', { className: 'sd-mo-status', 'data-status': motion.status }, h('i', null), motion.status_label)
+const Cell = ({ label, value, sub, tone }) => h('div', { className: 'sd-mo-cell' }, h('small', null, label), h('b', { 'data-tone': tone || '' }, value), sub ? h('span', null, sub) : null)
+
+/** A motion that is running or planned: what it is, who it is for, where it stands, and what it has brought in. */
+function MotionCard({ motion, data, open, toMap }) {
+  const impact = motion.impact, cur = data.currency, live = motion.status === 'running', when = timing(motion)
+  const over = impact.budget && impact.spend > impact.budget
+  return h('article', { className: 'sd-mo-card', 'data-status': motion.status, tabIndex: 0, role: 'button', 'aria-label': 'Open ' + motion.name, onClick: open,
+    onKeyDown: event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); open() } } },
+  h('header', null, h('span', { className: 'sd-mo-kind' }, h(KindMark, { kind: motion.kind }), [motion.kind_label, days(motion), motion.owner].filter(Boolean).join(' · ')), h(Status, { motion })),
+  h('h3', null, motion.name),
+  motion.goal ? h('p', { className: 'sd-mo-goal' }, motion.goal) : null,
+  h(Aim, { motion, toMap }),
+  when ? h('div', { className: 'sd-mo-when' }, when.part !== null ? h('span', { className: 'sd-mo-track', role: 'img', 'aria-label': when.words }, h('i', { style: { width: Math.round(when.part * 100) + '%' } })) : null, h('span', null, when.words)) : null,
+  live ? h('div', { className: 'sd-mo-cells' },
+    h(Cell, { label: 'Sourced', value: count(impact.sourced), sub: impact.leads ? impact.leads + ' still leads' : impact.influenced ? '+' + impact.influenced + ' influenced' : '' }),
+    h(Cell, { label: 'Pipeline', value: gtmMoney(impact.pipeline_value, cur), sub: impact.open ? impact.open + ' open' : '' }),
+    h(Cell, { label: 'Won', value: gtmMoney(impact.won_value, cur), sub: impact.won ? impact.won + ' won' : '', tone: impact.won ? 'good' : '' }),
+    h(Cell, { label: 'Spent', value: gtmMoney(impact.spend, cur), sub: impact.budget ? 'of ' + gtmMoney(impact.budget, cur) : '', tone: over ? 'bad' : '' }),
+    h(Cell, { label: 'Came back', value: times(impact.return), sub: !impact.return && impact.pipeline_return ? times(impact.pipeline_return) + ' if won' : '', tone: impact.return >= 1 ? 'good' : '' }))
+    : h('div', { className: 'sd-mo-cells' },
+      h(Cell, { label: 'Budget', value: gtmMoney(motion.budget, cur) }),
+      h(Cell, { label: 'Who it is for', value: impact.audience ? String(impact.audience) : '—', sub: impact.audience ? 'companies on the map' : '' }),
+      h(Cell, { label: 'In the pipeline', value: impact.audience ? String(impact.audience_in_pipeline) : '—', sub: impact.audience ? 'of them already' : '' })))
+}
+
+/** An idea: lighter than a motion that is under way, with the one thing to do about it. */
+function IdeaCard({ motion, open, toMap, plan }) {
+  return h('article', { className: 'sd-mo-card sd-mo-idea', tabIndex: 0, role: 'button', 'aria-label': 'Open ' + motion.name, onClick: open,
+    onKeyDown: event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); open() } } },
+  h('header', null, h('span', { className: 'sd-mo-kind' }, h(KindMark, { kind: motion.kind }), motion.kind_label)),
+  h('h3', null, motion.name),
+  motion.goal ? h('p', { className: 'sd-mo-goal' }, motion.goal) : null,
+  h(Aim, { motion, toMap }),
+  h('footer', null, h('button', { type: 'button', className: 'stoa-btn', title: 'Move it to Planned', onClick: event => { event.stopPropagation(); plan() } }, 'Plan it'),
+    h('span', { className: 'sd-mo-open' }, 'Open  ›')))
+}
+
+function FinishedRow({ motion, currency, open }) {
+  const impact = motion.impact
+  return h('button', { type: 'button', className: 'sd-mo-row', onClick: open, title: motion.goal || 'Open this motion' },
+    h(Status, { motion }),
+    h('span', { className: 'sd-mo-what' }, h('b', null, motion.name), h('span', null, [motion.kind_label, aimedAt(motion), days(motion)].filter(Boolean).join(' · '))),
+    h(Cell, { label: 'Sourced', value: count(impact.sourced) }), h(Cell, { label: 'Won', value: gtmMoney(impact.won_value, currency), tone: impact.won ? 'good' : '' }),
+    h(Cell, { label: 'Spent', value: gtmMoney(impact.spend, currency) }), h(Cell, { label: 'Came back', value: times(impact.return), tone: impact.return >= 1 ? 'good' : '' }))
+}
+
+const GROUPS = [['running', 'Running now', 'In market today. Stoa credits what comes in while each one runs.'], ['planned', 'Planned', 'Decided, and not started yet.'],
+  ['idea', 'Ideas', 'Worth considering. Plan the ones you believe in.'], ['finished', 'Finished', 'Done or stopped, with what each one brought in.']]
+
+/** The Motions view of the GTM tab: every campaign and idea, by where it stands. */
+function Motions({ state, open, toMap }) {
+  const path = usePath()
+  const query = useMotions()
+  const openId = useValue($motionOpen), draft = useValue($motionDraft)
+  const [kind, setKind] = useState('')
+  useEffect(() => { $motionOpen.set(''); $motionDraft.set(null) }, [Boolean(state.tour)])
+  const data = query.data
+  if (!data) return h('p', { className: 'stoa-sub' }, query.error ? 'Motions could not be read: ' + String(query.error.message || query.error) : 'Opening…')
+  if (openId) return h(MotionPage, { id: openId, data, state, path, back: () => $motionOpen.set(''), open, toMap })
+  const totals = data.totals, cur = data.currency, map = data.maps[0], adding = Boolean(draft)
+  const suggest = () => askStoa('Look at my market map “' + map.name + '” with gtm_market. Then suggest three motions for it with gtm_motion, each with status idea, aimed at the segments it fits, '
+    + 'with a goal that says what on the map led to it. Tell me the three in a line each.',
+  'Hermes is reading the map. Its suggestions will appear here as ideas; the talk box shows it working.')
+  const plan = async motion => { try { await api('/app/motions/' + motion.id, { method: 'POST', body: { status: 'planned' } }); again() } catch (error) { host.notifyError(error, 'Not changed') } }
+  const kinds = Object.keys(data.kinds).filter(each => data.motions.some(motion => motion.kind === each))
+  const showing = data.motions.filter(motion => !kind || motion.kind === kind)
+  const inGroup = id => showing.filter(motion => (id === 'finished' ? motion.status === 'done' || motion.status === 'stopped' : motion.status === id))
+  const spent = totals.spend, back = spent && totals.won_value ? Math.round(totals.won_value / spent * 10) / 10 : 0
+  return h('div', { className: 'sd-mo' },
+    h('div', { className: 'sd-mo-bar' },
+      kinds.length > 1 ? h('div', { className: 'sd-mo-kinds', role: 'group', 'aria-label': 'Show one kind of motion' },
+        [['', 'All', data.motions.length]].concat(kinds.map(each => [each, data.kinds[each], data.motions.filter(motion => motion.kind === each).length])).map(([id, label, n]) =>
+          h('button', { type: 'button', key: id || 'all', 'aria-pressed': kind === id, onClick: () => setKind(id) }, id ? h(KindMark, { kind: id }) : null, label, h('small', null, n)))) : h('span', null),
+      h('div', { className: 'sd-mo-acts' },
+        map && !adding ? h('button', { type: 'button', className: 'stoa-btn', onClick: suggest, title: 'Hermes reads the map and proposes motions as ideas' }, 'Suggest motions') : null,
+        !adding ? h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'primary', onClick: () => $motionDraft.set({}) }, '+  New motion') : null)),
+    adding ? h(MotionForm, { data, path, preset: draft, done: id => { $motionDraft.set(null); if (id) $motionOpen.set(id) } }) : null,
+    data.motions.length ? h('div', { className: 'sd-mo-totals' },
+      h(Cell, { label: 'Running', value: String(totals.running), sub: 'of ' + data.motions.length + (data.motions.length === 1 ? ' motion' : ' motions') }),
+      h(Cell, { label: 'Sourced', value: count(totals.sourced), sub: [totals.leads ? totals.leads + ' still leads' : '', totals.influenced ? totals.influenced + ' influenced' : ''].filter(Boolean).join(' · ') }),
+      h(Cell, { label: 'In the pipeline', value: gtmMoney(totals.pipeline_value, cur) }),
+      h(Cell, { label: 'Won', value: gtmMoney(totals.won_value, cur), tone: totals.won_value ? 'good' : '' }),
+      h(Cell, { label: 'Spent', value: gtmMoney(spent, cur) }),
+      h(Cell, { label: 'Came back', value: times(back), tone: back >= 1 ? 'good' : '' })) : null,
+    data.motions.length ? GROUPS.map(([id, title, what]) => {
+      const rows = inGroup(id)
+      if (!rows.length) return null
+      return h('section', { key: id, className: 'sd-mo-group', 'data-group': id },
+        h('div', { className: 'sd-mo-head' }, h('h3', null, title, h('sup', null, rows.length)), h('p', null, what)),
+        id === 'finished' ? h('div', { className: 'sd-mo-rows' }, rows.map(motion => h(FinishedRow, { key: motion.id, motion, currency: cur, open: () => $motionOpen.set(motion.id) })))
+          : h('div', { className: 'sd-mo-grid', 'data-kind': id }, rows.map(motion => (id === 'idea'
+            ? h(IdeaCard, { key: motion.id, motion, toMap, open: () => $motionOpen.set(motion.id), plan: () => plan(motion) })
+            : h(MotionCard, { key: motion.id, motion, data, toMap, open: () => $motionOpen.set(motion.id) })))))
+    }) : adding ? null : h('div', { className: 'sd-mo-empty' },
+      h('h3', null, 'No motions yet'),
+      h('p', null, map ? 'A motion is one play to break into the market: an outbound push, an event, a run of ads. Aim it at the map, or at the segments worth going after. Once it is running, Stoa credits it with the '
+        + ((data.terms && data.terms.deals) || 'records') + ' that come in from the companies it is aimed at, and with any whose Source or notes mention it. Log what it costs and Stoa shows what came back.'
+        : 'A motion is one play to break into a market, and it is aimed at a market map. Map a market first, under Maps, then come back and plan how to break into it.'),
+      h('div', { className: 'sd-mo-kindrow' }, Object.entries(data.kinds).filter(([id]) => id !== 'other').map(([id, label]) => h('span', { key: id }, h(KindMark, { kind: id }), label))),
+      h('div', { className: 'stoa-btns' },
+        h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'primary', onClick: () => $motionDraft.set({}) }, '+  New motion'),
+        map ? h('button', { type: 'button', className: 'stoa-btn', onClick: suggest }, 'Suggest motions from the map') : null)))
+}
+
+// The GTM tab: how a team sells.
+//
+// Three views, chosen by name, and any of them can be pinned as the one the tab opens on:
+//
+//   Maps      where we play, how we win, and what has to be true: the market map, drawn as a dial (dial.js), under
+//             the three answers read off it. The map is also what says what the business does.
+//   Motions   the campaigns and ideas that carry the go-to-market (motions.js).
+//   Assets    what the person reaches for when they sell: the deck, a one-pager, a case study, and its links.
+//
+// The Stoa page draws its own market map as before and hands it here as `children`. It also draws `MapStrategy`,
+// from here, above the picture. All of this sits inside the page, so it uses the page's own classes for plain things.
+
+// -- assets: the key files and the links ---------------------------------------------------------------------------
+const HUB = ['stoa', 'gtm', 'hub']
+const refreshHub = () => queryClient.invalidateQueries({ queryKey: HUB })
+const useHub = () => useQuery({ queryKey: HUB, queryFn: () => api('/app/hub'), staleTime: 3000 })
+const PIECE = 2 * 1024 * 1024, ASSET_MOST = 250 * 1000 * 1000
+const base64Of = blob => new Promise((resolve, reject) => {
+  const reader = new FileReader()
+  reader.onload = () => resolve(String(reader.result).split(',')[1] || '')
+  reader.onerror = () => reject(reader.error || new Error('The file could not be read'))
+  reader.readAsDataURL(blob)
+})
+/** A file kept with the desk, saved to this computer: it comes in pieces, as it went. */
+async function saveCopy(asset) {
+  try {
+    const pieces = []
+    let parts = 1, name = asset.name || asset.label
+    for (let part = 0; part < parts; part++) {
+      const got = await api('/app/hub/assets/' + asset.id + '/file?part=' + part)
+      parts = got.parts; name = got.name || name
+      pieces.push(Uint8Array.from(atob(got.data), ch => ch.charCodeAt(0)))
+    }
+    const url = URL.createObjectURL(new Blob(pieces))
+    const link = document.createElement('a')
+    link.href = url; link.download = name
+    document.body.appendChild(link); link.click(); link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 4000)
+  } catch (error) { host.notifyError(error, 'Not saved') }
+}
+const bytes = size => (size >= 1e6 ? (size / 1e6).toFixed(1) + ' MB' : Math.max(1, Math.round(size / 1e3)) + ' KB')
+
+function Links({ hub }) {
+  const [adding, setAdding] = useState(false)
+  const [row, setRow] = useState({ label: '', url: '' })
+  const add = async () => {
+    try { queryClient.setQueryData(HUB, await api('/app/hub/links', { method: 'POST', body: row })); setRow({ label: '', url: '' }); setAdding(false) } catch (error) { host.notifyError(error, 'Not added') }
+  }
+  const remove = async id => { try { queryClient.setQueryData(HUB, await api('/app/hub/items/' + id + '/remove', { method: 'POST', body: {} })) } catch (error) { host.notifyError(error, 'Not removed') } }
+  return h('div', { className: 'sd-hub-list' },
+    h('h3', null, 'Links'),
+    !hub.links.length && !adding ? h('p', { className: 'stoa-sub', style: { margin: '6px 0 0' } }, 'The website, the booking page, the pricing page: one press away.') : null,
+    hub.links.map(link => h('div', { key: link.id, className: 'sd-m-line' },
+      h('a', { className: 'sd-hub-item stoa-grow', href: link.url, target: '_blank', rel: 'noopener noreferrer', title: link.url }, h('span', { className: 'stoa-name' }, link.label),
+        h('span', { className: 'stoa-sub' }, '  ' + link.url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, ''))),
+      h('button', { type: 'button', className: 'sd-m-x', title: 'Remove this link', 'aria-label': 'Remove ' + link.label, onClick: () => remove(link.id) }, '×'))),
+    adding ? h('div', { className: 'sd-hub-add' },
+      h('input', { className: 'stoa-field', placeholder: 'Website, booking page…', value: row.label, autoFocus: true, 'aria-label': 'What the link is', onChange: event => setRow({ ...row, label: event.target.value }) }),
+      h('input', { className: 'stoa-field', placeholder: 'https://', value: row.url, 'aria-label': 'The address', onChange: event => setRow({ ...row, url: event.target.value }),
+        onKeyDown: event => { if (event.key === 'Enter' && row.url.trim()) add() } }),
+      h('button', { type: 'button', className: 'stoa-btn', disabled: !row.url.trim(), onClick: add }, 'Add'),
+      h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'quiet', onClick: () => setAdding(false) }, 'Cancel'))
+      : h('button', { type: 'button', className: 'stoa-btn sd-hub-plus', 'data-kind': 'quiet', onClick: () => setAdding(true) }, '+  Link'))
+}
+
+function Assets({ hub }) {
+  const [mode, setMode] = useState('')        // '' | 'link'
+  const [row, setRow] = useState({ label: '', url: '', kind: 'deck' })
+  const [over, setOver] = useState(false)
+  const [busy, setBusy] = useState('')
+  const picker = useRef(null)
+  const upload = async files => {
+    for (const file of [...files]) {
+      setBusy('Keeping ' + file.name + '…')
+      try {
+        if (file.size > ASSET_MOST) throw new Error('That file is larger than 250 MB. Keep it where it is and add a link to it instead.')
+        const upload = Array.from(crypto.getRandomValues(new Uint8Array(8)), byte => byte.toString(16).padStart(2, '0')).join('')
+        let answer = null
+        for (let part = 0; ; part++) {
+          const from = part * PIECE, last = from + PIECE >= file.size
+          answer = await api('/app/hub/files', { method: 'POST', body: { upload, name: file.name, part, last, data: await base64Of(file.slice(from, from + PIECE)) } })
+          if (last) break
+          setBusy('Keeping ' + file.name + '… ' + Math.round(100 * (from + PIECE) / file.size) + '%')
+        }
+        queryClient.setQueryData(HUB, answer)
+      } catch (error) { host.notifyError(error, file.name + ' was not kept') }
+    }
+    setBusy('')
+  }
+  const addLink = async () => {
+    try { queryClient.setQueryData(HUB, await api('/app/hub/assets', { method: 'POST', body: row })); setRow({ label: '', url: '', kind: 'deck' }); setMode('') } catch (error) { host.notifyError(error, 'Not added') }
+  }
+  const open = asset => (asset.url ? window.open(asset.url, '_blank', 'noopener') : saveCopy(asset))
+  const remove = async asset => { try { queryClient.setQueryData(HUB, await api('/app/hub/items/' + asset.id + '/remove', { method: 'POST', body: {} })) } catch (error) { host.notifyError(error, 'Not removed') } }
+  const carrying = event => Boolean(event.dataTransfer) && [...event.dataTransfer.types].includes('Files')
+  return h('div', { className: 'sd-hub-list', 'data-over': over ? '1' : '0',
+    // A file dropped here is an asset. The page around it takes dropped files for the agent, so the drop stops here.
+    onDragOver: event => { if (carrying(event)) { event.preventDefault(); event.stopPropagation(); setOver(true) } },
+    onDragLeave: event => { if (!event.currentTarget.contains(event.relatedTarget)) setOver(false) },
+    onDrop: event => { if (!carrying(event)) return; event.preventDefault(); event.stopPropagation(); setOver(false); upload(event.dataTransfer.files) } },
+  h('h3', null, 'Key assets'),
+  hub.assets.map(asset => h('div', { key: asset.id, className: 'sd-m-line' },
+    h('button', { type: 'button', className: 'sd-m-open stoa-grow', onClick: () => open(asset), title: asset.url || 'Open ' + asset.name },
+      h('span', { className: 'stoa-name' }, asset.label), h('span', { className: 'stoa-sub' }, '  ' + (asset.url ? asset.url.replace(/^https?:\/\/(www\.)?/, '').split('/')[0] : bytes(asset.size)))),
+    h('span', { className: 'stoa-chip' }, asset.kind_label),
+    asset.file ? h('button', { type: 'button', className: 'sd-m-x', title: 'Save a copy', 'aria-label': 'Save a copy of ' + asset.label, onClick: () => saveCopy(asset) }, '↓') : null,
+    h('button', { type: 'button', className: 'sd-m-x', title: 'Remove it from the desk', 'aria-label': 'Remove ' + asset.label, onClick: () => remove(asset) }, '×'))),
+  !hub.assets.length && !mode ? h('p', { className: 'stoa-sub', style: { margin: '6px 0 0' } }, 'The pitch deck, a one-pager, a case study. Drop a file here, or link to where it lives.') : null,
+  busy ? h('p', { className: 'stoa-sub', style: { margin: '6px 0 0' } }, busy) : null,
+  mode === 'link' ? h('div', { className: 'sd-hub-add', style: { gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr) 118px auto auto' } },
+    h('input', { className: 'stoa-field', placeholder: 'Pitch deck, autumn', value: row.label, autoFocus: true, 'aria-label': 'What the asset is', onChange: event => setRow({ ...row, label: event.target.value }) }),
+    h('input', { className: 'stoa-field', placeholder: 'https://', value: row.url, 'aria-label': 'Where it lives', onChange: event => setRow({ ...row, url: event.target.value }) }),
+    h('select', { className: 'stoa-field', value: row.kind, 'aria-label': 'What kind of asset', onChange: event => setRow({ ...row, kind: event.target.value }) },
+      Object.entries(hub.kinds).map(([id, text]) => h('option', { key: id, value: id }, text))),
+    h('button', { type: 'button', className: 'stoa-btn', disabled: !row.label.trim() || !row.url.trim(), onClick: addLink }, 'Add'),
+    h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'quiet', onClick: () => setMode('') }, 'Cancel'))
+    : h('div', { className: 'sd-hub-plus' },
+      h('input', { ref: picker, type: 'file', multiple: true, hidden: true, onChange: event => { upload(event.target.files); event.target.value = '' } }),
+      h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'quiet', onClick: () => picker.current && picker.current.click() }, '+  File'),
+      h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'quiet', onClick: () => setMode('link') }, '+  Link to one')))
+}
+
+/** The Assets view of the GTM tab: what the person reaches for when they sell. Files kept with the desk, and links. */
+function AssetsView() {
+  const hub = useHub().data
+  if (!hub) return h('p', { className: 'stoa-sub' }, 'Opening…')
+  return h('div', { className: 'sd-assets' }, h(Assets, { hub }), h(Links, { hub }))
+}
+
+// -- above the map: the three answers a map gives ------------------------------------------------------------------
+const squares = fit => { const n = Math.max(1, Math.min(5, Math.round(fit))); return h('span', { className: 'stoa-fit', 'data-fit': n, title: 'Average fit ' + (Math.round(fit * 10) / 10) + ' of 5' }, '■'.repeat(n), h('s', null, '■'.repeat(5 - n))) }
+
+// A map carries two notes. The external one is its brief: what you sell and who to, printed on the map wherever it
+// is shared. The internal one is this app's own and is never printed or sent: positioning, pricing, what to say
+// and what to leave out. Stoa's agent, and Claude, work from both and are told which is which.
+const NOTES = ['stoa', 'gtm', 'mapnotes']
+const useNotes = () => useQuery({ queryKey: NOTES, queryFn: () => api('/app/maps/notes'), staleTime: 3000 })
+
+function Note({ label, tag, tone, words, empty, placeholder, hint, most, save }) {
+  const [text, setText] = useState(null)        // null: reading; a string: writing
+  const [busy, setBusy] = useState(false)
+  const keep = async () => {
+    setBusy(true)
+    try { await save(text); setText(null) } catch (error) { host.notifyError(error, 'Not saved') }
+    setBusy(false)
+  }
+  const head = h('div', { className: 'sd-note-head' }, h('span', { className: 'stoa-eyebrow' }, label), h('span', { className: 'sd-note-tag', 'data-tone': tone }, tag),
+    text === null && words ? h('button', { type: 'button', className: 'sd-strat-edit', onClick: () => setText(words) }, 'Edit') : null)
+  if (text !== null) return h('div', { className: 'sd-note' }, head,
+    h('textarea', { className: 'stoa-field sd-m-area', rows: 4, autoFocus: true, maxLength: most, value: text, 'aria-label': label, placeholder, onChange: event => setText(event.target.value),
+      onKeyDown: event => { if (event.key === 'Escape') setText(null); if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) keep() } }),
+    h('p', { className: 'sd-strat-shared' }, hint),
+    h('div', { className: 'stoa-btns', style: { marginTop: 8 } },
+      h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'primary', disabled: busy || (!text.trim() && !words), onClick: keep }, 'Save'),
+      h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'quiet', onClick: () => setText(null) }, 'Cancel')))
+  return h('div', { className: 'sd-note' }, head,
+    words ? h('p', { className: 'sd-strat-lead', title: words }, words)
+      : h('button', { type: 'button', className: 'sd-note-empty', onClick: () => setText('') }, empty))
+}
+
+function MapNotes({ market, mapKey, words: say }) {
+  const notes = useNotes().data || {}
+  const key = mapKey || ':' + market.id
+  return h('div', { className: 'sd-notes' },
+    h(Note, { label: 'External', tag: 'printed on the map', tone: 'out', words: market.brief || '', most: 1200,
+      empty: say.briefEmpty, placeholder: say.briefPlace, hint: say.briefHint,
+      save: text => (text.trim() ? api('/app/maps/brief', { method: 'POST', body: { map: key, text } }) : Promise.reject(new Error(say.briefNeeded))) }),
+    h(Note, { label: 'Internal', tag: 'never printed or sent to a client', tone: 'in', words: notes[key] || '', most: 4000,
+      empty: say.notesEmpty, placeholder: say.notesPlace,
+      hint: 'Never printed on the map, exported or posted. They do go to the model Hermes runs on, as part of what it works from, and it is told not to quote them.',
+      save: async text => { queryClient.setQueryData(NOTES, await api('/app/maps/notes', { method: 'POST', body: { map: key, text } })) } }))
+}
+
+/** Where we play, how we win, and what has to be true, read off the map the page is showing. Pressing a row that
+    names a group of companies lights them up on the dial below (the page's own way of doing that: `setFacet`).
+    On a recruiting pipeline the same three are where to look, how to pitch the role, and what the role needs. */
+function MapStrategy({ market, list, facet, setFacet, shape }) {
+  const say = gtmWords(shape, market)
+  const motions = useMotions().data
+  const lit = (kind, value) => Boolean(facet) && facet.kind === kind && facet.value === value
+  const light = (kind, value, label) => setFacet(lit(kind, value) ? null : { kind, value, label })
+  const segments = (market.segments || []).map(segment => {
+    const here = list.filter(c => c.segment === segment.name)
+    return { name: segment.name, about: segment.description || '', count: here.length, fit: here.length ? here.reduce((sum, c) => sum + c.score, 0) / here.length / 20 : 0, now: here.filter(c => c.rank >= 75 && c.status !== 'tracked').length }
+  }).filter(segment => segment.count)
+  const aimed = motions ? motions.motions.filter(motion => motion.market === market.id && motion.status !== 'stopped') : []
+  const mapKey = motions ? (motions.maps.find(one => one.id === market.id) || {}).key || '' : ''
+  const implications = (market.implications || []).slice(0, 4)
+  const reading = String(market.reading || '').split('\n').filter(Boolean)[0] || ''
+  const holds = (market.holds || []).slice(0, 5)
+    // Where candidates work is worth a line only where two or more of them share an employer; eight employers of one each is the list again.
+    .filter(hold => !say.people || hold.count > 1)
+  const rates = market.rates || []
+  const read = () => askStoa(say.readAsk(market.name), 'Hermes is reading the map. What it finds appears here; the talk box shows it working.')
+  const toMotion = id => { $motionOpen.set(id); $motionDraft.set(null); $gtmView.set('motions') }
+  const planOne = () => { $motionOpen.set(''); $motionDraft.set({ market: mapKey }); $gtmView.set('motions') }
+  const toWeights = () => { const el = document.querySelector('.sd-maps .stoa-mapcols'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
+  return h('section', { className: 'sd-strat', 'aria-label': 'What this map says' },
+    h('div', { className: 'sd-strat-col' },
+      h('div', { className: 'sd-strat-n' }, '01'), h('h3', null, say.play),
+      h(MapNotes, { market, mapKey, words: say }),
+      segments.map(segment => h('div', { key: segment.name, className: 'sd-strat-row sd-strat-seg' }, h('span', null, segment.name, segment.about ? h('small', null, segment.about) : null),
+        segment.now ? h('em', null, say.now(segment.now)) : h('em', null), h('b', { title: segment.count + ' ' + (segment.count === 1 ? say.thing : say.things) }, segment.count), squares(segment.fit)))),
+    h('div', { className: 'sd-strat-col' },
+      h('div', { className: 'sd-strat-n' }, '02'), h('h3', null, say.win),
+      implications.length ? h('ol', null, implications.map((text, index) => h('li', { key: index }, text)))
+        : reading ? h('p', { className: 'sd-strat-lead', title: reading }, reading)
+          : h('div', null, h('p', { className: 'sd-strat-lead', 'data-empty': '1' }, say.noWin),
+            h('button', { type: 'button', className: 'stoa-btn', onClick: read }, 'Ask Hermes to read the map')),
+      holds.length ? [h('div', { key: 'h', className: 'sd-strat-sub' }, say.uses),
+        h('div', { key: 'c', className: 'sd-strat-chips' }, holds.map(hold => h('button', { type: 'button', key: hold.name, 'aria-pressed': lit('uses', hold.name), title: say.usesTitle(hold.count, market.holds_of),
+          onClick: () => light('uses', hold.name, (say.people ? 'Works at: ' : 'Uses: ') + hold.name) }, hold.name, h('small', null, hold.share + '%'))))] : null,
+      // A motion is a play for selling into a market; a search for one role has no use for one.
+      say.motions ? h('div', { className: 'sd-strat-sub' }, 'Motions aimed here') : null,
+      !say.motions ? null : aimed.slice(0, 3).map(motion => h('button', { type: 'button', key: motion.id, className: 'sd-strat-row sd-strat-motion', title: motion.goal || 'Open this motion', onClick: () => toMotion(motion.id) },
+        h('span', null, motion.name), h('em', { 'data-status': motion.status }, motion.status_label), h('b', null, motion.impact.sourced ? motion.impact.sourced + ' sourced' : '›'))),
+      say.motions ? h('button', { type: 'button', className: 'sd-strat-link', onClick: planOne }, aimed.length ? '+  Plan another motion' : '+  Plan a motion for this map') : null),
+    h('div', { className: 'sd-strat-col' },
+      h('div', { className: 'sd-strat-n' }, '03'), h('h3', null, say.needs),
+      rates.length ? [h('p', { key: 'p', className: 'sd-strat-lead' }, say.needsLead),
+        rates.map(rate => h('button', { type: 'button', key: rate.label, className: 'sd-strat-row sd-strat-rate', 'aria-pressed': lit('req', rate.label),
+          title: (rate.of ? rate.shown + ' of ' + rate.of + ' companies show it. ' : 'Not checked yet. ') + 'Press to light them up on the map.', onClick: () => light('req', rate.label, 'Shows: ' + rate.label) },
+        h('span', null, rate.label), h('i', { className: 'sd-strat-meter' }, h('i', { style: { width: Math.max(2, rate.rate) + '%' } })), h('b', null, rate.of ? rate.rate + '%' : '—'))),
+        h('button', { key: 'w', type: 'button', className: 'sd-strat-link', onClick: toWeights }, 'Change how much each one counts  ↓')]
+        : h('p', { className: 'sd-strat-lead', 'data-empty': '1' }, say.noNeeds)),
+    // A map is something people send on, and the plugin prints these on it. Say so where they are read and written.
+    h('p', { className: 'sd-strat-shared sd-strat-foot' }, say.foot))
+}
+
+// -- the head of a map: its numbers, and putting it away ---------------------------------------------------------
+/** The map by the numbers, each one large, above what the map says and above the picture. */
+function MapNumbers({ market, list, who, updated, shape }) {
+  const say = gtmWords(shape, market)
+  const named = list.filter(c => c.buyer).length
+  const employers = new Set(list.map(c => (c.uses || '').toLowerCase()).filter(Boolean)).size
+  const cap = text => text.replace(/^./, ch => ch.toUpperCase())
+  const items = [[list.length, cap(list.length === 1 ? say.thing : say.things), ''],
+    [market.numbers.in_pipeline, say.inPipe, say.recruiting ? 'Companies on this map that someone in your pipeline comes from' : 'Companies from this map that are records in your pipeline'],
+    [list.filter(c => c.reason).length, say.reasonCap, say.recruiting ? 'Something has happened there that would make people open to a move' : 'Something has happened there that makes now a good time'],
+    // On a candidate map every dot is a person, so "people named" says nothing: where they work does.
+    say.people ? [employers, employers === 1 ? 'Employer' : 'Employers', 'The companies these candidates work at now'] : [named, cap(named === 1 ? who.one : who.many) + ' named', '']]
+  return h('div', { className: 'sd-mapnums', role: 'group', 'aria-label': 'This map by the numbers' },
+    items.map(item => h('div', { key: item[1], title: item[2] || undefined }, h('b', null, item[0]), h('small', null, item[1]))),
+    updated ? h('div', { className: 'sd-mapnums-when' }, h('b', null, updated), h('small', null, 'Updated')) : null)
+}
+
+const ARCHIVED = ['stoa', 'gtm', 'archived']
+const mapsAgain = () => { queryClient.invalidateQueries({ queryKey: ARCHIVED }); queryClient.invalidateQueries({ queryKey: ['stoa'] }); queryClient.invalidateQueries({ queryKey: KEY }) }
+const putBack = key => api('/app/maps/restore', { method: 'POST', body: { key } })
+  .then(done => { mapsAgain(); host.notify({ kind: 'success', message: '“' + done.name + '” is back among your maps.' }) }).catch(error => host.notifyError(error, 'Not put back'))
+const companies = n => n + (n === 1 ? ' company' : ' companies')
+
+/** At the foot of the Maps view, when any map is archived: each one, to put back or to delete for good. It is here as
+    well as in a map's menu because with every map archived there is no map, and so no menu, to find them in. */
+function ArchivedMaps() {
+  const kept = useQuery({ queryKey: ARCHIVED, queryFn: () => api('/app/maps/archived'), staleTime: 3000 }).data || []
+  const [sure, setSure] = useState('')
+  if (!kept.length) return null
+  const day = stamp => { const when = stamp ? new Date(stamp) : null; return when && !isNaN(when) ? when.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '' }
+  const destroy = row => api('/app/maps/destroy', { method: 'POST', body: { key: row.key } })
+    .then(done => { setSure(''); mapsAgain(); host.notify({ kind: 'success', message: '“' + done.name + '” was deleted, with ' + companies(done.companies) + '.' }) }).catch(error => host.notifyError(error, 'Not deleted'))
+  return h('section', { className: 'sd-maps-archived', 'aria-label': 'Archived maps' },
+    h('div', { className: 'stoa-eyebrow' }, 'Archived maps'),
+    kept.map(row => h('div', { key: row.key, className: 'sd-maps-arow' },
+      h('span', null, h('b', null, row.name), h('small', null, [companies(row.companies), row.pipeline_name, day(row.at) ? 'archived ' + day(row.at) : ''].filter(Boolean).join(' · '))),
+      h('button', { type: 'button', className: 'stoa-btn', onClick: () => putBack(row.key) }, 'Put back'),
+      sure === row.key ? h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'danger', title: 'The map and every company on it go for good. Records already in your pipeline stay.', onClick: () => destroy(row) }, 'Delete it for good')
+        : h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'quiet', onClick: () => { setSure(row.key); setTimeout(() => setSure(now => (now === row.key ? '' : now)), 5000) } }, 'Delete…'))))
+}
+/** In the map's menu: put this map away, and the maps already put away, each of which a press puts back. */
+function MapArchive({ market, pipe }) {
+  const kept = useQuery({ queryKey: ARCHIVED, queryFn: () => api('/app/maps/archived'), staleTime: 3000 }).data || []
+  const again = mapsAgain, back = putBack
+  const away = () => api('/app/market/' + encodeURIComponent(market.id) + '/archive', { method: 'POST', body: {}, pipeline: pipe || '' })
+    .then(done => { again(); host.notify({ kind: 'success', title: '“' + done.name + '” was archived', message: 'Nothing on it was lost. It is under Archived maps at the foot of this tab, to put back or delete.' }) })
+    .catch(error => host.notifyError(error, 'Not archived'))
+  const count = companies
+  return [
+    h('button', { key: 'away', type: 'button', role: 'menuitem', className: 'stoa-menuitem', onClick: away }, h('span', null, 'Archive this map'), h('small', null, 'Out of your lists, with everything on it kept. It can be put back.')),
+    kept.length ? h('div', { key: 'rule', className: 'stoa-menurule' }) : null,
+    kept.length ? h('div', { key: 'head', className: 'sd-menuhead' }, 'Archived · press one to put it back') : null,
+    ...kept.map(row => h('button', { key: row.key, type: 'button', role: 'menuitem', className: 'stoa-menuitem', title: 'Put “' + row.name + '” back among your maps', onClick: () => back(row.key) },
+      h('span', null, row.name), h('small', null, [count(row.companies), row.pipeline_name].filter(Boolean).join(' · ')))),
+    kept.length ? h('div', { key: 'rule2', className: 'stoa-menurule' }) : null]
+}
+
+// -- the tab ----------------------------------------------------------------------------------------------------
+const VIEWS = [['maps', 'Maps', 'Where we play, how we win, and what has to be true.'], ['motions', 'Motions', 'The campaigns and ideas that carry the go-to-market.'],
+  ['assets', 'Assets', 'What you reach for when you sell: the deck, a one-pager, a case study, and the links worth having to hand.']]
+
+/** What the Stoa page draws on its market tab in this app: Maps, Motions or Assets. `children` is the page's own market map. */
+function GtmTab({ state, openRecord, showPipe, children }) {
+  const view = useValue($gtmView)
+  const [pinned, setPinned] = useState(() => { const kept = storage ? storage.get('gtm.view', '') : ''; return VIEWS.some(item => item[0] === kept) ? kept : 'maps' })
+  const motions = useMotions().data, hub = useHub().data
+  // A record a motion is credited with may be in another pipeline than the one showing: show that one, then open it.
+  const open = (id, pipeline) => {
+    if (pipeline && pipeline !== state.pipeline && showPipe && (state.pipelines || []).some(one => one.id === pipeline)) showPipe(pipeline)
+    openRecord(id)
+  }
+  // A motion's map may be in another pipeline too. The page shows the first map of a pipeline; with several, pick it from the map's own menu.
+  const toMap = motion => {
+    const pipeline = String(motion.market_key || '').split(':')[0]
+    if (pipeline && pipeline !== state.pipeline && showPipe && (state.pipelines || []).some(one => one.id === pipeline)) showPipe(pipeline)
+    $gtmView.set('maps')
+  }
+  const pin = () => { setPinned(view); try { storage.set('gtm.view', view) } catch { /* no storage: it opens on Maps */ } }
+  const pipes = state.pipelines || []
+  const counts = { maps: (state.markets || []).length, motions: motions ? motions.motions.length : 0, assets: hub ? hub.assets.length + hub.links.length : 0 }
+  const now = VIEWS.find(item => item[0] === view) || VIEWS[0]
+  const shape = (state.playbook || {}).shape
+  return h('div', { className: 'sd-gtm' },
+    h('div', { className: 'sd-gtm-bar' },
+      h('div', { className: 'sd-gtm-views', role: 'tablist', 'aria-label': 'What the GTM tab shows' }, VIEWS.map(item =>
+        h('button', { type: 'button', key: item[0], role: 'tab', id: 'sd-gtm-' + item[0], className: 'sd-gtm-view', 'aria-selected': view === item[0], onClick: () => $gtmView.set(item[0]) }, item[1], counts[item[0]] ? h('sup', null, counts[item[0]]) : null))),
+      h('button', { type: 'button', className: 'sd-gtm-pin', 'aria-pressed': pinned === view, disabled: pinned === view, onClick: pin,
+        title: pinned === view ? 'The GTM tab opens on ' + now[1] : 'Make ' + now[1] + ' the view the GTM tab opens on' },
+      h('svg', { width: 13, height: 13, viewBox: '0 0 14 14', 'aria-hidden': 'true' }, h('path', { d: 'M5 1.8h4l-.5 4 2 2.2v1H3.5V8l2-2.2zM7 9v3.6' })),
+      pinned === view ? 'Opens here' : 'Pin as the opening view')),
+    h('p', { className: 'sd-gtm-what' }, view === 'maps' ? gtmWords(shape).tab : now[2]),
+    view === 'maps' ? h('div', { className: 'sd-maps', role: 'tabpanel', 'aria-labelledby': 'sd-gtm-maps' },
+      // A market map is kept with the pipeline it was made in. With several pipelines, say which one's maps these are.
+      pipes.length > 1 && showPipe ? h('div', { className: 'sd-gtm-pipes' }, h('span', { className: 'stoa-sub' }, 'Maps are kept with a pipeline, and “Add to pipeline” adds to that one. Showing:'),
+        pipes.map(one => h('button', { type: 'button', key: one.id, className: 'stoa-btn', 'data-on': one.id === state.pipeline ? '1' : '0', 'aria-pressed': one.id === state.pipeline, onClick: () => showPipe(one.id) }, one.name))) : null,
+      children, h(ArchivedMaps))
+      : view === 'assets' ? h('div', { role: 'tabpanel', 'aria-labelledby': 'sd-gtm-assets' }, h(AssetsView))
+        : h('div', { role: 'tabpanel', 'aria-labelledby': 'sd-gtm-motions' }, h(Motions, { state, open, toMap })))
+}
+
+// The head of the Pipeline tab: which pipeline is showing, which of its searches, and its figures.
+//
+// Every pipeline on the desk is there by name with what it holds (leads, deals, candidates) and how many are open.
+// Up to four sit in a row, the one showing filled in; more than four fold into one button that opens the list, so
+// a desk with many pipelines keeps a head of one line.
+//
+// A pipeline is a way of working: its own stages. What there are many of is inside it: on a recruiting pipeline the
+// searches, one for each client's role (the playbook's "group", so an account or a project on other playbooks).
+// Beside the pipelines is the picker for those: every one, under its client, with how many are open in it, a box to
+// find one by name once there are more than a few, and a place to open a new one. Choosing one narrows the board,
+// and the list to it: it sets the page's own filter, the one its small "All searches" menu sets. While one is
+// chosen the figures under the pickers are that search's, and the page's funnel, which is always the whole
+// pipeline's, is put away so that nothing on the tab counts something else.
+//
+// Under them are a line on what this kind of pipeline is for and the pipeline's figures. A lead pipeline also says
+// which deal pipeline it hands over to: a lead that reaches its last stage becomes a deal there by itself.
+//
+// Drawn inside the Stoa page, above its own funnel and board, with the page's own classes. The page hands in
+// `showPipe`, its way of switching to another pipeline, and `filter`, its store of what the board is narrowed to.
+
+const PKEY = ['stoa', 'gtm', 'pipelines']
+const pipesAgain = () => queryClient.invalidateQueries({ queryKey: PKEY })
+
+// What each kind of pipeline is for, in a line.
+const FOR = {
+  leads: 'The long list: people to work before there is a deal. A lead that reaches the last stage becomes a deal by itself.',
+  deals: 'What is real: one record for each piece of business, from the first conversation to closed.',
+  roles: 'Recruiting: one record for each candidate, from the first approach to placed, kept in searches. One for each client’s role.'
+}
+
+const ROW_MOST = 4       // pipelines shown side by side; more than this and they fold into one button
+
+/** A button that opens a list under it. The list closes on a press anywhere else, or Escape. `children` is given the way to close it. */
+function Drop({ label, sub, title, on, name, children }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef(null), list = useRef(null)
+  // The list opens under its button and stays inside the tab: where it would run past the right edge it is moved
+  // back by that much (never past the left edge), and where the tab is narrower than it, it is as wide as the tab.
+  // Its find box takes the keys once it is in place, without the page being scrolled to it.
+  useEffect(() => {
+    const el = list.current, around = box.current && box.current.closest('.sd-p')
+    if (!open || !el || !around) return
+    const room = around.getBoundingClientRect(), from = box.current.getBoundingClientRect()
+    el.style.maxWidth = Math.floor(room.width) + 'px'
+    const over = el.getBoundingClientRect().right - room.right
+    el.style.left = (over > 0 ? Math.max(room.left - from.left, -over) : 0) + 'px'
+    const find = el.querySelector('input')
+    if (find) find.focus({ preventScroll: true })
+  }, [open])
+  useEffect(() => {
+    if (!open) return undefined
+    const away = event => { if (box.current && !box.current.contains(event.target)) setOpen(false) }
+    const key = event => { if (event.key === 'Escape') setOpen(false) }
+    document.addEventListener('pointerdown', away)
+    document.addEventListener('keydown', key)
+    return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', key) }
+  }, [open])
+  return h('div', { ref: box, className: 'sd-drop', 'data-name': name },
+    h('button', { type: 'button', className: 'sd-pp-item sd-drop-btn', 'data-on': on ? '1' : '0', title, 'aria-haspopup': 'true', 'aria-expanded': open, onClick: () => setOpen(!open) },
+      h('b', null, h('span', null, label), h('i', { 'aria-hidden': true }, '▾')), h('small', null, sub)),
+    open ? h('div', { ref: list, className: 'sd-drop-list' }, children(() => setOpen(false))) : null)
+}
+
+const holds = card => cap(card.records) + ' · ' + card.open + ' open' + (card.due ? ' · ' + card.due + ' due' : '')
+
+/** The pipeline picker: every pipeline, by name, with what it holds and how many are open. A row of up to four; a list to open beyond that. */
+function Picker({ cards, showing, pick }) {
+  if (cards.length > ROW_MOST) {
+    const now = cards.find(card => card.id === showing) || cards[0]
+    return h(Drop, { name: 'pipelines', label: now.name, sub: holds(now), on: true, title: 'Your ' + cards.length + ' pipelines: show another' }, close =>
+      cards.map(card => h('button', { type: 'button', key: card.id, className: 'sd-drop-row', 'aria-current': card.id === showing ? 'true' : undefined, 'data-on': card.id === showing ? '1' : '0',
+        onClick: () => { close(); if (card.id !== showing) pick(card.id) } }, h('b', null, card.name), h('small', null, holds(card)))))
+  }
+  return h('div', { className: 'sd-pp', role: 'tablist', 'aria-label': 'Which pipeline is showing' }, cards.map(card =>
+    h('button', { type: 'button', key: card.id, role: 'tab', className: 'sd-pp-item', 'aria-selected': card.id === showing, 'data-on': card.id === showing ? '1' : '0',
+      title: card.id === showing ? card.name + ' is showing' : 'Show ' + card.name, onClick: () => { if (card.id !== showing) pick(card.id) } },
+    h('b', null, card.name),
+    h('small', null, holds(card)))))
+}
+
+const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase()
+const FIND_FROM = 8      // with this many, a box to find one by name
+
+/** The picker for what a pipeline is divided into: its searches (or accounts, or projects), each under its client.
+    Choosing one narrows the board to it; "All" shows everything again. A new one is opened from the foot of the list. */
+function GroupPick({ state, filter, openGroup, won, billing, currency }) {
+  const terms = state.playbook.terms || {}
+  const one = terms.group || 'group', many = terms.groups || 'groups'
+  const groups = state.groups || []
+  const f = filter.use(filter.store)
+  const [find, setFind] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [name, setName] = useState('')
+  const [client, setClient] = useState('')
+  const [busy, setBusy] = useState(false)
+  // How the pipeline is paid for decides what a new search is asked: on contract work the company is the one the
+  // contract is with and there is no fee; on contingent work, the salary and the share of it that is the fee.
+  const hourly = Boolean(billing && billing.type === 'contract'), fee = Boolean(billing && billing.type === 'contingent')
+  const [salary, setSalary] = useState('')
+  const [seatsSaid, setSeats] = useState('')
+  const openings = Math.max(1, Math.round(Number(seatsSaid) || 1))
+  const [said, setPct] = useState(null)         // the fee % typed for this search; until one is, the pipeline's usual
+  const pct = said === null ? (billing && billing.fee_pct ? String(billing.fee_pct) : '') : said
+  const each = fee && Number(salary) > 0 && Number(pct) > 0 ? Math.round(Number(salary) * Number(pct) / 100) : 0
+  const whose = hourly && billing.client ? billing.client : client.trim()
+  const chosen = f.group ? groups.find(group => same(group.name, f.group)) : null
+  const running = groups.filter(group => group.status === 'open' || group.status === 'hold')
+  // The board narrows by the name written on the records, so that is the name handed to it.
+  const written = group => { const deal = (state.deals || []).find(d => same(d.group, group.name)); return deal ? deal.group : group.name }
+  const choose = group => filter.set({ group: group ? written(group) : '' })
+  const wanted = find.trim().toLowerCase()
+  const shown = groups.filter(group => !wanted || group.name.toLowerCase().includes(wanted) || (group.client || '').toLowerCase().includes(wanted))
+  const clients = [...new Set(groups.map(group => group.client).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+  const live = shown.filter(group => group.status === 'open' || group.status === 'hold'), over = shown.filter(group => !live.includes(group))
+  const sections = clients.map(who => [who, live.filter(group => group.client === who)]).concat([[clients.length ? 'No client yet' : '', live.filter(group => !group.client)]])
+    .concat([['Finished', over]]).filter(section => section[1].length)
+  const row = (group, close) => h('button', { type: 'button', key: group.key || group.name, className: 'sd-drop-row', 'data-on': chosen === group ? '1' : '0', 'data-dim': group.status === 'open' ? '0' : '1',
+    'aria-current': chosen === group ? 'true' : undefined, onClick: () => { close(); choose(group) } },
+  h('b', null, group.name), h('small', null, (group.status === 'open' ? '' : group.status_label + ' · ') + group.open + ' open' + (group.won ? ' · ' + group.won + ' ' + (won || 'won').toLowerCase() : '')))
+  const add = async close => {
+    setBusy(true)
+    try {
+      const made = await api('/group', { pipeline: state.pipeline || 'main', method: 'POST', body: Object.assign({ name: name.trim(), new: true }, whose ? { client: whose } : {},
+        each ? { value: each, fields: { fee_type: 'Contingent', fee_pct: Number(pct) + '%', target_base: String(Number(salary)) } } : {}) })
+      if (fee && openings > 1) await api('/group/openings', { pipeline: state.pipeline || 'main', method: 'POST', body: { name: (made && made.group && made.group.name) || name.trim(), openings } })
+      queryClient.invalidateQueries({ queryKey: ['stoa'] })
+      pipesAgain()
+      filter.set({ group: (made && made.group && made.group.name) || name.trim() })
+      setName(''); setClient(''); setSalary(''); setSeats(''); setAdding(false); close()
+    } catch (error) { host.notifyError(error, 'Not opened') }
+    setBusy(false)
+  }
+  if (!groups.length && state.playbook.shape !== 'roles') return null       // nothing to divide by, and not the kind that always is
+  return h(Drop, { name: 'groups', on: Boolean(f.group), label: f.group ? (chosen ? chosen.name : f.group) : 'All ' + many,
+    sub: f.group ? (chosen ? [chosen.client, chosen.open + ' open'].filter(Boolean).join(' · ') : 'nothing open in it') : running.length + ' running' + (clients.length > 1 ? ' · ' + clients.length + ' clients' : ''),
+    title: 'Narrow the pipeline to one ' + one + ', or open a new one' }, close => [
+    groups.length >= FIND_FROM ? h('input', { key: 'find', className: 'stoa-field sd-drop-find', value: find, placeholder: 'Find a ' + one + ' or a client', 'aria-label': 'Find a ' + one,
+      onChange: event => setFind(event.target.value) }) : null,
+    wanted ? null : h('button', { type: 'button', key: 'all', className: 'sd-drop-row', 'data-on': f.group ? '0' : '1', onClick: () => { close(); choose(null) } },
+      h('b', null, 'All ' + many), h('small', null, 'the whole pipeline')),
+    sections.map(([head, list]) => [head ? h('div', { key: 'h:' + head, className: 'sd-drop-head' }, head) : null, list.map(group => row(group, close))]),
+    wanted && !shown.length ? h('p', { key: 'none', className: 'stoa-sub sd-drop-none' }, 'No ' + one + ' or client like that.') : null,
+    chosen && openGroup ? h('button', { type: 'button', key: 'open', className: 'sd-drop-row sd-drop-act', onClick: () => { close(); openGroup(chosen.name) } },
+      h('b', null, 'Open this ' + one + '’s page'), h('small', null, 'its client, its terms and who is on their side')) : null,
+    adding ? h('div', { key: 'new', className: 'sd-drop-new' },
+      h('input', { className: 'stoa-field', value: name, autoFocus: true, placeholder: state.playbook.shape === 'roles' ? 'The role: Head of Events' : 'Its name', 'aria-label': 'The new ' + one + '’s name',
+        onChange: event => setName(event.target.value), onKeyDown: event => { if (event.key === 'Enter' && name.trim()) add(close) } }),
+      hourly && billing.client ? h('p', { className: 'stoa-sub', style: { margin: 0 } }, 'For ' + billing.client + ', on the contract.')
+        : h('input', { className: 'stoa-field', value: client, list: 'sd-drop-clients', placeholder: 'The client (optional)', 'aria-label': 'Its client',
+          onChange: event => setClient(event.target.value), onKeyDown: event => { if (event.key === 'Enter' && name.trim()) add(close) } }),
+      fee ? h('div', { className: 'sd-drop-pair', 'data-three': '1' },
+        h('input', { className: 'stoa-field', type: 'number', min: 0, step: 'any', value: salary, placeholder: 'Salary for the role', 'aria-label': 'The salary for the role', onChange: event => setSalary(event.target.value) }),
+        h('input', { className: 'stoa-field', type: 'number', min: 0, max: 100, step: 'any', value: pct, placeholder: 'Fee %', 'aria-label': 'The fee, as a percentage of the salary', onChange: event => setPct(event.target.value) }),
+        h('input', { className: 'stoa-field', type: 'number', min: 1, max: 50, step: 1, value: seatsSaid, placeholder: 'Openings: 1', 'aria-label': 'How many seats the search is hiring for', onChange: event => setSeats(event.target.value) })) : null,
+      fee ? h('p', { className: 'stoa-sub', style: { margin: 0 } }, each ? 'Each placement would bring ' + gtmMoney(each, currency) + (openings > 1 ? ', and there are ' + openings + ' openings: ' + gtmMoney(each * openings, currency) + ' in play once it has candidates.' : '.') : 'With a salary and a fee %, each candidate in it carries the fee they would bring.') : null,
+      h('datalist', { id: 'sd-drop-clients' }, clients.map(who => h('option', { key: who, value: who }))),
+      h('div', { className: 'stoa-btns' }, h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'primary', disabled: busy || !name.trim(), onClick: () => add(close) }, 'Open the ' + one),
+        h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'quiet', onClick: () => setAdding(false) }, 'Cancel')))
+      : h('button', { type: 'button', key: 'add', className: 'sd-drop-row sd-drop-act', onClick: () => setAdding(true) }, h('b', null, '+  New ' + one), h('small', null, 'for a client, in this pipeline'))])
+}
+
+
+// How a recruiting pipeline is paid for (web/billing.js): by the placement, or by the hour.
+const contract = card => Boolean(card && card.billing && card.billing.type === 'contract')
+
+/** The figures of the pipeline that is showing. A lead pipeline also says where its leads go when they are ready.
+    A contract pipeline counts candidates: it has no money on this side. */
+function Figures({ card, data }) {
+  const lead = card.kind === 'lead', hours = contract(card)
+  const setTarget = async to => {
+    try { queryClient.setQueryData(PKEY, await api('/app/pipelines/handover', { method: 'POST', body: { pipeline: card.id, to } })) } catch (error) { host.notifyError(error, 'Not changed') }
+  }
+  return h('div', { className: 'sd-mo-totals sd-p-figs', 'data-kind': card.kind },
+    h(Cell, { label: 'Open ' + card.records, value: String(card.open) }),
+    lead || hours ? null : h(Cell, { label: 'In play', value: gtmMoney(card.value, card.currency), sub: card.billing && card.value ? 'each search once, for each opening left' : '' }),
+    h(Cell, { label: 'Due', value: card.due ? String(card.due) : '—', tone: card.due ? 'warn' : '', sub: card.due ? 'a next step is due' : '' }),
+    h(Cell, { label: card.won_label, value: lead ? String(card.won) : hours ? (card.won ? String(card.won) : '—') : gtmMoney(card.won_value, card.currency),
+      sub: lead || hours ? '' : card.won ? card.won + ' closed' : '', tone: !lead && card.won ? 'good' : '' }),
+    h(Cell, { label: 'Lost', value: card.lost ? String(card.lost) : '—' }),
+    lead && !data.tour ? h('div', { className: 'sd-mo-cell sd-p-hand' }, h('small', null, 'At “' + card.won_label + '”, opens a deal in'),
+      h('select', { className: 'stoa-select', value: card.hands_to || '', 'aria-label': 'The deal pipeline ' + card.name + ' hands over to', onChange: event => setTarget(event.target.value) },
+        h('option', { value: '' }, 'nowhere'), data.deal_pipelines.map(one => h('option', { key: one.id, value: one.id }, one.name))),
+      h('span', null, card.handed ? card.handed + ' handed over so far' : 'none handed over yet')) : null)
+}
+
+/** The figures of the one search (account, project) the pipeline is narrowed to. */
+function GroupFigures({ group, card, one }) {
+  const hours = contract(card), seats = openingsOf(group)
+  return h('div', { className: 'sd-mo-totals sd-p-figs', 'data-kind': card.kind },
+    h(Cell, { label: 'Open in this ' + one, value: String(group.open) }),
+    card.kind === 'lead' || hours ? null : h(Cell, { label: 'In play', value: gtmMoney(group.open_value, card.currency),
+      sub: !card.billing ? '' : !seatsLeft(group) ? (group.status === 'done' || group.status === 'closed' ? 'the search is ' + group.status_label.toLowerCase() : seats > 1 ? 'all ' + seats + ' openings filled' : 'its opening is filled')
+        : seats > 1 ? seatsLeft(group) + ' of ' + seats + ' openings to fill' : '' }),
+    h(Cell, { label: card.won_label, value: group.won ? String(group.won) : '—', sub: group.won_value && !hours ? gtmMoney(group.won_value, card.currency) : '', tone: group.won ? 'good' : '' }),
+    h(Cell, { label: 'Lost', value: group.lost ? String(group.lost) : '—' }),
+    h(Cell, { label: 'Client side', value: group.people ? String(group.people) : '—', sub: group.people ? (group.people === 1 ? 'person' : 'people') + ' named' : '' }))
+}
+
+function NewPipeline({ start, done }) {
+  const [kind, setKind] = useState(start || 'leads')
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const kinds = [['leads', 'Lead pipeline', 'A long list of people to work: identified, contacted, in conversation. When one is ready it is handed over to a deal pipeline.'],
+    ['deals', 'Deal pipeline', 'Fewer, richer records: one for each deal with a company, from first call to closed.'],
+    ['roles', 'Recruiting pipeline', 'For filling open roles: one record for each candidate, kept in searches. Paid by the placement, or by the hour: you say which next.']]
+  const add = async () => {
+    setBusy(true)
+    try {
+      const made = await api('/pipeline/setup', { method: 'POST', body: { verb: 'add', shape: kind, name: name.trim() } })
+      pipesAgain()
+      done(made && made.added ? made.added.id : '', kind)
+    } catch (error) { host.notifyError(error, 'Not added') }
+    setBusy(false)
+  }
+  return h('div', { className: 'stoa-box sd-p-new' },
+    h('div', { className: 'stoa-eyebrow' }, 'A new pipeline'),
+    h('div', { className: 'sd-p-kinds' }, kinds.map(([id, title, words]) => h('button', { type: 'button', key: id, className: 'sd-p-kind', 'aria-pressed': kind === id, 'data-on': kind === id ? '1' : '0', onClick: () => setKind(id) },
+      h('b', null, title), h('span', { className: 'stoa-sub' }, words)))),
+    h('div', { className: 'sd-p-newrow' },
+      h('input', { className: 'stoa-field', value: name, autoFocus: true, placeholder: kind === 'leads' ? 'Outbound leads, Event leads…' : kind === 'deals' ? 'New business, Renewals…' : 'The client’s name, or Contract work…', 'aria-label': 'The pipeline\'s name',
+        onChange: event => setName(event.target.value), onKeyDown: event => { if (event.key === 'Enter' && name.trim()) add() } }),
+      h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'primary', disabled: busy || !name.trim(), onClick: add }, 'Add the pipeline'),
+      h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'quiet', onClick: () => done('') }, 'Cancel')),
+    h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'It starts with the usual stages for its kind. Change them on the Setup tab once it is open.'))
+}
+
+/** What the Stoa page draws at the head of its Pipeline tab in this app. The page's own funnel and board follow it. */
+function PipelinesHead({ state, showPipe, filter, openGroup }) {
+  const query = useQuery({ queryKey: PKEY, queryFn: () => api('/app/pipelines/overview'), staleTime: 1500, refetchInterval: 30000 })
+  const [adding, setAdding] = useState(false)
+  const f = filter ? filter.use(filter.store) : null
+  const data = query.data
+  if (!data) return null
+  const cards = data.pipelines
+  const card = cards.find(one => one.id === state.pipeline) || cards.find(one => one.id === data.showing) || cards[0]
+  if (!card) return null
+  const terms = (state.playbook || {}).terms || {}, one = terms.group || 'group', many = terms.groups || 'groups'
+  const narrowed = f && f.group ? (state.groups || []).find(group => same(group.name, f.group)) : null
+  return h('div', { className: 'sd-p', 'data-narrowed': narrowed ? '1' : '0' },
+    h('div', { className: 'sd-pp-bar' },
+      h('span', { className: 'stoa-eyebrow sd-pp-label' }, cards.length > 1 ? 'Pipelines' : 'Pipeline'),
+      h(Picker, { cards, showing: card.id, pick: showPipe }),
+      filter && state.playbook ? h(GroupPick, { state, filter, openGroup, won: card.won_label, billing: card.billing, currency: card.currency }) : null,
+      data.tour || adding ? null : h('button', { type: 'button', className: 'stoa-btn sd-p-add', onClick: () => setAdding(true) }, '+  New pipeline')),
+    narrowed ? h('p', { className: 'sd-gtm-what sd-p-one' },
+      h('b', null, narrowed.name), narrowed.client ? ' · for ' + narrowed.client : ' · no client on it yet', narrowed.status === 'open' ? '' : ' · ' + narrowed.status_label.toLowerCase(), ' ',
+      openGroup ? h('button', { type: 'button', className: 'stoa-btn', onClick: () => openGroup(narrowed.name) }, 'Open the ' + one + '’s page') : null,
+      card.billing && card.billing.type === 'contingent' ? h('label', { className: 'sd-p-seats', title: 'How many seats this ' + one + ' is hiring for. What is in play counts its fee once for each.' },
+        h('span', { className: 'stoa-sub' }, 'Openings'),
+        h('select', { className: 'stoa-select', value: String(Math.min(10, openingsOf(narrowed))), 'aria-label': 'Openings in this ' + one,
+          onChange: async event => {
+            try { await api('/group/openings', { pipeline: card.id, method: 'POST', body: { name: narrowed.name, openings: Number(event.target.value) } }); queryClient.invalidateQueries({ queryKey: ['stoa'] }) }
+            catch (error) { host.notifyError(error, 'Not changed') }
+          } },
+          [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => h('option', { key: n, value: String(n) }, String(n))))) : null,
+      h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'quiet', onClick: () => filter.set({ group: '' }) }, 'Show all ' + many))
+      : h('p', { className: 'sd-gtm-what' }, FOR[card.shape] || FOR.deals),
+    card.billing ? h(Billing, { key: card.id, state }) : null,
+    adding ? h(NewPipeline, { start: card.shape in FOR ? card.shape : 'deals',
+      done: id => { setAdding(false); if (id) showPipe(id) } }) : null,
+    narrowed ? h(GroupFigures, { group: narrowed, card, one }) : h(Figures, { card, data }))
+}
+  return { $gtmView, GtmTab, MapStrategy, MapNumbers, MapArchive, PipelinesHead }
+})()
+const { $gtmView, GtmTab, MapStrategy, MapNumbers, MapArchive, PipelinesHead } = GTM
+
 const CSS = `
 /* The look. Surfaces, words and lines are the app's theme (--ui-*), so every theme carries it.
    Labels, figures and anything you press are set in the app's mono face; sentences stay in its text face.
@@ -1813,7 +3220,450 @@ const CSS_RECRUITING = `
 .stoa-prodname:disabled { cursor: default; text-decoration: none; }
 .stoa-prodtable tfoot td { border-bottom: 0; border-top: 1px solid var(--ui-stroke-secondary); font-weight: 600; }
 `
-const Style = () => h('style', null, CSS + CSS_RECRUITING)
+const CSS_GTM = `
+/* The GTM tab: three views, Maps, Motions and Assets. The plain parts use the page's own classes; what is here is
+   the tab's own frame, the three answers above a map, the map drawn as a dial, and the motions. Colours are
+   Hermes's theme, as everywhere on the page; the dial adds a few of its own, made from it. */
+.sd-gtm { container: sdgtm / inline-size; }
+/* The dial's colours are made from Hermes's own theme, so they follow it in light and dark: the face is the page's
+   background, the fit tones are Stoa's heat ramp drawn toward the colour of the words (darker on a light theme,
+   lighter on a dark one), and lines are the words' colour, thinned. */
+.stoa {
+  --dial-ink: var(--ui-base, var(--ui-text-primary));
+  --dial-well: color-mix(in oklab, var(--dial-ink) 3%, var(--stoa-page));
+  --dial-face: var(--stoa-page); --dial-face-hi: color-mix(in oklab, var(--dial-ink) 1%, var(--stoa-page)); --dial-face-lo: color-mix(in oklab, var(--dial-ink) 7%, var(--stoa-page));
+  --dial-good: color-mix(in oklab, var(--stoa-h4) 62%, var(--dial-ink)); --dial-okay: color-mix(in oklab, var(--stoa-h2) 66%, var(--dial-ink));
+  --dial-weak: var(--ui-text-tertiary); --dial-amber: color-mix(in oklab, var(--stoa-h5) 74%, var(--dial-ink)); --dial-sh: .2;
+  --dial-zone: color-mix(in oklab, var(--dial-good) 10%, var(--dial-face-hi)); }
+.sd-gtm h2 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
+
+/* -- the Assets view: key files and links, side by side ------------------------------------------------------ */
+.sd-assets { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 28px 56px; align-items: start; max-width: 1180px; }
+.sd-assets h3 { margin: 0 0 8px; font: 600 16px/1.2 var(--font-sans); letter-spacing: -.012em; }
+.sd-assets .sd-m-line { padding: 9px 0; }
+.sd-assets .sd-hub-list { min-width: 0; }
+.sd-hub-list[data-over="1"] { outline: 2px dashed var(--stoa-accent-line); outline-offset: 6px; }
+.sd-hub-item { color: inherit; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sd-hub-item:hover .stoa-name { text-decoration: underline; text-underline-offset: 2px; }
+.sd-hub-add { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto auto; gap: 6px; margin-top: 8px; }
+.sd-hub-add .stoa-field { margin-top: 0; }
+.sd-hub-plus { margin-top: 6px; }
+div.sd-hub-plus { display: flex; gap: 4px; }
+a.sd-m-x { display: inline-grid; place-items: center; text-decoration: none; }
+.sd-m-figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 14px 22px; }
+.sd-m-figs { margin-top: 10px; }
+.sd-m-fig b { display: block; margin-top: 3px; font-family: var(--stoa-mono); font-size: 21px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.sd-m-fig small { display: block; margin-top: 2px; font-size: 11.5px; color: var(--ui-text-tertiary); }
+.sd-m-fig b[data-tone="good"] { color: var(--stoa-accent-text); }
+.sd-m-fig b[data-tone="bad"] { color: var(--ui-red); }
+.sd-m-form { margin-bottom: 14px; max-width: 760px; }
+.sd-m-segs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.sd-m-segs .stoa-btn[data-on="1"] { border-color: var(--stoa-accent); background: var(--stoa-accent-soft); }
+.sd-m-segs small { color: var(--ui-text-tertiary); }
+.stoa-field.sd-m-area { height: auto; padding: 6px 8px; resize: vertical; font: inherit; line-height: 1.4; }
+.sd-m-title { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0 14px; }
+.sd-m-goal { max-width: 78ch; margin: 6px 0 0; color: var(--ui-text-secondary); }
+.sd-m-stages { display: grid; gap: 5px; margin-top: 16px; max-width: 620px; }
+.sd-m-stage { display: grid; grid-template-columns: 112px minmax(0, 1fr) 28px; gap: 10px; align-items: center; }
+.sd-m-stage .stoa-num { text-align: right; }
+.sd-m-bar { display: block; height: 8px; }
+.sd-m-bar i { display: block; height: 100%; min-width: 0; background: var(--ui-text-primary); -webkit-mask-image: var(--stoa-grid); mask-image: var(--stoa-grid); }
+.sd-m-bar i[data-won="1"] { background: var(--stoa-accent); }
+.sd-m-cols { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; align-items: start; margin-top: 14px; }
+.sd-m-cols > div:first-child { display: grid; gap: 14px; min-width: 0; }
+.sd-m-addrow { display: grid; grid-template-columns: 112px 110px 138px minmax(0, 1fr) auto; gap: 6px; align-items: end; margin-top: 10px; }
+.sd-m-addrow .stoa-field { margin-top: 0; }
+.sd-m-line { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px dotted var(--ui-stroke-secondary); }
+.sd-m-line:last-of-type { border-bottom: 0; }
+.sd-m-rec { border-bottom: 1px dotted var(--ui-stroke-secondary); padding-bottom: 6px; }
+.sd-m-rec .sd-m-line { border-bottom: 0; padding-bottom: 2px; }
+.sd-m-why { font-size: 12px; color: var(--ui-text-tertiary); max-width: 86ch; }
+.sd-m-why b { font-weight: 600; color: var(--ui-text-secondary); }
+.sd-m-x[data-kind="yes"]:hover { color: var(--stoa-accent-text); }
+.sd-m-back { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.sd-m-open { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sd-m-open:hover .stoa-name { text-decoration: underline; text-underline-offset: 2px; }
+.sd-m-x { flex: none; width: 20px; height: 20px; padding: 0; border: 0; background: none; color: var(--ui-text-quaternary); font-size: 15px; line-height: 1; cursor: pointer; }
+button.sd-m-x:hover { color: var(--ui-red); }
+.sd-m-dots { display: flex; flex-wrap: wrap; gap: 4px; margin: 12px 0 10px; }
+.sd-m-dots i { width: 9px; height: 9px; border: 1px solid var(--ui-text-quaternary); }
+.sd-m-dots i[data-in="1"] { border-color: var(--stoa-accent); background: var(--stoa-accent); }
+.sd-m-cos { display: flex; flex-wrap: wrap; gap: 5px 9px; }
+.sd-m-co { padding: 0; border: 0; background: none; cursor: pointer; }
+.sd-m-group { margin-top: 6px; }
+.sd-gtm-pipes { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 14px; }
+.sd-gtm-pipes .stoa-btn[data-on="1"] { border-color: var(--stoa-accent); background: var(--stoa-accent-soft); }
+
+/* -- the two views, chosen by name, and the pin ------------------------------------------------------------- */
+.sd-gtm-bar { display: flex; align-items: flex-end; gap: 16px; border-bottom: 1px solid var(--ui-stroke-primary); }
+.sd-gtm-views { display: flex; gap: 28px; }
+.sd-gtm-view { position: relative; padding: 0 0 12px; border: 0; background: none; color: var(--ui-text-quaternary); font: 600 26px/1 var(--font-sans); letter-spacing: -.03em; cursor: pointer; transition: color .15s ease; }
+.sd-gtm-view:hover { color: var(--ui-text-secondary); }
+.sd-gtm-view[aria-selected="true"] { color: var(--ui-text-primary); }
+.sd-gtm-view[aria-selected="true"]::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--ui-text-primary); }
+.sd-gtm-view sup { position: relative; top: 2px; margin-left: 5px; vertical-align: top; font: 500 11px/1 var(--font-mono); letter-spacing: 0; color: var(--ui-text-tertiary); }
+.sd-gtm-pin { display: inline-flex; align-items: center; gap: 6px; height: 26px; margin: 0 0 9px auto; padding: 0 9px; border: 1px solid transparent; border-radius: 2px; background: none;
+  color: var(--ui-text-tertiary); font: 11px var(--font-mono); letter-spacing: .03em; white-space: nowrap; cursor: pointer; }
+.sd-gtm-pin svg path { fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; stroke-linejoin: round; }
+.sd-gtm-pin:hover:not(:disabled) { border-color: var(--ui-stroke-primary); color: var(--ui-text-primary); }
+.sd-gtm-pin[aria-pressed="true"] { color: var(--ui-text-secondary); cursor: default; }
+.sd-gtm-pin[aria-pressed="true"] svg path { fill: currentColor; }
+.sd-gtm-what { margin: 12px 0 22px; font-size: 14px; color: var(--ui-text-secondary); }
+
+/* -- the head of a map: one row of controls, then its numbers ---------------------------------------------- */
+.sd-maps .stoa-maptop { align-items: center; margin-bottom: 4px; }
+/* The map's own menu is a control like the ones beside it. A long name is cut short here; the menu gives it in full. */
+.sd-maps .stoa-maptop .stoa-menu > .stoa-btn { display: inline-flex; align-items: center; max-width: 100%; font-weight: 600; color: var(--ui-text-primary); }
+.sd-mappick { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-maps .stoa-maptop .stoa-menu > .stoa-btn .stoa-menucaret { flex: none; font-size: 11px; }
+.sd-menuhead { padding: 6px 12px 2px; font: 10px var(--font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ui-text-tertiary); }
+.sd-mapnums { display: flex; flex-wrap: wrap; gap: 14px 44px; margin: 18px 0 20px; }
+.sd-mapnums > div { min-width: 0; }
+.sd-mapnums b { display: block; font: 600 30px/1 var(--font-mono); letter-spacing: -.03em; font-variant-numeric: tabular-nums; color: var(--ui-text-primary); }
+.sd-mapnums small { display: block; margin-top: 8px; font: 10.5px var(--font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ui-text-tertiary); }
+.sd-mapnums-when b { font-weight: 500; color: var(--ui-text-secondary); }
+.sd-maps-archived { margin-top: 36px; padding-top: 14px; border-top: 1px solid var(--ui-stroke-secondary); }
+.sd-maps-arow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 9px 0; border-bottom: 1px dotted var(--ui-stroke-primary); }
+.sd-maps-arow > span { flex: 1 1 220px; min-width: 0; } .sd-maps-arow b { display: block; font-weight: 600; font-size: 13.5px; overflow-wrap: anywhere; }
+.sd-maps-arow small { font-size: 12px; color: var(--ui-text-tertiary); }
+@container sdgtm (max-width: 620px) { .sd-mapnums { gap: 12px 28px; } .sd-mapnums b { font-size: 24px; } }
+
+/* -- above the map: where we play, how we win, what has to be true ------------------------------------------ */
+.sd-strat { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 6px 0 22px; border-top: 1px solid var(--ui-stroke-secondary); border-bottom: 1px solid var(--ui-stroke-secondary); }
+.sd-strat-col { min-width: 0; padding: 18px 24px 18px; border-left: 1px dotted var(--ui-stroke-primary); }
+.sd-strat-col:first-child { padding-left: 0; border-left: 0; }
+.sd-strat-col:last-child { padding-right: 0; }
+.sd-strat-n { font: 500 10.5px var(--font-mono); letter-spacing: .14em; color: var(--ui-text-tertiary); }
+.sd-strat h3 { margin: 5px 0 9px; font: 600 18px/1.2 var(--font-sans); letter-spacing: -.018em; }
+.sd-strat-lead { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; margin: 0 0 12px; font-size: 13.5px; line-height: 1.5; color: var(--ui-text-secondary); }
+.sd-strat-lead[data-empty="1"] { color: var(--ui-text-tertiary); }
+.sd-notes { display: grid; gap: 12px; margin: 0 0 14px; }
+.sd-note-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.sd-note-tag { font: 10px var(--font-mono); letter-spacing: .04em; color: var(--ui-text-tertiary); }
+.sd-note-tag[data-tone="out"] { color: var(--dial-amber); }
+.sd-note-head .sd-strat-edit { margin-left: auto; }
+.sd-note .sd-strat-lead { margin: 0; }
+.sd-note .stoa-field { margin-top: 2px; }
+.sd-note-empty { padding: 0; border: 0; background: none; color: var(--ui-text-tertiary); font: 12px var(--font-mono); text-align: left; cursor: pointer; }
+.sd-note-empty:hover { color: var(--ui-text-primary); }
+.sd-strat-shared { margin: 6px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--ui-text-tertiary); }
+.sd-strat-foot { grid-column: 1 / -1; margin: 0; padding: 9px 0 10px; border-top: 1px dotted var(--ui-stroke-primary); }
+.sd-strat-edit { padding: 0; border: 0; background: none; color: var(--ui-text-tertiary); font: 11px var(--font-mono); cursor: pointer; }
+.sd-strat-edit:hover { color: var(--ui-text-primary); text-decoration: underline; text-underline-offset: 3px; }
+.sd-strat ol { margin: 0; padding: 0; list-style: none; counter-reset: sd-strat; }
+.sd-strat li { counter-increment: sd-strat; display: grid; grid-template-columns: 24px minmax(0, 1fr); padding: 6px 0; border-top: 1px dotted var(--ui-stroke-primary); font-size: 13px; line-height: 1.45; }
+.sd-strat li:first-child { border-top: 0; padding-top: 0; }
+.sd-strat li::before { content: counter(sd-strat); padding-top: 2px; font: 500 10.5px var(--font-mono); color: var(--ui-text-tertiary); }
+.sd-strat-row { display: grid; grid-template-columns: minmax(0, 1fr) auto 22px auto; gap: 10px; align-items: center; width: 100%; padding: 6px 0; border: 0; border-top: 1px dotted var(--ui-stroke-primary);
+  background: none; color: inherit; font: inherit; font-size: 12.5px; text-align: left; }
+.sd-strat-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-strat-row em { font: 10.5px var(--font-mono); font-style: normal; color: var(--dial-good); white-space: nowrap; }
+.sd-strat-row b { font: 600 12px var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+button.sd-strat-row { cursor: pointer; }
+button.sd-strat-row:hover { background: var(--ui-row-hover-background); }
+button.sd-strat-row[aria-pressed="true"] { box-shadow: inset 2px 0 0 var(--ui-text-primary); padding-left: 8px; }
+.sd-strat-seg > span small { display: block; overflow: hidden; text-overflow: ellipsis; font-size: 11.5px; color: var(--ui-text-tertiary); }
+.sd-strat-rate { grid-template-columns: minmax(0, 1fr) 64px 38px; }
+.sd-strat-rate > span { white-space: normal; }
+.sd-strat-meter { display: block; height: 4px; background: var(--ui-stroke-primary); }
+.sd-strat-meter i { display: block; height: 100%; background: var(--ui-text-primary); }
+.sd-strat-motion { grid-template-columns: minmax(0, 1fr) auto auto; }
+.sd-strat-motion em { color: var(--ui-text-tertiary); text-transform: uppercase; letter-spacing: .08em; font-size: 10px; }
+.sd-strat-motion em[data-status="running"] { color: var(--dial-good); }
+.sd-strat-motion b { font-weight: 500; color: var(--ui-text-secondary); }
+.sd-strat-sub { margin: 14px 0 6px; font: 10px var(--font-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ui-text-tertiary); }
+.sd-strat-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+/* A name here is whatever the research found, and can be a sentence: the chip grows to hold it, on as many lines as it needs. */
+.sd-strat-chips button { display: inline-flex; align-items: baseline; gap: 8px; max-width: 100%; min-height: 24px; padding: 3px 8px; border: 1px solid var(--ui-stroke-primary); border-radius: 2px; background: none; color: var(--ui-text-primary); font: 12px/1.35 var(--font-sans); text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.sd-strat-chips button small { flex: none; margin-left: auto; font: 10.5px var(--font-mono); color: var(--ui-text-tertiary); }
+.sd-strat-chips button:hover { background: var(--ui-control-hover-background); }
+.sd-strat-chips button[aria-pressed="true"] { border-color: var(--ui-text-primary); background: var(--ui-text-primary); color: var(--background); }
+.sd-strat-chips button[aria-pressed="true"] small { color: inherit; opacity: .75; }
+.sd-strat-link { display: block; margin-top: 8px; padding: 0; border: 0; background: none; color: var(--ui-text-secondary); font: 11.5px var(--font-mono); cursor: pointer; }
+.sd-strat-link:hover { color: var(--ui-text-primary); text-decoration: underline; text-underline-offset: 3px; }
+/* The list of who holds the market is drawn once, in "How we win" above. */
+.sd-maps .stoa-mapcols > [data-sd="holds"] { display: none; }
+/* Fit is said in the dial's three colours wherever the map says it. */
+.sd-maps .stoa-fit, .sd-maps .stoa-mapreq[data-on="1"] > span:first-child { color: var(--dial-okay); }
+.sd-maps .stoa-fit[data-fit="1"], .sd-maps .stoa-fit[data-fit="2"] { color: var(--dial-weak); }
+.sd-maps .stoa-fit[data-fit="4"], .sd-maps .stoa-fit[data-fit="5"] { color: var(--dial-good); }
+
+/* -- the map as a dial -------------------------------------------------------------------------------------- */
+.stoa-map.sd-dial { --dial-grid: color-mix(in oklab, var(--dial-ink) 4%, transparent); border-color: var(--ui-stroke-secondary); background-color: var(--dial-well);
+  background-image: linear-gradient(var(--dial-grid) 1px, transparent 1px), linear-gradient(90deg, var(--dial-grid) 1px, transparent 1px); background-size: 32px 32px; background-position: -1px -1px; }
+.sd-dial-rim { stroke: color-mix(in oklab, var(--dial-ink) 22%, transparent); stroke-width: 1; filter: drop-shadow(0 10px 20px rgb(0 0 0 / var(--dial-sh))); }
+.sd-dial-zone { fill: var(--dial-zone); stroke: color-mix(in oklab, var(--dial-ink) 13%, transparent); stroke-width: 1; }
+.sd-dial-line { fill: none; stroke: color-mix(in oklab, var(--dial-ink) 11%, transparent); stroke-width: 1; }
+.sd-dial-co { --k: var(--dial-okay); }
+.sd-dial-co[data-tone="good"] { --k: var(--dial-good); }
+.sd-dial-co[data-tone="weak"] { --k: var(--dial-weak); }
+.sd-dial-base { fill: var(--dial-face); }
+.sd-dial-co[data-band="1"] .sd-dial-base { fill: var(--dial-zone); }
+.sd-dial-disc { fill: color-mix(in oklab, var(--k) 24%, var(--dial-face)); transition: filter .15s ease; }
+.sd-dial-co[data-state="in"] .sd-dial-disc { fill: var(--k); }
+.sd-dial-edge { fill: none; stroke: var(--k); stroke-width: 1.6; }
+.sd-dial-co[data-band="1"] .sd-dial-edge { stroke-width: 2.3; }
+.sd-dial-co[data-state="fresh"] .sd-dial-edge { stroke-dasharray: 3 2.4; }
+.sd-dial-co[data-band="2"] :is(.sd-dial-disc, .sd-dial-edge) { opacity: .9; }
+.sd-dial-co[data-band="3"] :is(.sd-dial-disc, .sd-dial-edge) { opacity: .7; }
+.sd-dial-sig { fill: none; stroke: var(--dial-amber); stroke-width: 1.9; }
+.sd-dial-co[data-hot="1"] .sd-dial-sig { filter: drop-shadow(0 0 4px color-mix(in oklab, var(--dial-amber) 55%, transparent)); }
+.sd-dial-co:hover .sd-dial-disc { filter: brightness(1.07); }
+.sd-dial[data-spot="1"] .sd-dial-co[data-lit="kin"] { opacity: .75; }
+.sd-dial[data-spot="1"] .sd-dial-co[data-lit="off"] { opacity: .28; }
+.sd-dial .sd-dial-co[data-dim="1"] { opacity: .12; }
+.sd-dial .sd-dial-co[data-dim="1"][data-sel="1"] { opacity: .7; }
+.sd-dial-lbl { font: 500 11px var(--font-sans); fill: var(--ui-text-secondary); opacity: 0; pointer-events: none; paint-order: stroke; stroke: var(--dial-face); stroke-width: 4px; stroke-linejoin: round;
+  transition: transform .75s cubic-bezier(.2,.75,.2,1), opacity .3s; }
+.sd-dial-lbl[data-on="1"] { opacity: 1; }
+.sd-dial-lbl[data-band="1"] { fill: var(--ui-text-primary); font-weight: 600; stroke: var(--dial-zone); }
+.sd-dial-lbl[data-band="3"] { fill: var(--ui-text-tertiary); }
+.sd-dial-lbl[data-sel="1"] { fill: var(--ui-text-primary); font-weight: 600; }
+.sd-dial[data-spot="1"] .sd-dial-lbl[data-on="1"][data-lit="off"] { opacity: .14; }
+.sd-dial[data-spot="1"] .sd-dial-lbl[data-lit="hot"] { opacity: 1; fill: var(--ui-text-primary); }
+.sd-dial-band { transform: translateX(-50%); white-space: nowrap; color: var(--ui-text-tertiary); }
+.sd-dial-cap b { display: block; font: 600 10.5px/1.35 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ui-text-primary); text-wrap: balance; overflow-wrap: anywhere; }
+.sd-dial-cap > span { font: 11px var(--font-mono); color: var(--ui-text-tertiary); white-space: nowrap; }
+.sd-dial-cap[data-lit="1"] > span { color: var(--ui-text-primary); }
+.stoa-btn.sd-dial-grow { display: block; height: 20px; margin: 2px 0 0 -5px; padding: 0 5px; font-size: 10.5px; color: var(--ui-text-tertiary); }
+.sd-dial-cap[data-where="left"] .sd-dial-grow { margin: 2px -5px 0 auto; }
+.sd-dial-cap[data-where="top"] .sd-dial-grow, .sd-dial-cap[data-where="bottom"] .sd-dial-grow { margin: 2px auto 0; }
+.stoa-btn.sd-dial-grow:hover { color: var(--ui-text-primary); }
+.sd-dial-none { transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+.sd-dial-none b { font: 600 13px/1.3 var(--font-sans); color: var(--ui-text-primary); }
+.sd-dial-none span { font-size: 12px; line-height: 1.45; color: var(--ui-text-secondary); text-wrap: balance; }
+.sd-dial-none .stoa-btn { margin-top: 4px; background: var(--dial-face); }
+.sd-dial-keyline { transform: none; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sd-dial-keyline b { display: inline; text-wrap: nowrap; }
+.stoa-btn.sd-dial-more { left: 8px; bottom: 8px; color: var(--ui-text-tertiary); }
+.stoa-btn.sd-dial-more:hover { color: var(--ui-text-primary); }
+.sd-dial-tipband { margin: 3px 0 2px; font: 10px var(--font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ui-text-tertiary); }
+.sd-dial-tipband[data-band="1"] { color: var(--dial-good); }
+.sd-dial .stoa-maptip { background: var(--ui-bg-elevated); box-shadow: 0 14px 34px rgb(0 0 0 / var(--dial-sh)); border-color: color-mix(in oklab, var(--dial-ink) 22%, transparent); }
+.sd-dial-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
+.sd-dial-key { --k: var(--dial-okay); display: inline-block; width: 11px; height: 11px; border: 1.6px solid var(--k); border-radius: 50%; background: color-mix(in oklab, var(--k) 24%, transparent); }
+.sd-dial-key[data-tone="good"] { --k: var(--dial-good); }
+.sd-dial-key[data-tone="weak"] { --k: var(--dial-weak); }
+.sd-dial-key[data-kind="in"] { background: var(--k); }
+.sd-dial-key[data-kind="sig"] { width: 7px; height: 7px; margin: 0 4px; border: 0; background: color-mix(in oklab, var(--dial-okay) 35%, transparent); box-shadow: 0 0 0 2px var(--background), 0 0 0 3.7px var(--dial-amber); }
+.sd-dial-key[data-kind="fresh"] { --k: var(--ui-text-secondary); border-style: dashed; background: none; }
+@media (prefers-reduced-motion: reduce) { .sd-dial-lbl { transition: none; } }
+
+/* -- motions ------------------------------------------------------------------------------------------------ */
+.sd-mo-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 14px; margin: 0 0 18px; }
+.sd-mo-kinds { display: flex; flex-wrap: wrap; gap: 4px; }
+.sd-mo-kinds button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid transparent; border-radius: 2px; background: none; color: var(--ui-text-secondary); font: 12.5px var(--font-sans); cursor: pointer; }
+.sd-mo-kinds button:hover { color: var(--ui-text-primary); }
+.sd-mo-kinds button[aria-pressed="true"] { border-color: var(--ui-stroke-primary); background: var(--ui-bg-elevated); color: var(--ui-text-primary); }
+.sd-mo-kinds small { font: 10.5px var(--font-mono); color: var(--ui-text-tertiary); }
+.sd-mo-acts { display: flex; gap: 6px; margin-left: auto; }
+.sd-mo-mark { flex: none; }
+.sd-mo-mark path { fill: none; stroke: currentColor; stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+.sd-mo-cell { min-width: 0; }
+.sd-mo-cell small { display: block; font: 10px var(--font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ui-text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sd-mo-cell b { display: block; margin-top: 4px; font: 600 17px/1.1 var(--font-mono); letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.sd-mo-cell span { display: block; margin-top: 3px; font-size: 11.5px; color: var(--ui-text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sd-mo-cell b[data-tone="good"] { color: var(--dial-good); }
+.sd-mo-cell b[data-tone="bad"] { color: var(--ui-red); }
+.sd-mo-totals { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); margin: 0 0 30px; border-top: 1px solid var(--ui-stroke-secondary); border-bottom: 1px solid var(--ui-stroke-secondary); }
+.sd-mo-totals .sd-mo-cell { padding: 15px 18px 16px; border-left: 1px dotted var(--ui-stroke-primary); }
+.sd-mo-totals .sd-mo-cell:first-child { padding-left: 0; border-left: 0; }
+.sd-mo-totals .sd-mo-cell b { font-size: 25px; }
+.sd-mo-group { margin: 0 0 32px; }
+.sd-mo-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; margin: 0 0 12px; }
+.sd-mo-head h3 { margin: 0; font: 600 16px/1.2 var(--font-sans); letter-spacing: -.012em; }
+.sd-mo-head sup { position: relative; top: 1px; margin-left: 5px; vertical-align: top; font: 500 10.5px/1 var(--font-mono); color: var(--ui-text-tertiary); }
+.sd-mo-head p { margin: 0; font-size: 12.5px; color: var(--ui-text-tertiary); }
+.sd-mo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); gap: 14px; }
+.sd-mo-grid[data-kind="idea"] { grid-template-columns: repeat(auto-fill, minmax(min(100%, 270px), 1fr)); }
+.sd-mo-card { display: flex; flex-direction: column; min-width: 0; padding: 16px 18px 0; border: 1px solid var(--ui-stroke-secondary); border-radius: 3px; background: var(--ui-bg-elevated); cursor: pointer;
+  transition: border-color .15s ease, box-shadow .15s ease; }
+.sd-mo-card:hover { border-color: var(--ui-stroke-primary); box-shadow: 0 8px 24px rgb(0 0 0 / .08); }
+.sd-mo-card[data-status="running"] { box-shadow: inset 0 2px 0 var(--dial-good); }
+.sd-mo-card[data-status="running"]:hover { box-shadow: inset 0 2px 0 var(--dial-good), 0 8px 24px rgb(0 0 0 / .08); }
+.sd-mo-card > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.sd-mo-kind { display: inline-flex; align-items: center; gap: 7px; min-width: 0; font: 10.5px var(--font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ui-text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sd-mo-status { flex: none; display: inline-flex; align-items: center; gap: 7px; font: 10.5px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ui-text-secondary); white-space: nowrap; }
+.sd-mo-status i { width: 7px; height: 7px; border-radius: 50%; background: var(--ui-text-quaternary); }
+.sd-mo-status[data-status="running"] i { background: var(--dial-good); box-shadow: 0 0 0 3px color-mix(in oklab, var(--dial-good) 22%, transparent); }
+.sd-mo-status[data-status="planned"] i { background: var(--dial-amber); }
+.sd-mo-status[data-status="done"] i { background: var(--ui-text-primary); }
+.sd-mo-status[data-status="stopped"] i { background: var(--ui-red); }
+.sd-mo-card h3 { margin: 11px 0 0; font: 600 17px/1.25 var(--font-sans); letter-spacing: -.015em; text-wrap: balance; }
+.sd-mo-goal { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin: 6px 0 0; font-size: 13px; line-height: 1.5; color: var(--ui-text-secondary); }
+.sd-mo-aim { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 10px; margin-top: 12px; font-size: 12.5px; }
+.sd-mo-aim[data-none="1"] > span:last-child { color: var(--ui-text-tertiary); }
+.sd-mo-map { min-width: 0; padding: 0; border: 0; background: none; color: var(--ui-text-primary); font: inherit; font-weight: 550; text-align: left; cursor: pointer; }
+.sd-mo-map:hover { text-decoration: underline; text-underline-offset: 3px; }
+.sd-mo-reach { font-size: 11.5px; color: var(--ui-text-tertiary); white-space: nowrap; }
+.sd-mo-when { display: flex; align-items: center; gap: 10px; margin-top: 10px; font: 11px var(--font-mono); color: var(--ui-text-tertiary); }
+.sd-mo-track { flex: 0 0 120px; height: 3px; background: var(--ui-stroke-primary); }
+.sd-mo-track i { display: block; height: 100%; background: var(--ui-text-primary); }
+.sd-mo-cells { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0 12px; margin: auto -18px 0; padding: 13px 18px 15px; border-top: 1px dotted var(--ui-stroke-primary); }
+.sd-mo-card > :nth-last-child(2) { margin-bottom: 15px; }
+.sd-mo-card[data-status="planned"] .sd-mo-cells { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.sd-mo-idea { padding-bottom: 13px; border-style: dashed; background: transparent; }
+.sd-mo-idea:hover { background: var(--ui-bg-elevated); }
+.sd-mo-idea h3 { font-size: 15px; }
+.sd-mo-idea .sd-mo-goal { -webkit-line-clamp: 3; }
+.sd-mo-idea > footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; }
+.sd-mo-idea > footer .stoa-btn { height: 24px; padding: 0 9px; }
+.sd-mo-open { font: 11px var(--font-mono); color: var(--ui-text-tertiary); }
+.sd-mo-card:hover .sd-mo-open { color: var(--ui-text-primary); }
+.sd-mo-rows { border-top: 1px solid var(--ui-stroke-secondary); }
+.sd-mo-row { display: grid; grid-template-columns: 96px minmax(0, 1fr) repeat(4, 92px); gap: 14px; align-items: center; width: 100%; padding: 11px 6px; border: 0; border-bottom: 1px dotted var(--ui-stroke-primary);
+  background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.sd-mo-row:hover { background: var(--ui-row-hover-background); }
+.sd-mo-row .sd-mo-cell { text-align: right; }
+.sd-mo-row .sd-mo-cell b { font-size: 13.5px; }
+.sd-mo-what { min-width: 0; }
+.sd-mo-what b { display: block; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sd-mo-what span { display: block; font-size: 12px; color: var(--ui-text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sd-mo-empty { max-width: 640px; padding: 26px 0 12px; }
+.sd-mo-empty h3 { margin: 0; font: 600 20px/1.2 var(--font-sans); letter-spacing: -.02em; }
+.sd-mo-empty p { margin: 8px 0 0; font-size: 14px; line-height: 1.55; color: var(--ui-text-secondary); }
+.sd-mo-kindrow { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 18px 0 4px; font: 10.5px var(--font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ui-text-tertiary); }
+.sd-mo-kindrow span { display: inline-flex; align-items: center; gap: 7px; }
+.sd-m-page .sd-mo-kind { margin-bottom: 5px; }
+
+/* The tab is as wide as the window leaves it, with a panel open on either side or not, so it answers to its own width. */
+@container sdgtm (max-width: 1080px) { .sd-m-cols { grid-template-columns: minmax(0, 1fr); } }
+@container sdgtm (max-width: 900px) {
+  .sd-assets { grid-template-columns: minmax(0, 1fr); }
+  .sd-strat { grid-template-columns: minmax(0, 1fr); }
+  .sd-strat-col, .sd-strat-col:last-child { padding: 16px 0; border-left: 0; border-top: 1px dotted var(--ui-stroke-primary); }
+  .sd-strat-col:first-child { border-top: 0; }
+  .sd-mo-totals { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .sd-mo-totals .sd-mo-cell:nth-child(4) { padding-left: 0; border-left: 0; }
+  .sd-mo-totals .sd-mo-cell:nth-child(n+4) { border-top: 1px dotted var(--ui-stroke-primary); }
+  .sd-mo-row { grid-template-columns: 96px minmax(0, 1fr) repeat(2, 84px); }
+  .sd-mo-row .sd-mo-cell:nth-of-type(n+3) { display: none; }
+}
+@container sdgtm (max-width: 560px) {
+  .sd-gtm-view { font-size: 21px; }
+  .sd-gtm-pin { font-size: 0; gap: 0; }
+  .sd-mo-cells { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+}
+
+/* Which search a candidate map feeds: one line under the map's numbers. And the same choice in the form that starts a map. */
+.sd-mapsearch { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 18px; padding: 10px 0 12px; border-bottom: 1px dotted var(--ui-stroke-primary); font-size: 13px; color: var(--ui-text-secondary); }
+.sd-mapsearch .stoa-select { max-width: min(460px, 100%); }
+.sd-mapfor { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 8px 0 2px; }
+.sd-mapfor .stoa-select { max-width: min(460px, 100%); }
+
+/* -- the head of the Pipeline tab: every pipeline at once, the searches, the figures, the hand-over -------------- */
+.sd-p { margin-bottom: 22px; }
+/* The pipeline picker: every pipeline by name, the one showing filled with ink. */
+.sd-pp-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding-bottom: 14px; border-bottom: 1px solid var(--ui-stroke-primary); }
+.sd-pp-label { flex: none; }
+.sd-pp { display: flex; flex-wrap: wrap; gap: 8px; flex: 1 1 auto; min-width: 0; }
+.sd-pp-item { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 132px; max-width: 280px; padding: 9px 14px 9px; border: 1px solid var(--ui-stroke-primary); border-radius: 2px; background: var(--ui-bg-elevated); color: var(--ui-text-primary); text-align: left; cursor: pointer; }
+.sd-pp-item b { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 15px/1.2 var(--font-sans); letter-spacing: -.01em; }
+.sd-pp-item small { font: 11px var(--sd-mono, var(--font-mono)); color: var(--ui-text-tertiary); white-space: nowrap; }
+.sd-pp-item:hover { border-color: var(--ui-text-secondary); }
+.sd-pp-item[data-on="1"] { border-color: var(--ui-text-primary); background: var(--ui-text-primary); color: var(--background); cursor: default; }
+.sd-pp-item[data-on="1"] small { color: inherit; opacity: .72; }
+.sd-pp-item:focus-visible { outline: 2px solid var(--ui-accent); outline-offset: 2px; }
+.sd-pp-bar .sd-p-add { flex: none; margin-left: auto; }
+/* A picker that opens a list: the pipelines once there are more than four, and what a pipeline is divided into (its searches). */
+.sd-drop { position: relative; flex: none; max-width: 100%; }
+.sd-drop-btn { min-width: 190px; max-width: 320px; }
+.sd-drop-btn b { display: flex; align-items: baseline; gap: 10px; width: 100%; }
+.sd-drop-btn b span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+.sd-drop-btn b i { flex: none; font: 11px var(--sd-mono, var(--font-mono)); font-style: normal; opacity: .7; }
+.sd-drop[data-name="groups"] .sd-drop-btn[data-on="0"] { border-style: dashed; }
+.sd-drop-list { position: absolute; z-index: 40; top: calc(100% + 5px); left: 0; width: max-content; min-width: 100%; max-width: min(440px, 86vw); max-height: min(460px, 60vh); overflow-y: auto;
+  padding: 5px; border: 1px solid var(--ui-text-primary); border-radius: 2px; background: var(--ui-bg-elevated); }
+.sd-drop-row { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; width: 100%; padding: 8px 10px; border: 0; border-radius: 2px; background: none; color: var(--ui-text-primary); text-align: left; cursor: pointer; }
+.sd-drop-row b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13.5px/1.25 var(--font-sans); }
+.sd-drop-row small { flex: none; font: 11px var(--sd-mono, var(--font-mono)); color: var(--ui-text-tertiary); white-space: nowrap; }
+.sd-drop-row:hover, .sd-drop-row:focus-visible { background: color-mix(in oklab, var(--ui-text-primary) 7%, transparent); outline: none; }
+.sd-drop-row[data-on="1"] { background: var(--ui-text-primary); color: var(--background); }
+.sd-drop-row[data-on="1"] small { color: inherit; opacity: .72; }
+.sd-drop-row[data-dim="1"] b { color: var(--ui-text-tertiary); }
+.sd-drop-row[data-on="1"][data-dim="1"] b { color: inherit; }
+.sd-drop-act { margin-top: 4px; border-top: 1px dotted var(--ui-stroke-primary); border-radius: 0; padding-top: 10px; }
+.sd-drop-act b { font-weight: 600; }
+.sd-drop-head { padding: 10px 10px 4px; font: 10.5px var(--sd-mono, var(--font-mono)); letter-spacing: .12em; text-transform: uppercase; color: var(--ui-text-tertiary); }
+.sd-drop-find { box-sizing: border-box; width: 100%; margin: 0 0 5px; }
+.sd-drop-new .stoa-field { box-sizing: border-box; width: 100%; }
+.sd-drop-none { margin: 0; padding: 10px; }
+.sd-drop-new { display: grid; gap: 6px; margin-top: 4px; padding: 10px 6px 6px; border-top: 1px dotted var(--ui-stroke-primary); min-width: 300px; }
+.sd-p-note { margin: 12px 0; padding: 10px 12px; border: 1px dashed var(--ui-stroke-primary); border-radius: 2px; font-size: 13px; line-height: 1.45; color: var(--ui-text-secondary); }
+.sd-p-note b { display: block; margin-bottom: 4px; color: var(--ui-text-primary); font-weight: 600; }
+.sd-p-note span { display: block; max-width: 78ch; }
+.sd-p-note .stoa-btn { margin-top: 10px; }
+p.sd-p-note .stoa-btn { margin: 0 0 0 8px; }
+.sd-p-one { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+/* How a recruiting pipeline is paid for: one line under what the pipeline is for, and the form that changes it. */
+.sd-p-bill { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0 0 14px; font-size: 13px; color: var(--ui-text-secondary); }
+.sd-p-bill b { color: var(--ui-text-primary); font-weight: 600; }
+.sd-p-bill .stoa-btn { align-self: center; }
+.sd-p-kinds[data-two="1"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.sd-p-fields { display: flex; flex-wrap: wrap; gap: 10px 12px; margin-top: 12px; }
+.sd-p-field { display: grid; gap: 4px; flex: 1 1 180px; min-width: 0; }
+.sd-p-field .stoa-field { box-sizing: border-box; width: 100%; }
+.sd-p-clear { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--ui-text-secondary); }
+.sd-drop-pair[data-three="1"] { grid-template-columns: minmax(0, 1.5fr) minmax(0, .8fr) minmax(0, 1fr); }
+.sd-p-seats { display: inline-flex; align-items: center; gap: 6px; }
+.sd-p-seats .stoa-select { width: auto; min-width: 54px; }
+/* Production across every pipeline: one row each, figures in the mono face, the one showing marked. */
+.sd-prod { margin: 0 0 22px; padding-bottom: 16px; border-bottom: 1px dotted var(--ui-stroke-primary); }
+.sd-prod-wrap { overflow-x: auto; }
+.sd-prod-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.sd-prod-table th { padding: 6px 10px 6px 0; border-bottom: 1px solid var(--ui-stroke-primary); font: 10.5px var(--sd-mono, var(--font-mono)); letter-spacing: .1em; text-transform: uppercase; color: var(--ui-text-tertiary); text-align: left; white-space: nowrap; }
+.sd-prod-table td { padding: 9px 10px 9px 0; border-bottom: 1px dotted var(--ui-stroke-primary); vertical-align: top; }
+.sd-prod-table [data-num="1"] { text-align: right; font-family: var(--sd-mono, var(--font-mono)); font-variant-numeric: tabular-nums; white-space: nowrap; padding-right: 0; padding-left: 14px; }
+.sd-prod-table td[data-tone="good"] { color: var(--stoa-accent-text, var(--ui-accent)); }
+.sd-prod-table td[data-tone="warn"] { color: var(--ui-orange); }
+.sd-prod-table td[data-tone="bad"] { color: var(--ui-red); }
+.sd-prod-table small { display: block; margin-top: 2px; font-size: 11.5px; color: var(--ui-text-tertiary); }
+.sd-prod-name { padding: 0; border: 0; background: none; color: var(--ui-text-primary); font: 600 13.5px var(--font-sans); text-align: left; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.sd-prod-name:disabled { cursor: default; text-decoration: none; }
+.sd-prod-table tr[data-on="1"] td:first-child { box-shadow: inset 2px 0 0 var(--ui-text-primary); padding-left: 10px; }
+.sd-prod-table tfoot td { border-bottom: 0; border-top: 1px solid var(--ui-stroke-primary); font-weight: 600; }
+.sd-contract { margin: 0 0 22px; padding-bottom: 16px; border-bottom: 1px dotted var(--ui-stroke-primary); }
+.sd-drop-pair { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 6px; }
+.sd-p-one b { color: var(--ui-text-primary); font-weight: 600; }
+/* The page's funnel counts the whole pipeline. While the tab is narrowed to one search it is put away. */
+.sd-p[data-narrowed="1"] ~ .stoa-funnel { display: none; }
+/* The page's own row of pipelines, at its head on every other tab, is the same picker made small: it reads the
+   same way (the one showing in ink), says what it is, and steps aside on the Pipeline tab, where the big one is. */
+.stoa-page .stoa-pipes { align-items: center; }
+.stoa-page .stoa-pipes::before { content: "Pipeline"; margin-right: 4px; font: 500 10.5px var(--font-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ui-text-tertiary); }
+.stoa-page .stoa-pipe[data-on="1"] { border-color: var(--ui-text-primary); background: var(--ui-text-primary); color: var(--background); }
+.stoa-page:has(.sd-p) .stoa-pipes { display: none; }
+.sd-p .sd-gtm-what { margin-bottom: 16px; }
+.sd-p-tab { position: relative; }
+.sd-p-tab .sd-gtm-view small { display: inline-flex; align-items: center; gap: 6px; margin-left: 10px; font: 500 13px/1 var(--font-sans); letter-spacing: 0; color: var(--ui-text-tertiary); vertical-align: 4px; }
+.sd-p-tab .sd-gtm-view[aria-selected="true"] small { color: var(--ui-text-secondary); }
+.sd-p-tab svg path { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.sd-p-menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 20; min-width: 280px; padding: 6px; border: 1px solid var(--ui-stroke-primary); border-radius: 3px; background: var(--ui-bg-elevated); box-shadow: 0 14px 34px rgb(0 0 0 / .16); }
+.sd-p-item { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; width: 100%; padding: 8px 10px; border: 0; border-radius: 2px; background: none; color: var(--ui-text-primary); font: 13px var(--font-sans); text-align: left; cursor: pointer; }
+.sd-p-item:hover { background: var(--ui-row-hover-background); }
+.sd-p-item[data-on="1"] span { font-weight: 600; }
+.sd-p-item[data-on="1"] span::before { content: "✓  "; }
+.sd-p-item small { font: 11px var(--font-mono); color: var(--ui-text-tertiary); white-space: nowrap; }
+.sd-p-more { margin-top: 4px; padding-top: 10px; border-top: 1px dotted var(--ui-stroke-primary); border-radius: 0; color: var(--ui-text-secondary); font: 11.5px var(--font-mono); }
+.stoa-btn.sd-p-add { margin: 0 0 9px auto; }
+.sd-mo-totals.sd-p-figs { grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); margin-bottom: 0; }
+.sd-p-figs .sd-mo-cell b[data-tone="warn"] { color: var(--ui-orange); }
+.sd-p-hand { grid-column: span 2; }
+.sd-p-hand small { white-space: normal; }
+.sd-p-hand .stoa-select { display: block; max-width: 100%; height: 26px; margin-top: 5px; padding: 0 6px; font-size: 12px; }
+/* A kind with no pipeline yet says so; the funnel and board of some other pipeline have no place under it. */
+.sd-p[data-none="1"] ~ * { display: none; }
+.sd-p-new { max-width: 860px; margin-bottom: 14px; }
+.sd-p-kinds { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+.sd-p-kind { padding: 10px 12px; border: 1px solid var(--ui-stroke-secondary); border-radius: var(--stoa-r); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.sd-p-kind b { display: block; margin-bottom: 3px; }
+.sd-p-kind[data-on="1"] { border-color: var(--stoa-accent); background: var(--stoa-accent-soft); }
+.sd-p-newrow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; margin-top: 10px; }
+.sd-p-newrow .stoa-field { margin-top: 0; }
+@media (max-width: 900px) { .sd-p-kinds { grid-template-columns: minmax(0, 1fr); } }
+`
+
+const Style = () => h('style', null, CSS + CSS_RECRUITING + CSS_GTM)
 // A tag is one short word or two and never breaks. `wrap` is for a tag that carries someone's own sentence (a signal), which must fold inside its box.
 const Chip = ({ tone, wrap, children }) => h('span', { className: 'stoa-chip', 'data-tone': tone || '', 'data-wrap': wrap ? '1' : '0' }, children)
 const Btn = ({ kind, children, ...props }) => h('button', { type: 'button', className: 'stoa-btn', 'data-kind': kind || '', ...props }, children)
@@ -3385,7 +5235,7 @@ function Welcome({ skip, ink }) {
       h('div', { className: 'stoa-name' }, 'Or look around first'),
       h('div', { className: 'stoa-sub' }, 'A full pipeline of made-up people and companies, kept in a file of its own. Your desk stays empty, and one press brings you back.'),
       h('div', { className: 'stoa-btns' }, (setup ? setup.examples : []).map(example =>
-        h(Btn, { key: example.id, disabled: busy, onClick: () => { setBusy(true); tour('start', example.id).then(() => setBusy(false)) } }, cap(example.title))),
+        h(Btn, { key: example.id, disabled: busy, onClick: () => { setBusy(true); tour('start', example.id).then(() => setBusy(false)) } }, sampleName(example))),
         h(Btn, { kind: 'quiet', disabled: busy, onClick: skip }, 'Skip: I will set it up later'))))
 }
 
@@ -3807,7 +5657,7 @@ function Setup({ state, go }) {
             h('div', { className: 'stoa-btns', style: { marginTop: 6 } }, h(Btn, { disabled: Boolean(setup.tour), onClick: () => go('add') }, '+  New ' + terms.deal))),
           h('div', null, h('div', { className: 'stoa-name' }, 'Or look around first'), h('div', { className: 'stoa-sub' }, setup.tour ? cap(setup.tour.title) + ' is on show. Your own desk is untouched.' : 'A full pipeline of made-up people, in a file of its own. Your desk is untouched.'),
             h('div', { className: 'stoa-btns', style: { marginTop: 6 } }, setup.tour ? h(Btn, { kind: 'primary', disabled: busy, onClick: () => wait(tour('leave')) }, 'Leave the tour')
-              : setup.examples.map(example => h(Btn, { key: example.id, disabled: busy, onClick: () => wait(tour('start', example.id)) }, cap(example.title)))))))),
+              : setup.examples.map(example => h(Btn, { key: example.id, disabled: busy, onClick: () => wait(tour('start', example.id)) }, sampleName(example)))))))),
 
     h('div', { className: 'stoa-setgroup' }, 'Make it do more', h('span', null, 'each one is optional')),
     h('div', { className: 'stoa-steps' },
@@ -5210,17 +7060,12 @@ function Company({ company, sessionId }) {
 const MAP_BANDS = ['1–49', '50–199', '200–999', '1,000+']
 const bandOf = count => (!count ? '' : count < 50 ? MAP_BANDS[0] : count < 200 ? MAP_BANDS[1] : count < 1000 ? MAP_BANDS[2] : MAP_BANDS[3])
 const WEIGHT_WORDS = ['Off', 'Nice', 'Matters', 'Must']
-const MAP_LENSES = [['seg', 'Segments', 'Each ring is a segment that would get a different pitch. The best fit sits in the middle.'],
-  ['pri', 'Priority', 'Further right is a better fit; higher up is a fresher reason to call. The top right is who to call first.'],
-  ['held', 'Held by', 'Grouped by what each company uses today: who you would be replacing.']]
+// The ways to slice the map are the dial's (DIAL_LENSES): by segment, or by what each company uses today. Priority is the dial itself.
 const MAP_SIZES = [['people', 'People there', 'How many people work at the company'], ['named', 'People named', 'How many people you have named there'], ['same', 'Same size', 'Every company the same']]
-const heatOf = score => 1 + Math.min(6, Math.floor(score / 100 * 7))
 const squaresOf = score => Math.max(1, Math.ceil(score / 20))
 const hashOf = text => { let n = 2166136261; for (let i = 0; i < text.length; i++) { n ^= text.charCodeAt(i); n = Math.imul(n, 16777619) } return n >>> 0 }
 /** How long ago a reason to call happened, in words; nothing when it carries no date. */
 const agoWords = days => (days === null || days === undefined ? '' : days === 0 ? 'today' : days === 1 ? 'yesterday' : days < 60 ? days + ' days ago' : Math.round(days / 30) + ' months ago')
-/** A company's name as it is written on the map: whole when short, cut with an ellipsis when long. The panel and the table give it in full. */
-const shortName = name => (String(name).length > 22 ? String(name).slice(0, 21).trimEnd() + '…' : String(name))
 /** What every company Hermes adds to a map should carry, said the same way wherever the page asks for more. */
 const RECORD = 'For each one record its source, its headcount, what it uses today for the job we do, and any signal with the date it happened.'
 const namesOf = list => (list.length <= 2 ? list.map(c => c.company).join(' and ') : list[0].company + ', ' + list[1].company + ' and ' + (list.length - 2) + ' more')
@@ -5259,203 +7104,8 @@ function mapCompanies(market, weights, seenAt) {
   return out
 }
 
-/** Where every mark sits for one view at one width. The same list and width always give the same picture. */
-function mapLayout(list, lens, W, segments, sizeBy) {
-  const narrow = W < 620, cols = narrow ? 2 : 3, sc = narrow ? 0.74 : 1
-  const radius = c => {
-    if (sizeBy === 'same') return 12
-    if (sizeBy === 'named') return Math.min(26, 9 + (c.people || []).length * 3.4)
-    return c.headcount ? Math.max(8.5, Math.min(27, 6.5 + Math.sqrt(c.headcount) * 0.62)) : 11
-  }
-  const ns = list.map(c => ({ c, id: c.id, r: sc * radius(c), show: false, bridge: null }))
-  const out = { W, H: 0, narrow, groups: [], links: [], pri: null, ns }
-  const relax = hold => {
-    ns.forEach((n, i) => { n.x = n.ax + ((i * 37) % 7 - 3) * 0.4; n.y = n.ay + ((i * 53) % 7 - 3) * 0.4 })
-    for (let k = 0; k < 240; k++) {
-      const pull = k < 170 ? 0.07 : 0.02
-      for (const n of ns) { n.x += (n.ax - n.x) * pull; n.y += (n.ay - n.y) * pull }
-      for (let i = 0; i < ns.length; i++) {
-        for (let j = i + 1; j < ns.length; j++) {
-          const p = ns[i], q = ns[j]
-          let dx = q.x - p.x, dy = q.y - p.y
-          const d = Math.hypot(dx, dy) || 0.01, min = p.cr + q.cr
-          if (d < min) { const o = (min - d) / 2; dx /= d; dy /= d; p.x -= dx * o; p.y -= dy * o; q.x += dx * o; q.y += dy * o }
-        }
-      }
-      for (const n of ns) hold(n)
-    }
-  }
-  const clamp = (v, a, b) => Math.max(a, Math.min(b, v))
-  if (lens === 'pri') {
-    // The plot keeps a margin inside its axes, so a mark at either end of a scale, and its name, stay in the picture.
-    const m = { l: narrow ? 30 : 46, r: 16, t: 26, b: 40 }, H = narrow ? 500 : 580
-    const x0 = m.l + 40, xw = W - m.l - m.r - 112, y0 = H - m.b - 24, yh = H - m.t - m.b - 48
-    out.H = H
-    out.pri = { ...m, mid: y0 - yh * 0.5, fx: x0 + xw * 0.6 }
-    ns.forEach(n => {
-      // Fit comes in a few steps, so companies on the same step are spread across by a hair. A reason with no date has no
-      // place of its own up the page, so those are spread a little there too.
-      n.ax = x0 + xw * n.c.score / 100 + ((hashOf(n.id + 'x') % 100) / 100 - 0.5) * W * 0.05
-      n.ay = y0 - yh * n.c.timing / 100 + (n.c.days === null ? ((hashOf(n.id) % 100) / 100 - 0.5) * yh * 0.08 : 0)
-    })
-    ns.slice().sort((a, b) => b.c.rank - a.c.rank).slice(0, narrow ? 5 : 9).forEach(n => { n.show = true })
-    ns.forEach(n => { n.cr = n.r + (n.show ? 11 : 3.5) })
-    relax(n => {
-      n.x = clamp(n.x, m.l + n.r + 2, W - m.r - n.r - 2)
-      n.y = clamp(n.y, m.t + n.r + 2, H - m.b - n.r - 18)
-    })
-    return out
-  }
-  let groups
-  if (lens === 'seg') {
-    let real = segments.map(segment => ({ key: segment.name, name: segment.name, m: ns.filter(n => n.c.segment === segment.name) })).filter(g => g.m.length)
-    // Segments that share a company sit side by side where they can, so the line between them is short and crosses nothing.
-    const pairs = []
-    real.forEach((g, i) => g.m.forEach(n => {
-      const j = n.c.also ? real.findIndex(q => q !== g && q.key.toLowerCase() === String(n.c.also).toLowerCase()) : -1
-      if (j >= 0) pairs.push([i, j])
-    }))
-    if (pairs.length && real.length <= 7) {
-      const cell = k => [k % cols, Math.floor(k / cols)]
-      const cost = order => pairs.reduce((sum, pair) => { const p = cell(order.indexOf(pair[0])), q = cell(order.indexOf(pair[1])); return sum + Math.abs(p[0] - q[0]) + Math.abs(p[1] - q[1]) }, 0)
-      let best = real.map((_, i) => i), least = cost(best)
-      const walk = (order, rest) => {
-        if (!rest.length) { const c = cost(order); if (c < least) { best = order; least = c } return }
-        rest.forEach((x, k) => walk(order.concat(x), rest.filter((_, m) => m !== k)))
-      }
-      if (least > pairs.length) walk([], real.map((_, i) => i))
-      real = best.map(i => real[i])
-    }
-    groups = real
-    groups.push({ ghost: true, key: '+', m: [] })
-  } else {
-    const by = new Map()
-    ns.forEach(n => { const key = n.c.uses || 'Not known yet'; if (!by.has(key)) by.set(key, []); by.get(key).push(n) })
-    groups = [...by.entries()].map(([key, m]) => ({ key, name: key, m })).sort((a, b) => (a.key === 'Not known yet') - (b.key === 'Not known yet') || b.m.length - a.m.length)
-  }
-  const rows = Math.ceil(groups.length / cols), rowH = narrow ? 256 : 304
-  out.H = rows * rowH
-  groups.forEach((g, i) => { g.colW = W / cols; g.cx = g.colW * (i % cols + 0.5); g.cy = rowH * Math.floor(i / cols) + rowH / 2 - 20; g.R = Math.min(g.colW / 2 - 10, rowH / 2 - 42) })
-  groups.forEach((g, gi) => {
-    g.m.sort((a, b) => b.c.rank - a.c.rank)
-    g.m.forEach((n, i) => {
-      const d = i ? (g.R - 24 * sc) * Math.sqrt(i / g.m.length) : 0, a = i * 2.39996 + gi * 1.1
-      n.g = g; n.ax = g.cx + Math.cos(a) * d; n.ay = g.cy + Math.sin(a) * d
-      if (i < (narrow ? 2 : 3)) n.show = true
-      const other = lens === 'seg' && n.c.also ? groups.find(q => !q.ghost && q !== g && q.key.toLowerCase() === String(n.c.also).toLowerCase()) : null
-      if (other) {
-        const ux = other.cx - g.cx, uy = other.cy - g.cy, l = Math.hypot(ux, uy) || 1
-        n.ax = g.cx + ux / l * (g.R - n.r - 2); n.ay = g.cy + uy / l * (g.R - n.r - 2); n.bridge = other; n.show = true
-      }
-    })
-  })
-  ns.forEach(n => { n.cr = n.r + (n.show ? 11 : 3.5) })
-  relax(n => { const g = n.g, dx = n.x - g.cx, dy = n.y - g.cy, d = Math.hypot(dx, dy), max = g.R - n.r - 2; if (d > max) { n.x = g.cx + dx / d * max; n.y = g.cy + dy / d * max } })
-  ns.forEach(n => {
-    if (!n.bridge) return
-    const o = n.bridge, ux = n.x - o.cx, uy = n.y - o.cy, l = Math.hypot(ux, uy) || 1
-    out.links.push({ id: n.id, x1: n.x, y1: n.y, x2: o.cx + ux / l * o.R, y2: o.cy + uy / l * o.R })
-  })
-  out.groups = groups
-  return out
-}
-
-/** The picture itself. It only draws and reports what was picked; what a pick means is the map's business. */
-function MapPicture({ market, list, lens, sizeBy, sel, shown, onPick, onLasso, onClear, onGrow, onSuggest, say: said }) {
-  const say = said || MAP_SALES
-  const box = useRef(null), drag = useRef(null), lassoed = useRef(false)
-  const [W, setW] = useState(0)
-  const [hover, setHover] = useState('')
-  const [lasso, setLasso] = useState(null)
-  useEffect(() => {
-    const el = box.current
-    if (!el) return undefined
-    const read = () => setW(el.clientWidth)
-    read()
-    const watcher = new ResizeObserver(read)
-    watcher.observe(el)
-    return () => watcher.disconnect()
-  }, [])
-  const L = useMemo(() => (W ? mapLayout(list, lens, W, market.segments, sizeBy) : null), [list, lens, W, market.segments, sizeBy])
-  const down = event => {
-    if (!L || event.pointerType !== 'mouse' || event.button !== 0 || event.target.closest('.stoa-mapco, button')) return
-    const b = box.current.getBoundingClientRect()
-    const d = drag.current = { x: event.clientX - b.left, y: event.clientY - b.top, add: event.shiftKey, moved: false, r: null }
-    const move = ev => {
-      const x = ev.clientX - b.left, y = ev.clientY - b.top
-      if (Math.abs(x - d.x) + Math.abs(y - d.y) > 6) d.moved = true
-      if (!d.moved) return
-      d.r = { l: Math.min(x, d.x), t: Math.min(y, d.y), w: Math.abs(x - d.x), h: Math.abs(y - d.y) }
-      setLasso(d.r)
-    }
-    const up = () => {
-      window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up)
-      drag.current = null; setLasso(null)
-      if (!d.moved || !d.r) return
-      lassoed.current = true; setTimeout(() => { lassoed.current = false }, 0)
-      onLasso(L.ns.filter(n => shown(n.c) && n.x >= d.r.l && n.x <= d.r.l + d.r.w && n.y >= d.r.t && n.y <= d.r.t + d.r.h).map(n => n.id), d.add)
-    }
-    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
-  }
-  const brackets = s => { const q = 5; return 'M' + -s + ',' + (-s + q) + 'V' + -s + 'H' + (-s + q) + 'M' + (s - q) + ',' + -s + 'H' + s + 'V' + (-s + q) + 'M' + s + ',' + (s - q) + 'V' + s + 'H' + (s - q) + 'M' + (-s + q) + ',' + s + 'H' + -s + 'V' + (s - q) }
-  const hovered = L && hover ? L.ns.find(n => n.id === hover) : null
-  const pri = L && L.pri
-  return h('div', { ref: box, className: 'stoa-map', 'data-narrow': L && L.narrow ? '1' : '0', style: { height: L ? L.H : 420 }, onPointerDown: down,
-    onClick: event => { if (lassoed.current || event.target.closest('.stoa-mapco, button')) return; onClear() } },
-    L ? h('svg', { className: 'stoa-mapsvg', width: L.W, height: L.H, viewBox: '0 0 ' + L.W + ' ' + L.H, role: 'group', 'aria-label': 'Market map: ' + market.name },
-      h('defs', null, [1, 2, 3, 4, 5, 6, 7].map(k => h('pattern', { key: k, id: 'stoa-st' + k, width: 4, height: 4, patternUnits: 'userSpaceOnUse' },
-        h('rect', { width: 2.2, height: 2.2, style: { fill: 'var(--stoa-m' + k + ')' } }))),
-        h('pattern', { id: 'stoa-wash', width: 8, height: 8, patternUnits: 'userSpaceOnUse' }, h('rect', { width: 1.6, height: 1.6, style: { fill: 'var(--stoa-m6)' }, opacity: 0.5 }))),
-      pri ? h('g', { key: 'pri' },
-        h('rect', { x: pri.fx, y: pri.t, width: L.W - pri.r - pri.fx, height: pri.mid - pri.t, fill: 'url(#stoa-wash)' }),
-        h('line', { className: 'stoa-mapsplit', x1: pri.fx, y1: pri.t, x2: pri.fx, y2: L.H - pri.b }),
-        h('line', { className: 'stoa-mapsplit', x1: pri.l, y1: pri.mid, x2: L.W - pri.r, y2: pri.mid }),
-        h('line', { className: 'stoa-mapaxis', x1: pri.l, y1: L.H - pri.b, x2: L.W - pri.r, y2: L.H - pri.b }),
-        h('line', { className: 'stoa-mapaxis', x1: pri.l, y1: pri.t, x2: pri.l, y2: L.H - pri.b })) : null,
-      L.groups.map(g => h('circle', { key: lens + g.key, className: 'stoa-mapring', 'data-ghost': g.ghost ? '1' : '0', cx: g.cx, cy: g.cy, r: g.R })),
-      L.links.map(link => h('line', { key: link.id, className: 'stoa-maplink', x1: link.x1, y1: link.y1, x2: link.x2, y2: link.y2 })),
-      L.ns.map((n, index) => {
-        const c = n.c, k = heatOf(c.score), picked = sel.has(n.id)
-        return h('g', { key: n.id, className: 'stoa-mapco', 'data-state': c.status === 'tracked' ? 'in' : c.fresh ? 'fresh' : 'on', 'data-sel': picked ? '1' : '0', 'data-dim': shown(c) ? '0' : '1',
-          style: { transform: 'translate(' + n.x.toFixed(1) + 'px,' + n.y.toFixed(1) + 'px)' }, tabIndex: 0, role: 'button', 'aria-pressed': picked,
-          'aria-label': c.company + ', fit ' + c.score + ' of 100' + (c.status === 'tracked' ? ', in the pipeline' : '') + (c.reason ? ', has ' + say.reason : ''),
-          onClick: event => { event.stopPropagation(); onPick(n.id, event.shiftKey || event.metaKey || event.ctrlKey) },
-          onKeyDown: event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onPick(n.id, event.shiftKey) } },
-          onPointerEnter: event => { if (event.pointerType !== 'touch') setHover(n.id) }, onPointerLeave: () => setHover('') },
-          h('g', { className: 'stoa-mappop', style: { animationDelay: Math.min(index * 12, 500) + 'ms' } },
-            c.reason ? h('circle', { className: 'stoa-mapsig', r: n.r + 4 }) : null,
-            c.status === 'tracked' ? h('circle', { className: 'stoa-mapdisc', r: n.r, style: { fill: 'var(--stoa-m' + k + ')' } }) : h('circle', { className: 'stoa-mapdisc', r: n.r, fill: 'url(#stoa-st' + k + ')' }),
-            h('circle', { className: 'stoa-mapedge', r: n.r, style: { stroke: c.fresh ? undefined : 'var(--stoa-m' + k + ')' } }),
-            h('path', { className: 'stoa-mapbrk', d: brackets(n.r + 5) })))
-      }),
-      L.ns.map(n => h('text', { key: 'l' + n.id, className: 'stoa-maplbl', 'data-on': (n.show || sel.has(n.id)) && shown(n.c) ? '1' : '0', 'data-sel': sel.has(n.id) ? '1' : '0',
-        style: { transform: 'translate(' + n.x.toFixed(1) + 'px,' + (n.bridge && n.y > n.g.cy + n.g.R * 0.45 ? n.y - n.r - 7 : n.y + n.r + 15).toFixed(1) + 'px)' } }, shortName(n.c.company)))) : null,
-    L ? h('div', { className: 'stoa-mapover' },
-      h('div', { className: 'stoa-maphint' }, 'Click to open · shift-click or drag to pick several'),
-      pri ? [
-        h('div', { key: 'a', className: 'stoa-mapq', style: { left: pri.fx + 10, top: pri.t + 8 } }, h('strong', null, 'Call now'), h('em', null, 'Fits, and the reason is fresh')),
-        h('div', { key: 'b', className: 'stoa-mapq', style: { left: pri.fx + 10, top: pri.mid + 8 } }, 'Warm up', h('em', null, 'Fits, no fresh reason')),
-        h('div', { key: 'c', className: 'stoa-mapq', style: { left: pri.l + 10, top: pri.t + 8 } }, 'Watch', h('em', null, 'A reason, but a weak fit')),
-        h('div', { key: 'd', className: 'stoa-mapq', style: { left: pri.l + 10, top: pri.mid + 8 } }, 'Later'),
-        h('div', { key: 'e', className: 'stoa-mapq', style: { left: pri.l, bottom: 12 } }, 'Fit →'),
-        h('div', { key: 'f', className: 'stoa-mapq', style: { left: 10, top: pri.t + 96, transform: 'rotate(-90deg)', transformOrigin: 'left top' } }, 'Fresher →')] : null,
-      L.groups.map(g => {
-        if (g.ghost) {
-          return h('div', { key: 'ghost', className: 'stoa-mapghost', style: { left: g.cx, top: g.cy, width: Math.min(2 * g.R - 34, 216) } },
-            h('span', { className: 'stoa-eyebrow' }, say.recruiting ? 'Next to this role' : 'Next to this market'), h('b', null, say.recruiting ? 'A neighbouring pool' : 'A neighbouring segment'),
-            h('p', null, 'Hermes can suggest who else has this problem.'), h(Btn, { onClick: onSuggest }, 'Ask Hermes'))
-        }
-        const count = g.m.length, avg = count ? Math.round(g.m.reduce((sum, n) => sum + n.c.score, 0) / count) : 0
-        return h('div', { key: lens + g.key, className: 'stoa-mapcap', style: { left: g.cx, top: g.cy + g.R + 6, width: g.colW - 8 } },
-          h('b', null, g.name), h('span', null, plural(count, say.thing, say.things) + (lens === 'held' ? ' · ' + Math.round(100 * count / L.ns.length) + '%' : ' · fit ' + avg)),
-          lens === 'seg' && count <= 3 ? h('span', { className: 'stoa-chip', 'data-tone': 'warn', style: { marginLeft: 6 } }, 'thin') : null,
-          lens === 'seg' ? h(Btn, { kind: 'quiet', title: 'Ask Hermes to find more ' + say.things + ' for this ' + (say.recruiting ? 'pool' : 'segment'), onClick: () => onGrow(g.name) }, '+ Grow') : null)
-      }),
-      hovered ? h('div', { className: 'stoa-maptip', style: { left: Math.max(4, hovered.x + hovered.r + 14 + 236 > L.W ? hovered.x - hovered.r - 14 - 232 : hovered.x + hovered.r + 14), top: Math.max(4, Math.min(L.H - 120, hovered.y - 24)) } },
-        h('b', null, hovered.c.company), h(Fit, { value: squaresOf(hovered.c.score) }), h('span', { className: 'stoa-sub' }, '  fit ' + hovered.c.score + (hovered.c.size ? ' · ' + hovered.c.size : '') + (say.people && hovered.c.uses ? ' at ' + hovered.c.uses : '')),
-        hovered.c.signal ? h('div', null, h(Chip, { wrap: true }, hovered.c.signal), agoWords(hovered.c.days) ? h('span', { className: 'stoa-sub' }, '  ' + agoWords(hovered.c.days)) : null) : null, hovered.c.why ? h('div', { className: 'stoa-sub' }, hovered.c.why) : null) : null,
-      lasso ? h('div', { className: 'stoa-maplasso', style: { left: lasso.l, top: lasso.t, width: lasso.w, height: lasso.h } }) : null) : null)
-}
+/** The picture itself: the map drawn as a dial (DialPicture, below). It only draws and reports what was picked; what a pick means is the map's business. */
+function MapPicture(given) { return h(DialPicture, given) }
 
 /** A button that opens a short list beneath it. It closes on a choice, a click anywhere else, or Escape. */
 function Menu({ label, title, kind, up, right, children }) {
@@ -5747,16 +7397,15 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
       h('div', { className: 'stoa-btns' }, h(Btn, { kind: 'quiet', onClick: () => setPicked([]) }, 'Clear')))
   } else {
     side = h('div', null,
-      market.reading ? [label('Reading the map'), String(market.reading).split('\n').filter(Boolean).map((text, index) => h('p', { key: index, style: { margin: '0 0 8px' } }, text))] : null,
-      (market.implications || []).length ? [label('What this means'), market.implications.map((text, index) => h('p', { key: 'i' + index, className: 'stoa-tip' }, text))] : null,
-      h('div', { className: 'stoa-sechead', style: { padding: '0 0 6px' } }, h('span', { className: 'stoa-eyebrow' }, mapSay.people ? 'Who to approach first' : 'Next calls'),
+      h('div', { className: 'stoa-sechead', style: { padding: '0 0 6px' } }, h('span', { className: 'stoa-eyebrow' }, gtmWords(shape, market).first),
         calls.length > 1 ? h(Btn, { disabled: Boolean(busy), onClick: () => act.add(calls) }, 'Add all ' + calls.length) : null),
       calls.length ? calls.map((c, index) => h('div', { key: c.id, className: 'stoa-setrow' },
         h('span', { className: 'stoa-stagenum', style: { width: 18, margin: 0 } }, '0' + (index + 1)),
         h('button', { type: 'button', className: 'stoa-maprow stoa-grow', onClick: () => setPicked([c.id]) }, h('b', null, c.company), ' ', h(Fit, { value: squaresOf(c.score) }),
           h('span', { className: 'stoa-sub', style: { display: 'block' } }, [c.segment, c.signal, agoWords(c.days)].filter(Boolean).join(' · ')), c.why ? h('span', { style: { display: 'block' } }, c.why) : null),
         h(Btn, { disabled: Boolean(busy), onClick: () => act.add([c]) }, 'Add')))
-        : h('p', { className: 'stoa-sub' }, 'Every company on the map is in your pipeline. Grow a segment to find more.'))
+        : h('p', { className: 'stoa-sub' }, 'Every company on the map is in your pipeline. Grow a segment to find more.'),
+      market.reading ? [label('Reading the map'), String(market.reading).split('\n').filter(Boolean).map((text, index) => h('p', { key: index, style: { margin: '0 0 8px' } }, text))] : null)
   }
 
   const sortBy = key => setSort(now => ({ key, dir: now.key === key ? -now.dir : ['company', 'segment', 'uses'].includes(key) ? 1 : -1 }))
@@ -5782,7 +7431,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
   return h('div', { className: 'stoa-mapwrap' },
     h('div', { className: 'stoa-maptop' },
       h('div', { className: 'stoa-grow', style: { minWidth: 0 } },
-        h(Menu, { kind: 'title', label: market.name, title: 'Your market maps: switch, start a new one, rename or delete' },
+        h(Menu, { kind: 'pick', label: h('span', { className: 'sd-mappick', title: market.name }, market.name), title: 'Your market maps: switch, start a new one, rename, archive or delete' },
           (markets || []).map(item => h(MenuItem, { key: item.id, on: item.id === market.id, title: item.name,
             sub: (shape === 'roles' ? item.counts.mapped + ' on the map' : plural(item.counts.mapped, 'company', 'companies')) + (shortDay(item.updated) ? ' · updated ' + shortDay(item.updated) : ''), onClick: () => onMarket(item.id) })),
           h('div', { className: 'stoa-menurule' }),
@@ -5791,15 +7440,14 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
           rowsOf(market) ? h(MenuItem, { title: rowsOf(market) === 'people' ? 'Dots are candidates · change to companies' : 'Dots are companies · change to candidates',
             sub: rowsOf(market) === 'people' ? 'For a map of where the people work, with people named under each company' : 'For a map where every row is one person. Nothing on the map is changed, only how it is read',
             onClick: () => manage('rows', { rows: rowsOf(market) === 'people' ? 'companies' : 'people' }, result => (result.rows === 'people' ? 'This map’s dots are now candidates.' : 'This map’s dots are now companies.')) }) : null,
+          h(MapArchive, { market, pipe: pipe || $pipe.get() }),
           h(MenuItem, { title: 'Delete this map…', danger: true, onClick: () => setMode('delete') })),
-        h('div', { className: 'stoa-sub' }, [plural(list.length, mapSay.thing, mapSay.things), market.numbers.in_pipeline + mapSay.inPipe, list.filter(c => c.reason).length + ' with ' + mapSay.reason,
-          mapSay.people ? plural(new Set(list.map(c => (c.uses || '').toLowerCase()).filter(Boolean)).size, 'employer', 'employers') : plural(list.filter(c => c.buyer).length, who.one + ' named', who.many + ' named'), shortDay(market.updated) ? 'updated ' + shortDay(market.updated) : ''].filter(Boolean).join(' · '))),
+        null),
       h('div', { className: 'stoa-btns', style: { margin: 0 } },
         h(ModelPick, { lane: 'maps' }),
         h(Btn, { title: 'This map by the numbers: what is on it, where it came from, what it has cost, and its limits', onClick: () => setMode('facts') }, 'Map facts'),
         h(Btn, { disabled: Boolean(saving), title: 'The whole map as one web page, with buyers\' names and what is in your pipeline', onClick: () => save(false) }, saving === 'own' ? 'Saving…' : 'Download page'),
         h(Btn, { disabled: Boolean(saving), title: 'The same page without buyers\' names or your pipeline: the one to host or send to a client', onClick: () => save(true) }, saving === 'share' ? 'Saving…' : 'Download a copy to share'))),
-    h(MapSearch, { market }),
     mode === 'facts' ? h(MapFacts, { market, onClose: () => setMode(''), onFill: act.fill }) : null,
     mode === 'new' ? h(NewMap, { shape, onClose: () => setMode('') }) : null,
     mode === 'rename' ? h('form', { className: 'stoa-box stoa-mapform', onSubmit: event => { event.preventDefault(); if (draft.trim() && draft.trim() !== market.name) manage('rename', { name: draft.trim() }, result => 'The map is now called ' + result.name + '.') } },
@@ -5814,9 +7462,12 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
         + (market.numbers.in_pipeline ? 'The ' + plural(market.numbers.in_pipeline, 'record', 'records') + ' already in your pipeline ' + (market.numbers.in_pipeline === 1 ? 'stays' : 'stay') + ' there.' : 'Nothing in your pipeline is touched.')),
       h('div', { className: 'stoa-btns' }, h(Btn, { kind: 'danger', disabled: Boolean(busy), onClick: () => manage('remove', {}, result => result.name + ' was deleted, with ' + plural(result.companies, mapSay.thing, mapSay.things) + '.') }, busy === 'remove' ? 'Deleting…' : 'Delete the map'),
         h(Btn, { autoFocus: true, onClick: () => setMode('') }, 'Keep it'))) : null,
+    h(MapNumbers, { market, list, who, shape, updated: shortDay(market.updated) }),
+    h(MapSearch, { market }),
     gone && dismissed.length ? h('div', { className: 'stoa-box', style: { marginBottom: 12 } }, h('div', { className: 'stoa-sub', style: { marginBottom: 6 } }, 'Taken off this map. ' + mapSay.gone),
       h('div', { className: 'stoa-chips' }, dismissed.map(row => h(Btn, { key: row.id, disabled: Boolean(busy), title: 'Put ' + row.company + ' back on the map',
         onClick: () => send('restore', [row], null, result => ((result.restored || []).length ? row.company + ' is back on the map.' : 'Nothing was put back.')) }, row.company + '  ↩')))) : null,
+    h(MapStrategy, { market, list, facet, setFacet, shape }),
     h('div', { className: 'stoa-mapbody' },
       h('div', { className: 'stoa-mapa' },
         h('div', { className: 'stoa-mapbar' },
@@ -5830,10 +7481,12 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
             dismissed.length ? h(Btn, { kind: 'quiet', 'aria-expanded': gone, onClick: () => setGone(!gone) }, dismissed.length + ' dismissed') : null)),
         h('div', { className: 'stoa-maphow' }, h('p', { className: 'stoa-sub' }, (mapSay.how && mapSay.how[lens]) || MAP_LENSES.find(item => item[0] === lens)[2]),
           h('input', { className: 'stoa-field stoa-mapfind', type: 'search', value: find, placeholder: mapSay.find || 'Find a company', 'aria-label': mapSay.find || 'Find a company', onChange: event => setFind(event.target.value) })),
-        h(MapPicture, { say: mapSay, market, list, lens, sizeBy, sel, shown, onPick: pick, onClear: () => setPicked(now => (now.length ? [] : now)), onGrow: act.grow, onSuggest: act.suggest,
+        h(MapPicture, { say: mapSay, market, list, lens, sizeBy, sel, shown, onPick: pick,
+          shape, onReasons: companies => research(gtmWords(shape, market).reasonsAsk(here, companies.map(c => c.company).join(', '))), onClear: () => setPicked(now => (now.length ? [] : now)), onGrow: act.grow, onSuggest: act.suggest,
           onLasso: (ids, add) => setPicked(now => (add ? [...new Set(now.concat(ids))] : ids)) }),
         h('div', { className: 'stoa-maplegend' },
-          h('div', null,
+          h(MapLegend, { shape, market }),
+          h('div', { style: { display: 'none' } },
             h('span', null, 'Fit ', h('i', { className: 'stoa-mapheat' }), ' cold to hot'),
             h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'on' }), 'on the map'), h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'in' }), 'in the pipeline'),
             h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'fresh' }), 'new since you last looked'), h('span', null, h('i', { className: 'stoa-mapkey', 'data-kind': 'sig' }), 'a reason to call')),
@@ -5856,7 +7509,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
             h('form', { className: 'stoa-pathrow', style: { marginTop: 12 }, onSubmit: event => { event.preventDefault(); if (wanted.trim() && act.require(wanted.trim())) setWanted('') } },
               h('input', { className: 'stoa-field', style: { fontFamily: 'inherit' }, value: wanted, placeholder: 'A new requirement, in your words', 'aria-label': 'A new requirement', onChange: event => setWanted(event.target.value) }),
               h(Btn, { type: 'submit', disabled: !wanted.trim(), title: 'Hermes adds the requirement and checks every company on the map against it' }, 'Ask Hermes'))),
-          h('div', null, label('Who holds this market'),
+          h('div', { 'data-sd': 'holds' }, label('Who holds this market'),
             (market.holds || []).length ? [h('p', { key: 'p', className: 'stoa-sub stoa-mapnote' }, 'What the ' + market.holds_of + ' companies we could place use today, and how many use each. Press one to light it up on the map.'),
               market.holds.map(hold => facetBtn('uses', hold.name, 'Uses: ' + hold.name, hold.share + '%', hold.share, hold.name, String(hold.count)))] : h('p', { className: 'stoa-sub stoa-mapnote' }, 'Nothing recorded yet about what these companies use today.')),
           h('div', null, label('How big they are'),
@@ -7019,7 +8672,7 @@ function Page() {
         onClick: item[3] ? () => setTab(item[3]) : undefined }, h('span', { className: 'stoa-eyebrow' }, item[0]), h('b', null, String(item[1])))))),
     h('div', { className: 'stoa-rule' }),
     h('div', { className: 'stoa-tabsrow' },
-      h('div', { className: 'stoa-tabs', role: 'tablist' }, [['today', 'Today', day.needs], ['market', 'Market map', totals.mapped], ['pipeline', 'Pipeline', totals.open], ['reports', 'Reports', 0], ['database', 'Database', 0], ['activity', 'Activity', 0]]
+      h('div', { className: 'stoa-tabs', role: 'tablist' }, [['today', 'Today', day.needs], ['market', 'GTM', totals.mapped], ['pipeline', 'Pipeline', totals.open], ['reports', 'Reports', 0], ['database', 'Database', 0], ['activity', 'Activity', 0]]
         .concat(cashShown ? [['cash', 'Cash', state.cash ? state.cash.strip.overdue.count + (state.cash.strip.to_bill || { count: 0 }).count : 0]] : [])
         .concat([['setup', 'Setup', 0]]).map(item =>
         h('button', { type: 'button', key: item[0], role: 'tab', 'aria-selected': tab === item[0], className: 'stoa-tab', 'data-on': tab === item[0] ? '1' : '0',
@@ -7033,7 +8686,8 @@ function Page() {
       state.deals.length || waiting || (day.to_bill || []).length ? h(Today, { state, openId: '', setOpenId: openRecord, openClient }) : nothing,
       side || (state.deals.length ? h(Ahead, { state, setOpenId: openRecord }) : null)) : null,
     !paged && tab === 'pipeline' && (!welcome || waiting) ? h('div', null,
-      h(Billing, { key: state.pipeline || 'main', state }),          // each pipeline its own: a form left open does not follow the page to another
+      h(PipelinesHead, { state, showPipe, openGroup, filter: { store: $filter, use: useValue, set: setFilter } }),
+      null,          // each pipeline its own: a form left open does not follow the page to another
       state.deals.length && view === 'board' ? h(Funnel, { state }) : null,
       state.deals.length || groups.length ? h('div', { className: 'stoa-viewrow' },
         h('div', { className: 'stoa-grow', style: { maxWidth: 760 } }, h(Filters, { state })),
@@ -7049,7 +8703,7 @@ function Page() {
     !paged && tab === 'database' ? h(Database, { state, openRecord, openGroup, openCompany, openMap: id => { setMarketId(id); setTab('market') } }) : null,
     !paged && tab === 'cash' ? h('div', { className: 'stoa-split', ref: split, 'data-side': '0' },
       h(Cash, { state, openId: '', setOpenId: openRecord, openClient })) : null,
-    tab === 'market' ? (market
+    tab === 'market' ? h(GtmTab, { state, openRecord, showPipe }, market
       ? h(MarketMap, { market, markets: state.markets, onMarket: setMarketId, shape: state.playbook.shape, openRecord })
       : h('div', { style: { maxWidth: 720 } }, h(NewMap, { first: true, shape: state.playbook.shape }))) : null,
     !paged && tab === 'reports' ? h(Reports, { state, openRecord }) : null,
@@ -7296,6 +8950,7 @@ export default {
         .then(answer => seenAnswer(path, pipe, answer))        // how the pipeline is paid for is noted, and a contract pipeline's fees are left out
     }
     try { $folds.set({ ...(storage.get('folds', {}) || {}) }) } catch { /* no storage: every group starts closed */ }
+    try { const view = storage.get('gtm.view', ''); if (['maps', 'motions', 'assets'].includes(view)) $gtmView.set(view) } catch { /* no storage: the GTM tab opens on Maps */ }
     for (const lane of Object.keys(LANES)) {
       const was = (ctx.storage.get(LANES[lane].key, {}) || {}).model
       if (was && typeof was.model === 'string' && typeof was.provider === 'string') setModel({ [lane]: { model: was.model, provider: was.provider, ...(typeof was.effort === 'string' && was.effort ? { effort: was.effort } : {}) } })
