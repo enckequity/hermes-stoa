@@ -387,8 +387,10 @@ It runs no shell commands and no background processes. The detail follows.
   the plugin: its path is given to the agent, which reads it with its own tools. Recordings are
   counted and never opened. By path it reads only `.csv` and `.tsv` files, and only from the plugin's
   own `imports/` folder, the folder you name in `import_dir`, and the working directory when that
-  is a project folder; a path the agent passes anywhere else is refused. (At a terminal,
-  `hermes stoa import <file>` reads the CSV you name.) It writes nowhere outside its own data
+  is a project folder; a path passed to Stoa's tools from anywhere else is refused. (At a terminal,
+  `hermes stoa import <file>` reads any CSV it is given, and takes it as a list of past records, whose
+  placements keep their fees on contract work too. Nothing checks who typed it: an agent that has a
+  terminal can run it as well.) It writes nowhere outside its own data
   folder: exports (the pipeline as CSV, a market map as a web page) always go to its `exports/`
   folder, and a file name is all the agent can choose.
   On the Setup page, **Check** counts the note files in a folder you name, and **Look for a folder**

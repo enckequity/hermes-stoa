@@ -174,7 +174,7 @@ def _run(desk, args, command) -> None:
         result = desk.export({"action": "export", "path": args.path or None, "group": getattr(args, "group", ""), "share": getattr(args, "share", False)})
         print("Wrote %d records to %s" % (result["rows"], result["path"]) if result.get("ok") else result.get("error"))
     elif command == "import":
-        path, refused = desk.csv_path(args.path, trusted=True)        # typed by a person at a terminal: any folder, CSV only
+        path, refused = desk.csv_path(args.path, trusted=True)        # a terminal command (a person's, or an agent's that has a terminal): any folder, CSV only
         result = refused or desk.import_csv(path, dry_run=args.dry_run, history=True)
         if result.get("ok"):
             print("%s %d records, skipped %d already on the desk."

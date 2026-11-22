@@ -629,7 +629,7 @@ function inPlay(deals, from) {
 }
 /** What some OPEN records have in play, a stage at a time, as a Map from stage id to amount. On a contingent recruiting
     pipeline a search counts once, in the stage of its furthest-along candidate (the next seat's in the stage of the
-    next furthest), so the board's columns add up to the number at the head of the page and a search with people at three
+    next furthest), so the whole board's open columns add up to the number at the head of the page and a search with people at three
     stages is not counted three times (the desk does the same for the funnel: `store.by_stage`). On any other pipeline a
     stage is the plain sum of what is in it. */
 function stageSums(deals, from) {
@@ -2771,6 +2771,56 @@ function ModelPickPlain({ lane = 'desk' }) {
     talk.busy ? h('div', { className: 'stoa-sub', style: { padding: '6px 10px' } }, 'Hermes is answering; a change waits until it is done.') : null)
 }
 
+// The Mac's own dictation (and anything else that types through an input method) keeps the words marked while it
+// listens and puts its final transcript in afterwards, at the cursor. If they were sent in between, the box filled up
+// again with what had just been sent. So: what comes back within a few seconds that is only those words again,
+// with nothing typed since, is not taken.
+function lateWords() {
+  const plain = value => String(value || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  let marked = '', at = 0, composing = false, gone = [], until = 0
+  const same = (said, was) => {
+    if (said === was) return true
+    const a = said.split(' '), b = was.split(' ')
+    if (was.startsWith(said) && said.length * 2 >= was.length) return true              // the same words on their way back in
+    if (said.startsWith(was + ' ') && a.length - b.length <= 3) return true             // and the last word or two it was still hearing
+    if (Math.max(a.length, b.length) < 5) return false
+    const left = b.slice()
+    let both = 0
+    for (const word of a) { const index = left.indexOf(word); if (index >= 0) { left.splice(index, 1); both++ } }
+    return both >= 0.8 * Math.max(a.length, b.length)                                   // the same, put right in a word
+  }
+  return {
+    marks: {
+      onCompositionStart: () => { composing = true },
+      onCompositionUpdate: event => { composing = true; if (event.data) marked = event.data },
+      onCompositionEnd: event => { composing = false; at = Date.now(); if (event.data) marked = event.data }
+    },
+    /** A key pressed: what follows typing is the person's. */
+    typed: event => {
+      if (event.metaKey || event.ctrlKey) return
+      if (event.key.length === 1 || event.key === 'Backspace' || event.keyCode === 229) { gone = []; if (!composing) marked = '' }
+    },
+    /** Return sends, also while words are still marked, unless the input method took the key for itself (229). */
+    sends: event => event.key === 'Enter' && !event.shiftKey && (!event.nativeEvent.isComposing || event.keyCode === 13),
+    /** The box's words are being sent, or left. */
+    leaving: text => {
+      if (!marked || !(composing || Date.now() - at < 1500)) return
+      gone = [plain(marked), plain(text)].filter(Boolean)
+      until = Date.now() + 5000
+      marked = ''
+      composing = false
+    },
+    /** Whether this change to the box is only those words coming back. */
+    late: event => {
+      const { inputType = '', data = '' } = event.nativeEvent || {}
+      if (!data || !['insertText', 'insertCompositionText', 'insertReplacementText'].includes(inputType)) return false
+      if (gone.length && Date.now() < until) { const said = plain(data); if (said && gone.some(was => same(said, was))) return true }
+      if (inputType === 'insertText' && data.length > 1) { marked = data; at = Date.now() }     // dictation that commits as it goes
+      return false
+    }
+  }
+}
+
 function Dock({ state }) {
   const talk = useValue($talk)
   const files = useValue($attached)
@@ -2779,6 +2829,7 @@ function Dock({ state }) {
   const [listening, setListening] = useState(false)
   const area = useRef(null), picker = useRef(null), sheet = useRef(null), ear = useRef(null), before = useRef('')
   const draft = useValue($draft)
+  const [late] = useState(lateWords)
   useEffect(() => {
     if (!draft) return
     setText(draft)
@@ -2797,16 +2848,28 @@ function Dock({ state }) {
   }, [talk.turns, talk.open])
   useEffect(() => () => { try { if (ear.current) ear.current.abort() } catch { /* already stopped */ } }, [])
   const hush = () => { try { if (ear.current) ear.current.stop() } catch { /* already stopped */ } }
+  // What was said has been sent as it stood in the box: the recogniser's last transcript of it, which can come a
+  // second later, is not wanted, and would fill the box again.
+  const unhear = () => {
+    const was = ear.current
+    if (!was) return
+    ear.current = null
+    was.onresult = was.onerror = was.onend = null
+    setListening(false)
+    try { was.abort() } catch { /* already stopped */ }
+  }
   const send = line => {
     const words = typeof line === 'string' ? line : text
     if (isCommand(words) && !files.length) {          // a command is for a chat, not for the agent (see typeInChat)
-      hush()
+      unhear()
+      late.leaving(words)
       setText('')
       typeInChat(words.trim())
       return
     }
     if ((!words.trim() && !files.length) || talk.busy) return
-    hush()
+    unhear()
+    late.leaving(words)
     say(words, files)
     setText('')
     $attached.set([])
@@ -2875,9 +2938,11 @@ function Dock({ state }) {
         h('span', { className: 'stoa-prompt', 'aria-hidden': true }, '›'),
         h('textarea', { ref: area, rows: 1, value: text, disabled: talk.busy, 'aria-label': 'Talk to the desk',
           placeholder: listening ? 'Listening…' : 'Tell Stoa what happened, ask it anything, or drop a list on the page…',
-          onChange: event => setText(event.target.value),
+          ...late.marks,
+          onChange: event => { if (!late.late(event)) setText(event.target.value) },
           onKeyDown: event => {
-            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send() }
+            late.typed(event)
+            if (late.sends(event)) { event.preventDefault(); send() }
             else if (event.key === 'Escape' && talk.open) { event.preventDefault(); setTalk({ open: false }) }
           } }),
         Recognition ? h('button', { type: 'button', className: 'stoa-icon', 'data-on': listening ? '1' : '0', disabled: talk.busy,
