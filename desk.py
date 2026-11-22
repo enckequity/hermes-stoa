@@ -4001,8 +4001,14 @@ class Desk:
         try:
             if action == "pipelines":
                 listed = self.pipelines()
-                return {"ok": True, "count": len(listed), "pipelines": [{"name": entry["name"], "playbook": entry["playbook"], "runs": entry["title"],
-                                                                        "first": entry["first"]} for entry in listed]}
+                kinds, hands = self.handoffs.kinds(), {}
+                for entry in listed:
+                    if kinds.get(entry["id"]) == "lead":
+                        hands[entry["id"]] = next((one["name"] for one in listed if one["id"] == self.handoffs.target_of(entry["id"], kinds)), "")
+                return {"ok": True, "count": len(listed), "pipelines": [dict({"name": entry["name"], "playbook": entry["playbook"], "runs": entry["title"],
+                                                                             "first": entry["first"], "kind": kinds.get(entry["id"], "deal")},
+                                                                            **({"hands_over_to": hands[entry["id"]] or "nowhere"} if entry["id"] in hands else {}))
+                                                                        for entry in listed]}
             if action == "shapes":
                 return {"ok": True, "shapes": self.shapes(),
                         "note": "Three shapes. Ask which fits, then the stages their business uses (2 to %d), and set them with action='stages'." % MOST_STAGES}
@@ -4015,6 +4021,20 @@ class Desk:
                 return self.pipeline_add(args.get("pipeline_name") or args.get("to"), args.get("playbook") or args.get("name"))
             if action == "rename_pipeline":
                 return self.pipeline_rename(self._pipe().get("id") or MAIN, args.get("to") or args.get("pipeline_name"))
+            if action in ("set_handover", "hand_over"):
+                # The lead pipeline is the one in hand (`pipeline` on the call); `to` names the deal pipeline.
+                lead = self._pipe().get("id") or MAIN
+                to = str(args.get("to") or "").strip()
+                try:
+                    if action == "set_handover":
+                        out = self.handoffs.set_target(lead, to)
+                        return {"ok": True, "pipelines": [{key: card.get(key) for key in ("name", "kind_label", "hands_to_name") if card.get(key)} for card in out["pipelines"]]}
+                    target = self.handoffs._find(to)["id"] if to else ""
+                    return dict(self.handoffs.hand_over(lead, str(args.get("deal") or ""), target, actor=self.actor()), ok=True)
+                except Exception as exc:
+                    if type(exc).__name__ != "Refused":
+                        raise
+                    return {"ok": False, "error": str(exc)}
             if action == "list":
                 return {"ok": True, "active": self.playbook().name, "playbooks": library.catalog()}
             if action == "show":

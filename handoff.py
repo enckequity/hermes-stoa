@@ -41,30 +41,6 @@ CREATE TABLE IF NOT EXISTS handoffs (
   PRIMARY KEY (lead_pipeline, lead));
 """
 
-TOOL = {
-    "name": "gtm_pipelines",
-    "description": (
-        "See every pipeline on the Stoa desk at once, and move a qualified lead into a deal pipeline. A desk can hold lead pipelines "
-        "(long lists of people being worked) and deal pipelines (fewer, richer records). A lead pipeline hands over to a deal pipeline: "
-        "when a lead reaches its last stage Stoa opens the deal by itself. "
-        "Actions: list (each pipeline: its kind, what is open, its value, its stages, and where it hands over), hand_over (open a deal "
-        "now for one lead: `deal` names the lead, `pipeline` the lead pipeline it is in, `to` the deal pipeline; the lead is closed as "
-        "handed over), set_handover (say which deal pipeline a lead pipeline hands over to with `pipeline` and `to`; to='' stops it). "
-        "To add or change records inside one pipeline use gtm_deal with its `pipeline` argument."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "action": {"type": "string", "enum": ["list", "hand_over", "set_handover"]},
-            "pipeline": {"type": "string", "description": "hand_over/set_handover: the lead pipeline, by name."},
-            "deal": {"type": "string", "description": "hand_over: the lead, by id or name."},
-            "to": {"type": "string", "description": "hand_over/set_handover: the deal pipeline, by name. Left out on hand_over, the one the lead pipeline is set to hand over to."},
-        },
-        "required": ["action"],
-    },
-}
-
-
 # What each sample desk is called where pipelines are named (the same names as its button on the page: sampleName).
 SAMPLE_NAMES = {"saas": "B2B Sales Data", "recruiting": "Recruiting Data"}
 
@@ -310,25 +286,3 @@ class Handoffs:
         """Whether a Source names where a record came from (see motions.Motions.says_where: the same rule)."""
         low = " ".join(str(source or "").casefold().split())
         return bool(low) and low not in ("stoa-demo", "import") and not low.startswith(("market map", "intake:", "lead pipeline:"))
-
-    # -- the tool an agent uses -------------------------------------------------------------------------------
-    def tool(self, args: dict, session: Optional[dict] = None) -> dict:
-        """``gtm_pipelines``, as the agent calls it."""
-        args = dict(args or {})
-        action = str(args.get("action") or "").strip().lower()
-        session = session or {}
-        try:
-            if session.get("platform") == "cron" and action != "list":
-                raise Refused("A scheduled job may read the pipelines but not hand leads over or change where they go.")
-            if action == "list":
-                return dict(self.overview(), ok=True, note="A lead pipeline hands a lead over by itself when it reaches the last stage.")
-            if action == "hand_over":
-                lead = self._find(args.get("pipeline"))
-                to = self._find(args["to"])["id"] if str(args.get("to") or "").strip() else ""
-                return dict(self.hand_over(lead["id"], str(args.get("deal") or ""), to, actor=str(session.get("actor") or "")), ok=True)
-            if action == "set_handover":
-                self.set_target(args.get("pipeline"), args.get("to"))
-                return {"ok": True}
-            raise Refused("gtm_pipelines does not have an action called %s." % (action or "(none)"))
-        except Refused as exc:
-            return {"ok": False, "error": str(exc)}

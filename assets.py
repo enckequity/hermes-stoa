@@ -66,29 +66,6 @@ class JsonFile:
 ASSET_BYTES = 250_000_000
 KINDS = {"deck": "Pitch deck", "one-pager": "One-pager", "case-study": "Case study", "pricing": "Pricing", "demo": "Demo", "other": "Other"}
 
-TOOL = {
-    "name": "gtm_hub",
-    "description": (
-        "Read or keep what the business reaches for when it sells, kept under Assets on the GTM tab of the Stoa app: its key assets "
-        "(pitch deck, one-pager, case studies) and its links (website, booking page and the like). Read it before drafting anything "
-        "that should point at one of them. What the business sells, and to whom, is on its market maps: read those with gtm_market. "
-        "Actions: get (the links and the list of assets), add_link (a `label` and a `url`), add_asset (a `label`, a `url` to where it "
-        "lives, and a `kind`), remove (a link or an asset, by `label`). An asset kept as a file is listed by name; you cannot read or "
-        "send the file itself."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "action": {"type": "string", "enum": ["get", "add_link", "add_asset", "remove"]},
-            "label": {"type": "string", "description": "add_link/add_asset/remove: what it is called, e.g. 'Website' or 'Pitch deck, autumn 2026'."},
-            "url": {"type": "string", "description": "add_link/add_asset: the full address, starting with https://."},
-            "kind": {"type": "string", "enum": list(KINDS), "description": "add_asset: what kind of asset it is."},
-        },
-        "required": ["action"],
-    },
-}
-
-
 class Refused(Exception):
     """A request that cannot be done, in words for whoever asked."""
 
@@ -272,7 +249,7 @@ class Assets:
 
     # -- the tool an agent uses -------------------------------------------------------------------------------
     def tool(self, args: dict, session: Optional[dict] = None) -> dict:
-        """``gtm_hub``, as the agent calls it."""
+        """The links and assets actions of ``gtm_context``, as the agent calls them."""
         args = dict(args or {})
         action = str(args.get("action") or "").strip().lower()
         try:
@@ -282,7 +259,7 @@ class Assets:
                 kept = self.view()
                 return {"ok": True, "links": [{"label": link["label"], "url": link["url"]} for link in kept["links"]],
                         "assets": [{"label": asset["label"], "kind": asset["kind_label"], "url": asset["url"] or "(a file kept on the Stoa page)"} for asset in kept["assets"]],
-                        "note": "What the business sells, and to whom, is on its market maps (gtm_market, gtm_context)."}
+                        "note": "What the business sells, and to whom, is on its market maps."}
             if action == "add_link":
                 self.add_link(args.get("label"), args.get("url"))
             elif action == "add_asset":
@@ -290,7 +267,7 @@ class Assets:
             elif action == "remove":
                 self.remove(args.get("label"))
             else:
-                raise Refused("gtm_hub does not have an action called %s." % (action or "(none)"))
+                raise Refused("gtm_context does not have an action called %s." % (action or "(none)"))
         except Refused as exc:
             return {"ok": False, "error": str(exc)}
         return {"ok": True, "note": "It is under Assets on the GTM tab of the Stoa page."}

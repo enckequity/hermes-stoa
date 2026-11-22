@@ -75,45 +75,35 @@ CREATE TABLE IF NOT EXISTS links (motion TEXT NOT NULL, deal TEXT NOT NULL, how 
 TOOL = {
     "name": "gtm_motion",
     "description": (
-        "Plan and track go-to-market motions on the Stoa desk: the plays a team runs to break into a market or grow sales (an outbound "
-        "push, an event, digital ads, content, a partnership), and what each one brought in. A motion belongs to the whole desk and is "
-        "aimed at a market map, or at some of its segments, so read the map with gtm_market before proposing one. "
-        "Stoa works out by itself which records each motion sourced (brought in) and which it influenced, across every pipeline, from "
-        "each record's Source, its notes and calls, and whether it is at a company the motion is aimed at and came in while the motion "
-        "ran; a lead and the deal it was handed over as count once. Every record in the answer carries the reason. You help most by "
-        "keeping the desk honest: when the person says where a record came from, put it in the record's Source or log it as a note in "
-        "their words, and link it here when you are sure. "
-        "Actions: list (every motion with its figures), get (one motion: its audience, results, the records it is credited with and why, "
-        "and impact), add (a new motion; one you are only suggesting takes status='idea'), update (change its fields or status), log "
-        "(record a number as it runs: spend, reach, responses, meetings, or a metric of your own naming), link (say by hand what a record "
-        "owes a motion: how='sourced', 'influenced', or 'none' to stop the motion claiming it), unlink (take back what was said by hand, "
-        "so Stoa judges it again), remove. "
-        "Every figure in the answer is counted by Stoa from the desk; do not work them out again yourself."
+        "Go-to-market motions (an outbound push, an event, ads, content, a partnership) on the GTM tab: each is aimed at a market map or "
+        "some of its segments, and Stoa credits it, across every pipeline, with the records it sourced or influenced, saying why. Every "
+        "figure is counted by Stoa: don't redo the sums. Actions: list, get (one motion with its records and impact), add (a suggestion "
+        "takes status idea), update, log (a number as it runs: spend, reach, responses, meetings, or your own `metric`), link (a record "
+        "the motion `how`: sourced, influenced or none), unlink, remove."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "action": {"type": "string", "enum": ["list", "get", "add", "update", "log", "link", "unlink", "remove"]},
-            "motion": {"type": "string", "description": "get/update/log/link/unlink/remove: the motion's id, or its name or part of it."},
-            "name": {"type": "string", "description": "add/update: what the motion is called, e.g. 'Fraud summit dinner' or 'Outbound to neobanks'."},
-            "kind": {"type": "string", "enum": list(KINDS), "description": "add/update: the kind of play."},
-            "status": {"type": "string", "enum": list(STATUSES), "description": "add/update: idea, planned, running, done or stopped."},
-            "goal": {"type": "string", "description": "add/update: what it is for and why it should work, in a sentence or two. Say what on the map led to it."},
-            "market": {"type": "string", "description": "add/update: the market map it is aimed at, by name or id. Maps in any pipeline can be named."},
-            "segments": {"type": "array", "items": {"type": "string"}, "description": "add/update: the segments of that map it is for. Leave out for the whole map."},
+            "motion": {"type": "string", "description": "Its name or id."},
+            "name": {"type": "string"},
+            "kind": {"type": "string", "enum": list(KINDS)},
+            "status": {"type": "string", "enum": list(STATUSES)},
+            "goal": {"type": "string", "description": "What it is for, and what on the map led to it."},
+            "market": {"type": "string", "description": "The market map it is aimed at."},
+            "segments": {"type": "array", "items": {"type": "string"}, "description": "Leave out for the whole map."},
             "owner": {"type": "string"},
-            "start_on": {"type": "string", "description": "add/update: the day it starts, YYYY-MM-DD."},
-            "end_on": {"type": "string", "description": "add/update: the day it ends, YYYY-MM-DD."},
-            "budget": {"type": "number", "description": "add/update: what it is expected to cost, in the desk's currency."},
-            "tags": {"type": "array", "items": {"type": "string"}, "description": "add/update: words to watch for besides the motion's name, such as a campaign code or the event's name. "
-                                                                                     "A record whose Source or notes mention one is credited to the motion."},
-            "metric": {"type": "string", "description": "log: spend, reach, responses, meetings, or a short name of your own."},
-            "value": {"type": "number", "description": "log: the number. For spend, money in the desk's currency."},
-            "on": {"type": "string", "description": "log: the day it is for, YYYY-MM-DD (default today)."},
-            "note": {"type": "string", "description": "log: a few words on what the number is."},
-            "deal": {"type": "string", "description": "link/unlink: the record, by id or name."},
-            "how": {"type": "string", "enum": ["sourced", "influenced", "none"], "description": "link: sourced (the motion brought it in; the default), influenced, or none (not this motion's)."},
-            "pipeline": {"type": "string", "description": "link/unlink: the pipeline the record is in, by name, when records in two pipelines share a name."},
+            "start_on": {"type": "string", "description": "YYYY-MM-DD"},
+            "end_on": {"type": "string", "description": "YYYY-MM-DD"},
+            "budget": {"type": "number"},
+            "tags": {"type": "array", "items": {"type": "string"}, "description": "Words besides its name that credit a record whose Source or notes mention one."},
+            "metric": {"type": "string"},
+            "value": {"type": "number"},
+            "on": {"type": "string", "description": "log: YYYY-MM-DD, default today."},
+            "note": {"type": "string"},
+            "deal": {"type": "string", "description": "link/unlink: the record."},
+            "how": {"type": "string", "enum": ["sourced", "influenced", "none"]},
+            "pipeline": {"type": "string", "description": "link/unlink: the record's pipeline, when two share a name."},
         },
         "required": ["action"],
     },

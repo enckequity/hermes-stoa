@@ -54,24 +54,21 @@ NOTE_CHARS = 4000
 TOOL = {
     "name": "gtm_context",
     "description": (
-        "Read the go-to-market in one call. For each market map: what the business sells and who to, where it plays (its "
-        "segments), how it wins, what has to be true of a company for it to be worth a call, and who the business would be replacing. "
-        "Then the motions running and planned, and the links and key assets to point at. "
-        "Call it once before you draft anything that describes the business (an outreach note, a follow-up, a proposal) and before you "
-        "plan a motion, and work from it; do not ask the person for what it already says. "
-        "Actions: get (the default); set_brief, which saves the map's external note, what the business sells and who to, in the "
-        "person's own words (`map`, `text`); and set_notes, which saves the map's internal notes (`map`, `text`; an empty `text` clears "
-        "them). Use either only on the person's word. The brief is printed on the map when it is downloaded, exported or posted, so it "
-        "may reach a client. The internal notes are never printed or sent: pricing, internal positioning and anything about a named "
-        "account go there, not in the brief. "
-        "For more than the reading: gtm_market has the companies, gtm_motion the figures, gtm_hub the assets."
+        "The go-to-market on the GTM tab in one read: per market map what the business sells and who to, where it plays, how it wins "
+        "and what has to be true; the motions under way; the links and key assets. Call it once before writing about the business or "
+        "planning a motion; don't ask for what it says. Actions: get (default); set_brief (`map`, `text`: what we sell and who to, printed "
+        "on the map, so client-safe); set_notes (`map`, `text`: internal, never printed: pricing, positioning); add_link (`label`, `url`); "
+        "add_asset (`label`, `url`, `kind`); remove (a link or asset by `label`). Change any only on the person's word."
     ),
     "parameters": {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["get", "set_brief", "set_notes"]},
-            "map": {"type": "string", "description": "set_brief/set_notes: the market map, by name or id. Leave it out when there is only one."},
-            "text": {"type": "string", "description": "set_brief: what the business sells and who to, in a sentence or two, fit for a client to read. set_notes: the internal notes, in the person's words."},
+            "action": {"type": "string", "enum": ["get", "set_brief", "set_notes", "add_link", "add_asset", "remove"]},
+            "map": {"type": "string", "description": "The market map; leave out when there is one."},
+            "text": {"type": "string"},
+            "label": {"type": "string"},
+            "url": {"type": "string"},
+            "kind": {"type": "string", "enum": ["deck", "one-pager", "case-study", "pricing", "demo", "other"]},
         },
     },
 }
@@ -180,7 +177,7 @@ class Gtm:
             return ""
         lines = ["## The go-to-market (the GTM tab)",
                  "What the business sells, who to and how, as the desk has it today. Work from this when you write or plan for the person, and do not ask "
-                 "for what it already says. gtm_market has the companies, gtm_motion the figures, gtm_hub the assets.", SHARED]
+                 "for what it already says. gtm_market has the companies, gtm_motion the figures.", SHARED]
         if not seen["maps"]:
             lines.append("There is no market map yet, so nothing on the desk says what the business sells or who to. Ask the person before you describe "
                          "the business, then map the market with gtm_market.")
@@ -295,6 +292,8 @@ class Gtm:
         try:
             if action == "get":
                 return dict(self.context(), ok=True, note="A map with no 'what_we_sell_and_who_to' has not been told: ask the person, then save it with set_brief. " + SHARED)
+            if action in ("add_link", "add_asset", "remove"):
+                return self.base.tool(args, session)
             if action not in ("set_brief", "set_notes"):
                 raise Refused("gtm_context does not have an action called %s." % action)
             if (session or {}).get("platform") == "cron":

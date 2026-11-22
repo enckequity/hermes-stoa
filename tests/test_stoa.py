@@ -4285,8 +4285,8 @@ class RegisterTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def test_everything_the_manifest_promises_is_registered(self):
-        self.assertEqual(sorted(self.ctx.tools), ["gtm_card", "gtm_contact", "gtm_context", "gtm_deal", "gtm_enrich", "gtm_export", "gtm_group", "gtm_hub", "gtm_intake",
-                                                  "gtm_invoice", "gtm_market", "gtm_motion", "gtm_notes", "gtm_pipeline", "gtm_pipelines", "gtm_playbook",
+        self.assertEqual(sorted(self.ctx.tools), ["gtm_card", "gtm_contact", "gtm_context", "gtm_deal", "gtm_enrich", "gtm_export", "gtm_group", "gtm_intake",
+                                                  "gtm_invoice", "gtm_market", "gtm_motion", "gtm_notes", "gtm_pipeline", "gtm_playbook",
                                                   "gtm_report"])
         self.assertEqual(sorted(self.ctx.blueprints), ["activity-sweep", "friday-review", "market-watch", "morning-brief",
                                                        "notes-sweep", "sheet-mirror", "sheet-pull"])
@@ -5613,7 +5613,7 @@ class GtmTabTests(unittest.TestCase):
         with self.desk.on(self.deals):
             self.assertEqual([p["name"] for p in self.desk.store.people(deals[0]["id"])], ["Dana Whitfield"])
         self.assertEqual(self.desk.handoffs.pairs(), {"main:%s" % lead: "%s:%s" % (self.deals, deals[0]["id"])})
-        again = self.call("gtm_pipelines", action="hand_over", pipeline="Client lead desk", deal=lead)
+        again = self.call("gtm_playbook", action="hand_over", pipeline="Client lead desk", deal=lead)
         self.assertFalse(again["ok"])
         self.assertIn("already handed over", again["error"])
         # A second lead at the same company joins the open deal; it does not open another.
@@ -5622,13 +5622,15 @@ class GtmTabTests(unittest.TestCase):
         self.assertEqual(len(self.records(self.deals)), 1)
         with self.desk.on(self.deals):
             self.assertEqual(sorted(p["name"] for p in self.desk.store.people(deals[0]["id"])), ["Dana Whitfield", "Ola Brandt"])
-        overview = self.call("gtm_pipelines", action="list")
+        overview = self.desk.handoffs.overview()
         self.assertEqual(overview["totals"]["handed"], 2)
         lead_card = next(card for card in overview["pipelines"] if card["kind"] == "lead")
         self.assertEqual(lead_card["hands_to"], self.deals)
+        listed = self.call("gtm_playbook", action="pipelines")["pipelines"]
+        self.assertEqual([(p["kind"], p.get("hands_over_to")) for p in listed], [("lead", "Deals"), ("deal", None)])
 
     def test_hand_over_can_be_switched_off_and_a_claim_is_kept_once(self):
-        self.assertTrue(self.call("gtm_pipelines", action="set_handover", pipeline="Client lead desk", to="")["ok"])
+        self.assertTrue(self.call("gtm_playbook", action="set_handover", pipeline="Client lead desk", to="")["ok"])
         lead = self.lead("Rosa Lind", "Ledgerline")
         self.call("gtm_deal", action="close", deal=lead, outcome="won", pipeline="Client lead desk")
         self.assertEqual(self.records(self.deals), [])
@@ -5636,7 +5638,7 @@ class GtmTabTests(unittest.TestCase):
         self.assertFalse(self.desk.handoffs._claim("main", lead, self.deals))        # a second process closing it too opens nothing
         self.desk.handoffs._settle("main", lead)
         self.assertIsNone(self.desk.handoffs.handed("main", lead))
-        by_hand = self.call("gtm_pipelines", action="hand_over", pipeline="Client lead desk", deal=lead, to="Deals")
+        by_hand = self.call("gtm_playbook", action="hand_over", pipeline="Client lead desk", deal=lead, to="Deals")
         self.assertTrue(by_hand["ok"], by_hand)
         self.assertEqual([d["name"] for d in self.records(self.deals)], ["Ledgerline"])
 
@@ -5661,8 +5663,8 @@ class GtmTabTests(unittest.TestCase):
             return self.ctx.tools[tool](args)
 
     def test_assets_the_brief_and_internal_notes_reach_the_agent_in_one_reading(self):
-        self.assertTrue(self.call("gtm_hub", action="add_link", label="Booking page", url="cal.example.com/us")["ok"])
-        self.assertTrue(self.call("gtm_hub", action="add_asset", label="Pitch deck", url="https://example.com/deck", kind="deck")["ok"])
+        self.assertTrue(self.call("gtm_context", action="add_link", label="Booking page", url="cal.example.com/us")["ok"])
+        self.assertTrue(self.call("gtm_context", action="add_asset", label="Pitch deck", url="https://example.com/deck", kind="deck")["ok"])
         empty = self.call("gtm_context")
         self.assertEqual(empty["maps"], [])
         self.assertEqual(empty["links"], [{"label": "Booking page", "url": "https://cal.example.com/us"}])

@@ -263,7 +263,7 @@ GTM_PLAYBOOK = {
         "playbook from the template, show it to them, and save it once they agree. A desk can hold several pipelines "
         "side by side, each with its own records and its own playbook (client work beside the team's own sales): "
         "'pipelines' lists them, 'add_pipeline' opens an empty one (pipeline_name, and the playbook it runs on), "
-        "'rename_pipeline' renames the one named in `pipeline` (to). With `pipeline`, show/use/save act on that one. "
+        "'rename_pipeline' renames the one named in `pipeline` (to). A lead pipeline hands a lead won there to a deal pipeline by itself: 'set_handover' (`pipeline` = the lead pipeline, `to` = the deal pipeline, or '' for none), 'hand_over' (one lead now: `deal`). With `pipeline`, show/use/save act on that one. "
         "Most people need no YAML: a pipeline has one of three shapes (action='shapes': close deals, fill roles, generate "
         "leads) and its own stages, 2 to 7 before won or lost: action='stages' with stages=[names in order], and won/lost "
         "for what a win and a loss are called, sets them on the pipeline in hand (shape too, when it changes). "
@@ -272,7 +272,7 @@ GTM_PLAYBOOK = {
     "parameters": {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["list", "show", "use", "template", "save", "pipelines", "add_pipeline", "rename_pipeline", "shapes", "stages"]},
+            "action": {"type": "string", "enum": ["list", "show", "use", "template", "save", "pipelines", "add_pipeline", "rename_pipeline", "shapes", "stages", "set_handover", "hand_over"]},
             "shape": {"type": "string", "enum": ["deals", "roles", "leads"], "description": "stages/add_pipeline: close deals, fill roles or generate leads."},
             "stages": {"type": "array", "items": {"type": "string"}, "description": "stages/add_pipeline: the open stages in order, 2 to 7 (not the won or lost ones)."},
             "won": {"type": "string", "description": "stages: what a win is called (Closed won, Placed, Handed over)."},
@@ -280,7 +280,8 @@ GTM_PLAYBOOK = {
             "name": {"type": "string", "description": "show/use: the playbook name."},
             "pipeline_name": {"type": "string", "description": "add_pipeline: what to call the new pipeline (My practice, Client work)."},
             "playbook": {"type": "string", "description": "add_pipeline: the playbook it runs on (see action='list')."},
-            "to": {"type": "string", "description": "rename_pipeline: the new name."},
+            "to": {"type": "string", "description": "rename_pipeline: the new name. set_handover/hand_over: the deal pipeline."},
+            "deal": {"type": "string", "description": "hand_over: the lead."},
             "yaml": {"type": "string", "description": "save: the full playbook as YAML."},
             "activate": {"type": "boolean", "description": "save: also switch the desk to this playbook."},
         },

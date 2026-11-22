@@ -230,12 +230,10 @@ def register(ctx) -> None:
         ctx.register_tool(name=schema["name"], toolset=TOOLSET, schema=schema, emoji=emoji,
                           handler=_tool(fn, desk, quiet=schema is schemas.GTM_PIPELINE, name=schema["name"]))    # a read changes nothing
 
-    from . import assets, gtm, handoff, motions
+    from . import gtm, motions
     for schema, fn, reads, emoji in (
         (motions.TOOL, lambda args, session: desk.motions.tool(args, session), ("list", "get"), "🎯"),
-        (assets.TOOL, lambda args, session: desk.assets.tool(args, session), ("get",), "📎"),
         (gtm.TOOL, lambda args, session: desk.gtm.tool(args, session), ("get",), "🧭"),
-        (handoff.TOOL, lambda args, session: desk.handoffs.tool(args, session), ("list",), "🔀"),
     ):
         ctx.register_tool(name=schema["name"], toolset=TOOLSET, schema=schema, emoji=emoji, handler=_desk_tool(fn, desk, reads))
 
