@@ -146,6 +146,27 @@ def _tool(fn, desk=None, quiet=False, name=""):
     return handler
 
 
+def _desk_tool(fn, desk, reads=()):
+    """The tools about the desk as a whole (the GTM tab's motions and assets, the go-to-market reading, every pipeline
+    at once): no one pipeline is in hand, so a ``pipeline`` argument is the tool's own to read. ``fn(args, session)``
+    returns a dict; an action in ``reads`` changes nothing, so the page is not told to look again."""
+    def handler(args: dict, **kwargs) -> str:
+        try:
+            session = _session()
+            if not desk.allowed(session):
+                return json.dumps(AWAY_TOUR if session.get("platform") == "cron" and desk.tour() else AWAY)
+            args = dict(args or {})
+            with desk.on(""):
+                out = fn(args, session)
+            if str(args.get("action") or "get").lower() not in reads:
+                desk.announce()
+            return json.dumps(out, ensure_ascii=False, default=str)
+        except Exception as exc:
+            log.error("stoa: %s failed: %s", getattr(fn, "__name__", "tool"), exc, exc_info=True)
+            return json.dumps({"ok": False, "error": "%s: %s" % (type(exc).__name__, exc)})
+    return handler
+
+
 def _jobs_reader(home: Path):
     """A way to read this profile's scheduled jobs from Hermes: each one's name, whether it is on, its schedule and
     when it runs next. Read only; Setup uses it to say which of Stoa's automations are switched on."""
@@ -209,6 +230,15 @@ def register(ctx) -> None:
         ctx.register_tool(name=schema["name"], toolset=TOOLSET, schema=schema, emoji=emoji,
                           handler=_tool(fn, desk, quiet=schema is schemas.GTM_PIPELINE, name=schema["name"]))    # a read changes nothing
 
+    from . import assets, gtm, handoff, motions
+    for schema, fn, reads, emoji in (
+        (motions.TOOL, lambda args, session: desk.motions.tool(args, session), ("list", "get"), "🎯"),
+        (assets.TOOL, lambda args, session: desk.assets.tool(args, session), ("get",), "📎"),
+        (gtm.TOOL, lambda args, session: desk.gtm.tool(args, session), ("get",), "🧭"),
+        (handoff.TOOL, lambda args, session: desk.handoffs.tool(args, session), ("list",), "🔀"),
+    ):
+        ctx.register_tool(name=schema["name"], toolset=TOOLSET, schema=schema, emoji=emoji, handler=_desk_tool(fn, desk, reads))
+
     # -- Slack cards and their buttons ----------------------------------------------------------
     from .slackdesk import ACTIONS, SlackDesk
     slack = SlackDesk(desk, ctx.inject_message)
@@ -238,6 +268,15 @@ def register(ctx) -> None:
             return desk.prompt_section() if desk.allowed(session) else ""
 
     ctx.register_system_prompt_section("stoa.desk", section, max_chars=900)
+
+    def gtm_section(info) -> str:
+        session = _session()
+        platform = str((info or {}).get("platform") or "").lower()
+        if platform:
+            session = dict(session, platform=platform)
+        return gtm.PROMPT_LINE if desk.allowed(session) else ""
+
+    ctx.register_system_prompt_section("stoa.gtm", gtm_section, max_chars=300)
     skills = Path(__file__).parent / "skills"
     for child in sorted(skills.iterdir()):
         if child.is_dir() and (child / "SKILL.md").exists():

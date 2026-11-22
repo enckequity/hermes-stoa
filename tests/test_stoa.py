@@ -4285,8 +4285,9 @@ class RegisterTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def test_everything_the_manifest_promises_is_registered(self):
-        self.assertEqual(sorted(self.ctx.tools), ["gtm_card", "gtm_contact", "gtm_deal", "gtm_enrich", "gtm_export", "gtm_group", "gtm_intake", "gtm_invoice", "gtm_market",
-                                                  "gtm_notes", "gtm_pipeline", "gtm_playbook", "gtm_report"])
+        self.assertEqual(sorted(self.ctx.tools), ["gtm_card", "gtm_contact", "gtm_context", "gtm_deal", "gtm_enrich", "gtm_export", "gtm_group", "gtm_hub", "gtm_intake",
+                                                  "gtm_invoice", "gtm_market", "gtm_motion", "gtm_notes", "gtm_pipeline", "gtm_pipelines", "gtm_playbook",
+                                                  "gtm_report"])
         self.assertEqual(sorted(self.ctx.blueprints), ["activity-sweep", "friday-review", "market-watch", "morning-brief",
                                                        "notes-sweep", "sheet-mirror", "sheet-pull"])
         self.assertEqual(sorted(self.ctx.skills), ["desk", "market-map", "playbook-authoring"])
@@ -5564,6 +5565,131 @@ class SlackClickGuardTests(unittest.IsolatedAsyncioTestCase):
         await self.slack.on_action(self.ack, {}, {"action_id": "stoa_advance", "value": self.dana["id"] + "|screened"})
         await self.slack.on_action(self.ack, {"user": {"id": "U1"}}, {"action_id": "stoa_advance", "value": self.dana["id"] + "|screened"})
         self.assertEqual((self.stage(), self.app.client.whispers), ("screened", []))
+
+
+class GtmTabTests(unittest.TestCase):
+    """The desk as a whole: a lead handed over to a deal pipeline, motions credited across pipelines, assets, the
+    one reading of the go-to-market, and a map archived. The first pipeline here is a lead pipeline."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.data = Path(self.tmp.name) / "data"
+        self.data.mkdir()
+        fakes = {"hermes_constants": types.SimpleNamespace(get_hermes_home=lambda: self.tmp.name),
+                 "plugins": types.ModuleType("plugins"),
+                 "plugins.plugin_storage": types.SimpleNamespace(plugin_data_dir=lambda name: self.data)}
+        patcher = mock.patch.dict(sys.modules, fakes)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.ctx = FakeCtx({"playbook": "client-leads"})
+        stoa.register(self.ctx)
+        self.desk = stoa.LIVE_DESKS[-1]
+        patcher = mock.patch.object(stoa, "_session", lambda: {"platform": "cli"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        made = self.call("gtm_playbook", action="add_pipeline", pipeline_name="Deals", playbook="b2b-sales")
+        self.assertTrue(made["ok"], made)
+        self.deals = made["added"]["id"] if "added" in made else next(p["id"] for p in self.desk.pipelines() if p["name"] == "Deals")
+
+    def call(self, tool, **args):
+        return json.loads(self.ctx.tools[tool](args))
+
+    def lead(self, name, company, **more):
+        out = self.call("gtm_deal", action="add", name=name, company=company, pipeline="Client lead desk", **more)
+        self.assertTrue(out["ok"], out)
+        return out["deal"]["id"]
+
+    def records(self, pipeline):
+        with self.desk.on(pipeline):
+            return self.desk.store.list(status="all")
+
+    def test_a_lead_closed_as_won_is_handed_over_once_as_a_deal(self):
+        lead = self.lead("Dana Whitfield", "Calder Bank", email="dana@calder.example")
+        closed = self.call("gtm_deal", action="close", deal=lead, outcome="won", pipeline="Client lead desk")
+        self.assertTrue(closed["ok"], closed)
+        deals = self.records(self.deals)
+        self.assertEqual([d["name"] for d in deals], ["Calder Bank"])
+        with self.desk.on(self.deals):
+            self.assertEqual([p["name"] for p in self.desk.store.people(deals[0]["id"])], ["Dana Whitfield"])
+        self.assertEqual(self.desk.handoffs.pairs(), {"main:%s" % lead: "%s:%s" % (self.deals, deals[0]["id"])})
+        again = self.call("gtm_pipelines", action="hand_over", pipeline="Client lead desk", deal=lead)
+        self.assertFalse(again["ok"])
+        self.assertIn("already handed over", again["error"])
+        # A second lead at the same company joins the open deal; it does not open another.
+        second = self.lead("Ola Brandt", "Calder Bank, Inc.")
+        self.call("gtm_deal", action="close", deal=second, outcome="won", pipeline="Client lead desk")
+        self.assertEqual(len(self.records(self.deals)), 1)
+        with self.desk.on(self.deals):
+            self.assertEqual(sorted(p["name"] for p in self.desk.store.people(deals[0]["id"])), ["Dana Whitfield", "Ola Brandt"])
+        overview = self.call("gtm_pipelines", action="list")
+        self.assertEqual(overview["totals"]["handed"], 2)
+        lead_card = next(card for card in overview["pipelines"] if card["kind"] == "lead")
+        self.assertEqual(lead_card["hands_to"], self.deals)
+
+    def test_hand_over_can_be_switched_off_and_a_claim_is_kept_once(self):
+        self.assertTrue(self.call("gtm_pipelines", action="set_handover", pipeline="Client lead desk", to="")["ok"])
+        lead = self.lead("Rosa Lind", "Ledgerline")
+        self.call("gtm_deal", action="close", deal=lead, outcome="won", pipeline="Client lead desk")
+        self.assertEqual(self.records(self.deals), [])
+        self.assertTrue(self.desk.handoffs._claim("main", lead, self.deals))
+        self.assertFalse(self.desk.handoffs._claim("main", lead, self.deals))        # a second process closing it too opens nothing
+        self.desk.handoffs._settle("main", lead)
+        self.assertIsNone(self.desk.handoffs.handed("main", lead))
+        by_hand = self.call("gtm_pipelines", action="hand_over", pipeline="Client lead desk", deal=lead, to="Deals")
+        self.assertTrue(by_hand["ok"], by_hand)
+        self.assertEqual([d["name"] for d in self.records(self.deals)], ["Ledgerline"])
+
+    def test_a_motion_is_credited_with_a_lead_and_the_deal_it_became_once(self):
+        made = self.call("gtm_motion", action="add", name="Fraud summit dinner", kind="event", status="running", tags=["FSD26"])
+        self.assertTrue(made["ok"], made)
+        lead = self.lead("Dana Whitfield", "Calder Bank", source="FSD26 dinner")
+        listed = self.call("gtm_motion", action="list")
+        self.assertEqual(listed["motions"][0]["impact"]["sourced"], 1)
+        self.call("gtm_deal", action="close", deal=lead, outcome="won", pipeline="Client lead desk")
+        got = self.call("gtm_motion", action="get", motion="fraud summit")
+        impact = got["motion"]["impact"]
+        self.assertEqual((impact["sourced"], impact["handed_over"]), (1, 1))         # the lead and its deal are one piece of business
+        self.assertEqual(impact["records"][0]["kind"], "deal")
+        self.assertIn("FSD26", impact["records"][0]["why"])                            # the deal carries the lead's Source over
+        logged = self.call("gtm_motion", action="log", motion="Fraud summit dinner", metric="spent", value=1200)
+        self.assertEqual(logged["motion"]["impact"]["spend"], 1200.0)
+        self.assertIn("scheduled job", json.loads(self._cron("gtm_motion", action="add", name="x"))["error"])
+
+    def _cron(self, tool, **args):
+        with mock.patch.object(stoa, "_session", lambda: {"platform": "cron"}):
+            return self.ctx.tools[tool](args)
+
+    def test_assets_the_brief_and_internal_notes_reach_the_agent_in_one_reading(self):
+        self.assertTrue(self.call("gtm_hub", action="add_link", label="Booking page", url="cal.example.com/us")["ok"])
+        self.assertTrue(self.call("gtm_hub", action="add_asset", label="Pitch deck", url="https://example.com/deck", kind="deck")["ok"])
+        empty = self.call("gtm_context")
+        self.assertEqual(empty["maps"], [])
+        self.assertEqual(empty["links"], [{"label": "Booking page", "url": "https://cal.example.com/us"}])
+        self.assertTrue(self.call("gtm_market", action="define", name="Neobanks", segments=["Challengers"])["ok"])
+        self.assertTrue(self.call("gtm_context", action="set_brief", text="Fraud checks for neobanks.")["ok"])
+        self.assertTrue(self.call("gtm_context", action="set_notes", text="Never go below 40k a year.")["ok"])
+        read = self.call("gtm_context")
+        self.assertEqual(read["maps"][0]["what_we_sell_and_who_to"], "Fraud checks for neobanks.")
+        self.assertEqual(read["maps"][0]["internal_notes"], "Never go below 40k a year.")
+        self.assertEqual(self.desk.gtm.repeats("We never go below 40k a year, sorry."), ["Never go below 40k a year."])
+        self.assertIn("gtm_context", self.ctx.sections["stoa.gtm"][0]({}))
+
+    def test_an_archived_map_is_out_of_every_list_until_it_is_put_back(self):
+        self.assertTrue(self.desk.markets.define({"name": "Neobanks"})["ok"])
+        self.assertTrue(self.desk.markets.define({"name": "Credit unions"})["ok"])
+        self.assertTrue(self.desk.markets.archive("Neobanks")["ok"])
+        self.assertEqual([m["name"] for m in self.desk.markets.list_markets()], ["Credit unions"])
+        self.assertEqual([m["name"] for m in self.desk.markets.list_markets(archived=True)], ["Neobanks"])
+        self.assertIsNone(self.desk.markets._market("Neobanks"))
+        self.assertEqual(self.desk.markets._market("").get("name"), "Credit unions")            # the only map left is "the map"
+        self.assertFalse(self.desk.markets.remove("Credit unions", archived=True)["ok"])         # only an archived one goes this way
+        self.assertTrue(self.desk.markets.unarchive("neobanks")["ok"])
+        self.assertEqual(len(self.desk.markets.list_markets()), 2)
+        self.assertTrue(self.desk.markets.archive("Neobanks")["ok"])
+        gone = self.desk.markets.remove("neobanks", archived=True)
+        self.assertTrue(gone["ok"], gone)
+        self.assertEqual(self.desk.markets.list_markets(archived=True), [])
 
 
 class SlackTests(unittest.IsolatedAsyncioTestCase):

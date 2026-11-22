@@ -204,11 +204,42 @@ class Desk:
         self.reports = Reports(self)
         self.database = Database(self)        # accounts, deals and people as rows, and the views kept of them
         self.handed = Handed(self)            # the files the talk box handed to Hermes, and removing them
+        self._gtm_parts: dict = {}            # motions, assets, the go-to-market reading and hand-overs, made when first used
 
     # -- host services --------------------------------------------------------------------------
     @property
     def data_dir(self) -> Path:
         return Path(self._data_dir())
+
+    # -- the desk as a whole: what belongs to no one pipeline --------------------------------------------
+    # The GTM tab's motions (motions.py) and assets (assets.py), the one reading of the go-to-market an agent works
+    # from (gtm.py), and leads handed over from a lead pipeline to a deal pipeline (handoff.py). Each keeps a file of
+    # its own in the desk's folder, and is made the first time it is wanted, for the folder in hand then.
+    def _part(self, name: str, make: Callable):
+        key = (name, str(self.data_dir))
+        if key not in self._gtm_parts:
+            self._gtm_parts[key] = make(self)
+        return self._gtm_parts[key]
+
+    @property
+    def motions(self):
+        from .motions import Motions
+        return self._part("motions", Motions)
+
+    @property
+    def assets(self):
+        from .assets import Assets
+        return self._part("assets", Assets)
+
+    @property
+    def gtm(self):
+        from .gtm import Gtm
+        return self._part("gtm", Gtm)
+
+    @property
+    def handoffs(self):
+        from .handoff import Handoffs
+        return self._part("handoffs", Handoffs)
 
     def _store_at(self, name: str) -> st.Store:
         path = str(self.data_dir / name)
@@ -2064,8 +2095,14 @@ class Desk:
         delivery = (playbook.delivery[0]["id"] if playbook.delivery else "") if status == "won" else ""
         if status == "lost":
             reason = playbook.reason(reason)      # "Timing" however it was put, where the playbook has the word for it
-        return self.store.move(deal["id"], stage, status=status, reason=reason, actor=actor,
-                               label=playbook.label(stage), expect=deal["stage"], delivery=delivery, earned=earned)
+        moved = self.store.move(deal["id"], stage, status=status, reason=reason, actor=actor,
+                                label=playbook.label(stage), expect=deal["stage"], delivery=delivery, earned=earned)
+        if moved is not None and status == "won" and playbook.shape == "leads" and not self.tour():
+            # A lead pipeline hands a qualified lead over to its deal pipeline. Once what this action wrote is saved:
+            # the hand-over writes to other pipelines, and must not hold this one's lock while it does.
+            pipe, lead_id = PIPELINE.get() or MAIN, deal["id"]
+            self.store.after_commit(lambda: self.handoffs.after_won(pipe, lead_id))
+        return moved
 
     def _reopen(self, deal: dict, playbook: Playbook, actor: str, stage: str = "") -> Optional[dict]:
         target = playbook.resolve_stage(stage) or deal["fields"].get("_prev_stage") or playbook.first_stage()

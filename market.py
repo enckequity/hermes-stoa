@@ -244,10 +244,15 @@ class Markets:
         return self.desk.store
 
     # -- storage --------------------------------------------------------------------------------
-    def _market(self, ref: Any) -> Optional[dict]:
+    # A map can be archived: put away with everything on it, out of every list and every name lookup (the page's, the
+    # agent's, motions', the market watch's), until a person puts it back or deletes it for good. The mark is the
+    # map's own (``detail.archived``, when), so nothing else on the desk changes.
+    def _market(self, ref: Any, archived: bool = False) -> Optional[dict]:
         ref = str(ref or "").strip()
         with self.store._conn() as conn:
             rows = [dict(r) for r in conn.execute("SELECT * FROM markets ORDER BY updated_at DESC").fetchall()]
+        if not archived:
+            rows = [r for r in rows if not _archived_at(r)]
         if not rows:
             return None
         if not ref:
@@ -266,14 +271,38 @@ class Markets:
         return {"ok": False, "error": "which market? pass `market`" if not ref else "no market map matches '%s'" % ref,
                 "markets": names}
 
-    def list_markets(self) -> list:
+    def list_markets(self, archived: bool = False) -> list:
+        """The maps on this pipeline, newest first. With ``archived`` only the archived ones, each with when."""
         with self.store._conn() as conn:
             rows = conn.execute(
                 "SELECT m.*, (SELECT count(*) FROM targets t WHERE t.market_id = m.id AND t.status != 'dismissed') AS companies, "
                 "(SELECT count(*) FROM targets t WHERE t.market_id = m.id AND t.status = 'tracked') AS tracked "
                 "FROM markets m ORDER BY m.updated_at DESC").fetchall()
-        return [{"id": r["id"], "name": r["name"], "brief": r["brief"], "companies": r["companies"], "in_pipeline": r["tracked"]}
-                for r in rows]
+        out = []
+        for r in rows:
+            when = _archived_at(dict(r))
+            if bool(when) != bool(archived):
+                continue
+            row = {"id": r["id"], "name": r["name"], "brief": r["brief"], "companies": r["companies"], "in_pipeline": r["tracked"]}
+            if archived:
+                row["archived_at"] = when
+            out.append(row)
+        return out
+
+    def archive(self, ref: Any) -> dict:
+        """Put a map away with everything on it. It can be put back (``unarchive``) or deleted for good (``remove``)."""
+        market = self._market(ref) if str(ref or "").strip() else None
+        if market is None:
+            return {"ok": False, "error": "That map is not among your maps."}
+        self._write(market, archived=st.now())
+        return {"ok": True, "id": market["id"], "name": market["name"]}
+
+    def unarchive(self, ref: Any) -> dict:
+        market = self._market(ref, archived=True)
+        if market is None or not market["detail"].get("archived"):
+            return {"ok": False, "error": "That map is not among the archived ones."}
+        self._write(market, archived="")
+        return {"ok": True, "id": market["id"], "name": market["name"]}
 
     def targets(self, market_id: str, status: str = "", segment: str = "") -> list:
         sql, params = "SELECT * FROM targets WHERE market_id = ?", [market_id]
@@ -1114,10 +1143,13 @@ class Markets:
         self._refresh(market["id"])
         return {"ok": True, "id": market["id"], "name": name}
 
-    def remove(self, ref: Any) -> dict:
+    def remove(self, ref: Any, archived: bool = False) -> dict:
         """Delete a map and every company on it. Records already made from it stay in the pipeline. This is not on the
-        ledger and cannot be taken back, so only a person at the page does it: no tool action leads here."""
-        market = self._market(ref)
+        ledger and cannot be taken back, so only a person at the page does it: no tool action leads here. With
+        ``archived`` it is an archived map that goes (and only an archived one)."""
+        market = self._market(ref, archived=archived)
+        if market is not None and archived and not market["detail"].get("archived"):
+            market = None
         if market is None:
             return {"ok": False, "error": "That map is no longer on the desk."}
         with self.store._conn() as conn:
@@ -1303,6 +1335,15 @@ class Markets:
                         "not add it again.\n\nYour task: %s Do not send anything." % (actor or "Someone", target["company"], deal["id"], task))
         return {"deal": deal, "market_id": target["market_id"], "followup": followup, "notice": "",
                 "existing": bool(made.get("existing_record"))}
+
+
+def _archived_at(row: dict) -> str:
+    """When a map row (as read from the table) was archived, or ''."""
+    try:
+        detail = json.loads(row.get("detail") or "{}") if isinstance(row.get("detail"), str) else (row.get("detail") or {})
+    except ValueError:
+        return ""
+    return str(detail.get("archived") or "") if isinstance(detail, dict) else ""
 
 
 def _unpack(row: dict) -> dict:

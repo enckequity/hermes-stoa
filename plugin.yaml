@@ -23,6 +23,10 @@ provides_tools:
   - gtm_playbook
   - gtm_export
   - gtm_report
+  - gtm_motion
+  - gtm_hub
+  - gtm_context
+  - gtm_pipelines
   - gtm_intake
   - gtm_contact
   - gtm_invoice

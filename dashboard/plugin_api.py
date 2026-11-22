@@ -1070,6 +1070,63 @@ def market_remove(market_id: str) -> dict:
     return result
 
 
+@router.post("/market/{market_id}/archive")
+def market_archive(market_id: str) -> dict:
+    """Put a map away with everything on it: out of every list, until it is put back or deleted for good."""
+    d = desk()
+    result = d.markets.archive(market_id)
+    d.announce()
+    return result
+
+
+@router.get("/maps/archived")
+def maps_archived() -> list:
+    """Every archived map on the desk, in every pipeline, newest first."""
+    d = desk()
+    listed = [{"id": "", "name": ""}] if d.tour() else d.pipelines()
+    out = []
+    for pipe in listed:
+        with d.on(pipe["id"]):
+            for row in d.markets.list_markets(archived=True):
+                out.append(dict(row, key="%s:%s" % (pipe["id"], row["id"]), pipeline=pipe["id"],
+                                pipeline_name=pipe["name"] if len(listed) > 1 else "", at=row["archived_at"]))
+    return sorted(out, key=lambda row: row["at"], reverse=True)
+
+
+def _archived_ref(d, body: dict) -> tuple:
+    key = str((body or {}).get("key") or "")
+    pipe, _, market_id = key.partition(":") if ":" in key else ("", "", key)
+    if pipe and not any(one["id"] == pipe for one in d.pipelines()):
+        raise HTTPException(404, "That pipeline is no longer on the desk.")
+    return pipe, market_id
+
+
+@router.post("/maps/restore")
+def maps_restore(body: dict = Body(...)) -> dict:
+    """Put an archived map back among the maps, as it was."""
+    d = desk()
+    pipe, market_id = _archived_ref(d, body)
+    with d.on(pipe):
+        result = d.markets.unarchive(market_id)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "Not put back")
+    d.announce()
+    return dict(result, key="%s:%s" % (pipe, result["id"]))
+
+
+@router.post("/maps/destroy")
+def maps_destroy(body: dict = Body(...)) -> dict:
+    """Delete an archived map for good, with every company on it. Records already made from it stay."""
+    d = desk()
+    pipe, market_id = _archived_ref(d, body)
+    with d.on(pipe):
+        result = d.markets.remove(market_id, archived=True)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "Not deleted")
+    d.announce()
+    return result
+
+
 @router.post("/targets")
 def targets(body: dict = Body(...)) -> dict:
     """One thing done to the companies picked on the map: add them to the pipeline, dismiss them, put dismissed ones
