@@ -441,7 +441,7 @@ async function handOver(sessionId, files) {
 
 /** Send a line to one of the page's conversations: the desk's, or (lane 'maps') the map's research. `file` is one
     file or several: a small text file rides in the message itself, anything else is handed to Hermes first. */
-async function say(text, file, lane = 'desk') {
+async function say(text, file, lane = 'desk', fromBox = false) {
   const line = String(text || '').trim()
   const files = [].concat(file || []).filter(Boolean)
   if ((!line && !files.length) || $talk.get().busy) return
@@ -480,11 +480,11 @@ async function say(text, file, lane = 'desk') {
     }, 180000)
   } catch (error) {
     setTalk({ busy: false })
-    const back = !reached && lane === 'desk' && files.length > 0
+    const back = !reached && lane === 'desk' && (files.length > 0 || fromBox)
     const said = String((error && error.message) || error).trim()
-    setTurn({ note: '', error: 'Hermes could not take that: ' + said + (/[.!?]$/.test(said) ? '' : '.') + (back ? ' Your words and files are back in the box.' : '') })
+    setTurn({ note: '', error: 'Hermes could not take that: ' + said + (/[.!?]$/.test(said) ? '' : '.') + (back ? (files.length ? ' Your words and files are back in the box.' : ' Your words are back in the box.') : '') })
     if (back) {      // typed words and picked files are a person's work: a failed hand-over does not throw them away
-      if (!$attached.get().length) $attached.set(files)
+      if (files.length && !$attached.get().length) $attached.set(files)
       if (line) $draft.set(line)
     }
   }
@@ -624,7 +624,7 @@ function inPlay(deals, from) {
     if (!search || (deal.status && deal.status !== 'open')) alone += deal.value || 0       // placed or passed: each was paid for, a plain sum
     else fees.set(search, (fees.get(search) || []).concat([deal.value || 0]))
   }
-  for (const [search, mine] of fees) alone += mine.sort((a, b) => b - a).slice(0, search in seats ? seats[search] : 1).reduce((sum, fee) => sum + fee, 0)
+  for (const [search, mine] of fees) alone += mine.sort((a, b) => b - a).slice(0, Object.hasOwn(seats, search) ? seats[search] : 1).reduce((sum, fee) => sum + fee, 0)
   return alone
 }
 /** What some OPEN records have in play, a stage at a time, as a Map from stage id to amount. On a contingent recruiting
@@ -646,7 +646,7 @@ function stageSums(deals, from) {
     else searches.set(search, (searches.get(search) || []).concat([deal]))
   }
   for (const [search, mine] of searches) {
-    const take = Math.max(0, Math.min(mine.length, search in seats ? seats[search] : 1))
+    const take = Math.max(0, Math.min(mine.length, Object.hasOwn(seats, search) ? seats[search] : 1))
     const fees = mine.map(deal => deal.value || 0).sort((a, b) => b - a).slice(0, take)
     mine.map((deal, index) => [deal, index]).sort((a, b) => far(b[0]) - far(a[0]) || a[1] - b[1]).slice(0, take).forEach((pair, index) => add(pair[0].stage, fees[index]))
   }
@@ -797,7 +797,7 @@ function Billing({ state }) {
       ? 'Each month that ends is put on the Cash tab to bill: the rate times that month’s hours (the hours a week, over its working days), which you can correct before you record the invoice. A month that is not over shows there as the month in progress. Leave the month empty to start with this one; a company you already bill by the hour keeps the month it started. No fee is asked for or shown on a ' + pb.terms.deal + ' here.'
       : 'Give a ' + pb.terms.group + ' the fee each ' + pb.terms.deal + ' in it would bring, and how many openings it has; what is in play counts that fee once for each opening left.'),
     contract && carried ? h('label', { className: 'stoa-billclear' }, h('input', { type: 'checkbox', checked: v.clear, onChange: event => setV({ ...v, clear: event.target.checked }) }),
-      h('span', null, 'Some ' + pb.terms.deals + ' or ' + pb.terms.groups + ' here carry fees from before. On contract work they are not counted or shown anywhere. Tick this to remove them for good; left alone, they are back if this pipeline is made contingent again.')) : null,
+      h('span', null, 'Some ' + pb.terms.deals + ' or ' + pb.terms.groups + ' here carry fees from before. On contract work they are not counted or shown anywhere. Tick this to set them to zero (Undo on a record can bring its fee back; a search\'s has to be typed again). Left alone, open and passed ' + pb.terms.deals + '\' fees show again if this pipeline is made contingent.')) : null,
     h('div', { className: 'stoa-btns', style: { marginTop: 10 } }, h(Btn, { kind: 'primary', disabled: busy || !ready, onClick: save }, busy ? 'Saving…' : 'Save'), h(Btn, { kind: 'quiet', onClick: () => setOpen(false) }, 'Cancel'))))
 }
 
@@ -2773,50 +2773,83 @@ function ModelPickPlain({ lane = 'desk' }) {
 
 // The Mac's own dictation (and anything else that types through an input method) keeps the words marked while it
 // listens and puts its final transcript in afterwards, at the cursor. If they were sent in between, the box filled up
-// again with what had just been sent. So: what comes back within a few seconds that is only those words again,
-// with nothing typed since, is not taken.
+// again with what had just been sent. So: only where words were still marked as they went, the one commit
+// that follows within five seconds, with nothing typed since, is not taken if it is those words; what was heard after them is.
 function lateWords() {
-  const plain = value => String(value || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
-  let marked = '', at = 0, composing = false, gone = [], until = 0
-  const same = (said, was) => {
-    if (said === was) return true
-    const a = said.split(' '), b = was.split(' ')
-    if (was.startsWith(said) && said.length * 2 >= was.length) return true              // the same words on their way back in
-    if (said.startsWith(was + ' ') && a.length - b.length <= 3) return true             // and the last word or two it was still hearing
-    if (Math.max(a.length, b.length) < 5) return false
-    const left = b.slice()
+  // One for the window, and the same one for Stoa's other box: a box can be gone by the time its last words arrive.
+  const watch = globalThis.__stoaLateWords || (globalThis.__stoaLateWords = { owed: null })
+  const split = value => String(value || '').toLowerCase().replace(/['’]/g, '').split(/[^\p{L}\p{M}\p{N}]+/u).filter(Boolean)
+  let marked = '', at = 0, composing = false
+  // Whether `said` can be the last transcript of `was`: the same, the same with more on the end, or the same put right.
+  const again = (said, was) => {
+    if (said.join('') === was.join('')) return true
+    const left = said.slice()
     let both = 0
-    for (const word of a) { const index = left.indexOf(word); if (index >= 0) { left.splice(index, 1); both++ } }
-    return both >= 0.8 * Math.max(a.length, b.length)                                   // the same, put right in a word
+    for (const word of was) { const index = left.indexOf(word); if (index >= 0) { left.splice(index, 1); both++ } }
+    return both * 2 >= was.length && both > 0
+  }
+  const opens = (said, was) => said.length >= was.length && was.every((word, index) => said[index] === word)
+  // What follows the words that went, where more was heard after them (a word of them put right is still them).
+  const more = (data, was, theirs) => {
+    const said = split(data)
+    if (said.length <= was.length || !(theirs || opens(said, was) || said.length - was.length > 1)) return ''
+    let seen = 0
+    for (const part of data.matchAll(/\S+/g)) {
+      seen += split(part[0]).length
+      if (seen >= was.length) return seen === was.length ? data.slice(part.index + part[0].length).trim() : ''
+    }
+    return ''
   }
   return {
     marks: {
       onCompositionStart: () => { composing = true },
       onCompositionUpdate: event => { composing = true; if (event.data) marked = event.data },
-      onCompositionEnd: event => { composing = false; at = Date.now(); if (event.data) marked = event.data }
+      onCompositionEnd: event => { composing = false; at = Date.now(); if (event.data) marked = event.data }      // a click elsewhere ends it a moment before the box is left
     },
     /** A key pressed: what follows typing is the person's. */
     typed: event => {
       if (event.metaKey || event.ctrlKey) return
-      if (event.key.length === 1 || event.key === 'Backspace' || event.keyCode === 229) { gone = []; if (!composing) marked = '' }
+      if (event.key.length === 1 || event.key === 'Backspace') { watch.owed = null; if (!composing) marked = '' }
     },
-    /** Return sends, also while words are still marked, unless the input method took the key for itself (229). */
-    sends: event => event.key === 'Enter' && !event.shiftKey && (!event.nativeEvent.isComposing || event.keyCode === 13),
-    /** The box's words are being sent, or left. */
-    leaving: text => {
-      if (!marked || !(composing || Date.now() - at < 1500)) return
-      gone = [plain(marked), plain(text)].filter(Boolean)
-      until = Date.now() + 5000
+    /** Return sends, also while dictated words are still marked, but not a Return an input method took for itself (229). */
+    sends: event => event.key === 'Enter' && !event.shiftKey && event.keyCode !== 229 && (!event.nativeEvent.isComposing || event.keyCode === 13),
+    /** The box's words are being sent, or left. Only words still marked (or until a moment ago) have a transcript to
+        come. `keep`, when the box was left and not sent: given the last transcript, for the place it was said in. */
+    leaving: (text, keep) => {
+      const still = watch.owed && watch.owed.heard && Date.now() < watch.owed.until && text     // still talking, and sent again
+      if (still) marked = watch.owed.heard
+      if (marked && (still || composing || Date.now() - at < 1000)) {
+        watch.owed = { marked, words: [split(marked), split(text)].filter(words => words.length), until: Date.now() + 5000, keep: keep || null }
+      }
       marked = ''
       composing = false
     },
-    /** Whether this change to the box is only those words coming back. */
+    /** They did not go after all: the same words said again are meant. */
+    forget: () => { watch.owed = null },
+    /** What the box should hold if this change is those words coming back, or null if it is the person's. Either the
+        next commit, whole, or a dictation still running that marks them again whole, with what it has heard since:
+        that keeps only what is new, as it grows. New words being marked end the watch. */
     late: event => {
-      const { inputType = '', data = '' } = event.nativeEvent || {}
-      if (!data || !['insertText', 'insertCompositionText', 'insertReplacementText'].includes(inputType)) return false
-      if (gone.length && Date.now() < until) { const said = plain(data); if (said && gone.some(was => same(said, was))) return true }
-      if (inputType === 'insertText' && data.length > 1) { marked = data; at = Date.now() }     // dictation that commits as it goes
-      return false
+      const owed = watch.owed, { inputType = '', data = '' } = event.nativeEvent || {}
+      if (!owed || !data) return null
+      const marking = inputType === 'insertCompositionText'
+      if (!marking && !['insertText', 'insertFromComposition', 'insertReplacementText'].includes(inputType)) return null
+      const said = split(data)
+      if (!said.length) return null
+      const running = owed.before !== undefined           // it has marked them again once already
+      const mine = Date.now() < owed.until && owed.words.find(was => (marking
+        ? (running ? again(said, was) : was.join('').length >= 12 && opens(said, was))      // a short word being composed is new ("yes" again)
+        : again(said, was)))
+      if (!mine) { watch.owed = null; return null }
+      const value = String((event.target && event.target.value) || ''), end = value.lastIndexOf(data)
+      if (end < 0) return null
+      const before = running ? owed.before : value.slice(0, end), after = running ? owed.after : value.slice(end + data.length)
+      if (marking) Object.assign(owed, { before, after, until: Date.now() + 5000 })
+      else watch.owed = null
+      let rest = ''
+      if (owed.keep) { owed.keep(data, owed.marked); owed.marked = data } else rest = more(data, mine, running)
+      if (marking && !owed.keep) owed.heard = data
+      return before + rest + after
     }
   }
 }
@@ -2830,6 +2863,18 @@ function Dock({ state }) {
   const area = useRef(null), picker = useRef(null), sheet = useRef(null), ear = useRef(null), before = useRef('')
   const draft = useValue($draft)
   const [late] = useState(lateWords)
+  const failed = Boolean(talk.turns.length && talk.turns[talk.turns.length - 1].error)
+  useEffect(() => { if (failed) late.forget() }, [failed])
+  const held = useRef('')
+  held.current = text
+  // Left with words still marked: their last transcript is for this box, when it is shown again.
+  useEffect(() => () => {
+    let was = held.current
+    late.leaving(was, (said, marked) => {
+      was = was.includes(marked) ? was.slice(0, was.lastIndexOf(marked)) + said : was + said
+      $draft.set(was)
+    })
+  }, [])
   useEffect(() => {
     if (!draft) return
     setText(draft)
@@ -2870,7 +2915,7 @@ function Dock({ state }) {
     if ((!words.trim() && !files.length) || talk.busy) return
     unhear()
     late.leaving(words)
-    say(words, files)
+    say(words, files, 'desk', typeof line !== 'string')
     setText('')
     $attached.set([])
   }
@@ -2939,7 +2984,7 @@ function Dock({ state }) {
         h('textarea', { ref: area, rows: 1, value: text, disabled: talk.busy, 'aria-label': 'Talk to the desk',
           placeholder: listening ? 'Listening…' : 'Tell Stoa what happened, ask it anything, or drop a list on the page…',
           ...late.marks,
-          onChange: event => { if (!late.late(event)) setText(event.target.value) },
+          onChange: event => { const without = late.late(event); setText(without === null ? event.target.value : without) },
           onKeyDown: event => {
             late.typed(event)
             if (late.sends(event)) { event.preventDefault(); send() }

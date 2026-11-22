@@ -219,7 +219,7 @@ def board_text(playbook, deals: list, title: str = "", total=None, staged=None) 
     """The whole pipeline as a compact text board. ``total``: how the pipeline adds records up (the desk's ``sum``, which
     counts a search once on a contingent recruiting pipeline); the plain sum if not given. ``staged``: each stage's
     amount by stage id (the desk's ``stage_sums``, where a search counts in the stage of its furthest-along
-    candidate, so the stages add up to the head); each stage added up by itself if not given."""
+    candidate, so the open stages, with Other stages, add up to the head); each stage added up by itself if not given."""
     lines = [title or playbook.title]
     open_deals = [d for d in deals if d["status"] == "open"]
     add = total or st.total
@@ -241,7 +241,8 @@ def board_text(playbook, deals: list, title: str = "", total=None, staged=None) 
     strays = [d for d in open_deals if d["stage"] not in known]
     if strays:
         lines.append("")
-        lines.append("Other stages (%d) — from a different playbook" % len(strays))
+        value = sum(staged.get(stage, 0) for stage in {d["stage"] for d in strays}) if staged is not None else add(strays)
+        lines.append("Other stages (%d)%s — from a different playbook" % (len(strays), "  " + money(value, playbook.currency) if value else ""))
         for deal in strays[:12]:
             lines.append("  %s [%s]" % (_row(deal, playbook), deal["stage"]))
     return "\n".join(lines)

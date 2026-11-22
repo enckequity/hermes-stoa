@@ -80,8 +80,8 @@ EMPLOYER_MOST, EMPLOYER_WORDS = 90, 12       # a company's name can be long and 
 
 def uses_name(value: Any, employer: bool = False) -> tuple:
     """What to do with a `uses` an agent sent: ``(name, 'keep' | 'clear' | 'refuse' | 'none')``. ``employer``: on a
-    candidate map `uses` is where the person works, so a longer name, with brackets, is still a name ("PCBC (California
-    Building Industry Association)"). A note or a guess is refused either way."""
+    candidate map `uses` is where the person works, so a longer name, with brackets, is still a name ("HVBC (Halden Valley
+    Building Trades Association)"). A note or a guess is refused either way."""
     text = _clean(value, 200)
     if not text:
         return "", "none"

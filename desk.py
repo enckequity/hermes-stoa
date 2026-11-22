@@ -607,7 +607,7 @@ class Desk:
     def stage_sums(self, deals: Any) -> dict:
         """What some records come to, a stage at a time, as an amount by stage id. On a contingent recruiting pipeline
         an open search counts once, in the stage of its furthest-along candidate (one for each seat still to fill:
-        ``store.by_stage``), so the stages add up to what is in play; on any other pipeline, and for what is no
+        ``store.by_stage``), so the stages of all the open records add up to what is in play; on any other pipeline, and for what is no
         longer open, each stage is the plain sum of what is in it."""
         rows = list(deals)
         out: dict = {}
@@ -818,7 +818,7 @@ class Desk:
 
     def csv_path(self, given: Any, trusted: bool = False) -> tuple:
         """``(path, None)`` for a CSV the desk may read, or ``(None, error)``. Only ``.csv`` and ``.tsv``.
-        A path a person typed at a terminal is ``trusted``; one that arrives in a tool call has to sit
+        A path given to the terminal command is ``trusted`` (whoever ran it: a person, or an agent with a terminal); one that arrives in a tool call has to sit
         inside one of the import folders once every symlink in it is resolved."""
         raw = str(given or "").strip()
         if not raw:
@@ -988,7 +988,7 @@ class Desk:
                                                     "contract work keeps its own). Speak of %s and where they stand, not of money in play."
                                                     % (playbook.terms["deal"], playbook.terms["deals"])}
         elif kind:
-            out["billing"] = {"type": kind, "note": "Contingent: a fee for each placement. A stage's amount is the fees of the %s whose furthest-along %s, among those listed, is there. "
+            out["billing"] = {"type": kind, "note": "Contingent: a fee for each placement. A stage's amount is the fees of the %s whose furthest-along %s, among those matched, is there. "
                                                     % (playbook.terms["groups"], playbook.terms["deal"])
                                                     + "What is in play counts each %s's fee once for each seat still to fill, "
                                                     "not once for every %s in it." % (playbook.terms["group"], playbook.terms["deal"])}
@@ -4118,7 +4118,7 @@ class Desk:
         return out
 
     def import_csv(self, path: Path, dry_run: bool = False, history: bool = False) -> dict:
-        """``hermes stoa import``: a CSV typed in at a terminal, added straight away (no review). Headers are read the
+        """``hermes stoa import``: a CSV named to the terminal command, added straight away (no review). Headers are read the
         way a dropped list's are ("Client Name", "Contact email", "First name"), and what has no place is kept in notes."""
         if not path.is_file():
             return {"ok": False, "error": "no file at %s" % path}
@@ -4153,7 +4153,7 @@ class Desk:
                                           source=row.get("source", "") or "import", notes=self.intake._kept_notes(row),
                                           fields=row.get("fields") or None)
                     if status != "open":
-                        # ``history``: typed in at a terminal by a person, a list of past records, whose placements keep
+                        # ``history``: the terminal import (nothing checks who ran it), a list of past records, whose placements keep
                         # the fee they earned even on contract work. The agent's own import is about now, like any other
                         # way it places someone: on contract work that placement brings no fee.
                         self._move(deal, stage, playbook, "import", row.get("lost_reason", ""), earned=history)

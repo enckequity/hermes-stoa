@@ -465,8 +465,8 @@ tab says which and changes it. Each pipeline keeps its own.
 - **Contingent**: a fee for each placement. What is in play counts each search's fee once for
   each opening still to fill, however many candidates are in it: six candidates in a $30k search
   are $30k in play, not $180k. On the board, in the funnel and on Today that fee sits in the
-  stage of the search's furthest-along candidate, so on the whole board the open stages add up to
-  what is in play. The Placed column is apart from that, and a filtered board works out who is
+  stage of the search's furthest-along candidate, so on the whole board the open stages (Other stages included) add up to
+  what is in play. The funnel does not draw stages that are not the playbook's. The Placed column is apart from that, and a filtered board works out who is
   furthest along among the candidates it shows, so two filtered boards can add up to more than
   what is in play. A search hiring for more than one seat has **Openings** on its
   page; a seat that is filled, and a search marked done or closed, stop counting. The forecast
@@ -477,7 +477,9 @@ tab says which and changes it. Each pipeline keeps its own.
   contract work keeps its fee and is billed and paid as before; a candidate placed while it is
   contract work brings none, and is marked so. Fees that candidates carried from before are left
   out, not lost: an open candidate's is back if the pipeline is made contingent again, unless
-  you clear them. Clearing writes those amounts to zero on the records and their searches. The Cash tab shows the contract, the month
+  you clear them. Clearing writes to zero the amounts on open and passed records, on placements
+  made on contract work and on every search. Undo on a record brings its amount back (a search's
+  has to be typed again), and the ledger and daily copies keep what each was. The Cash tab shows the contract, the month
   in progress at the hours agreed, and each month that has ended, ready to bill; you can correct
   a month's hours before recording its invoice.
 

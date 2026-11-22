@@ -631,7 +631,9 @@ class Store:
         return len(deals) + len(groups)
 
     def clear_fees(self, actor: str = "") -> int:
-        """Take those amounts away for good (asked for in so many words). A placement stays as it is."""
+        """Write those amounts to zero (asked for in so many words): open and passed records, placements made on contract
+        work, and every group's. Other placements stay as they are. The ledger keeps what each was: undo on a record
+        brings its back."""
         deals, groups = self._fees()
         with self.operation():
             for deal in deals:

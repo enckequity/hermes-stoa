@@ -1054,10 +1054,10 @@ class CandidateMapTests(unittest.TestCase):
 
     def people(self, market="Head of Events"):
         return self.markets.add({"market": market, "companies": [
-            {"company": "Dana Whitcombe", "size": "Director of Events", "uses": "PCBC (California Building Industry Association)", "location": "Sacramento, CA",
+            {"company": "Dana Whitcombe", "size": "Director of Events", "uses": "HVBC (Halden Valley Building Trades Association)", "location": "Sacramento, CA",
              "segment": "Trade show operators", "fit": 5, "why": "Ran a 10,000-person show for six years.", "signal": "Her show's dates are not announced",
              "signal_date": "2026-10-01", "source": "https://www.linkedin.com/in/dana-whitcombe"},
-            {"company": "Luis Ortega", "size": "Events Manager", "uses": "Ohio Health Care Association", "segment": "Association event leads", "fit": 4, "why": "Runs a 3,200-person convention."},
+            {"company": "Luis Ortega", "size": "Events Manager", "uses": "Brindlemoor Care Association", "segment": "Association event leads", "fit": 4, "why": "Runs a 3,200-person convention."},
             {"company": "Priya Nand", "size": "Meetings Lead", "uses": "probably somewhere in Dayton (not confirmed)", "segment": "Association event leads", "fit": 3, "why": "Listed on a conference page."}]})
 
     def test_the_downloaded_page_of_a_candidate_map_speaks_of_candidates(self):
@@ -1067,13 +1067,13 @@ class CandidateMapTests(unittest.TestCase):
             html = Path(self.markets.export({"action": "export", "share": share})["path"]).read_text(encoding="utf-8")
             still = html[:html.index('<script type="application/json"')]            # the page itself, before the map's rows and its script
             for said in ("Candidate map", "<small>Candidates</small>", "<small>Pools</small>", "<small>Employers</small>", "<th>Candidate</th>", "Title and place",
-                         "Why they fit", "At PCBC", "Find a candidate", "Reason to move", ">Employer</button>", '"rows": "people"', "who could fill a role"):
+                         "Why they fit", "At HVBC", "Find a candidate", "Reason to move", ">Employer</button>", '"rows": "people"', "who could fill a role"):
                 self.assertIn(said, html, (share, said))
-            for wrong in ("<small>Companies</small>", "Buyers named", "<th>Company</th>", "Size by", "Reason to call</", "Uses PCBC", "COMPANIES"):
+            for wrong in ("<small>Companies</small>", "Buyers named", "<th>Company</th>", "Size by", "Reason to call</", "Uses HVBC", "COMPANIES"):
                 self.assertNotIn(wrong, still, (share, wrong))
         # A map of companies on the same pipeline (the older kind) reads as it always did.
         self.markets.define({"name": "Event employers", "rows": "companies", "segments": ["Associations"]})
-        self.markets.add({"market": "Event employers", "companies": [{"company": "Ohio Health Care Association", "segment": "Associations", "fit": 4}]})
+        self.markets.add({"market": "Event employers", "companies": [{"company": "Brindlemoor Care Association", "segment": "Associations", "fit": 4}]})
         html = Path(self.markets.export({"action": "export", "market": "Event employers"})["path"]).read_text(encoding="utf-8")
         for said in ("Market map", "<small>Companies</small>", "<th>Company</th>", "Find a company", "Size by", '"rows": "companies"'):
             self.assertIn(said, html, said)
@@ -1090,7 +1090,7 @@ class CandidateMapTests(unittest.TestCase):
         self.assertEqual([gap["what"] for gap in facts["gaps"]], ["checked against the role's requirements", "a source link", "where they work now"])
         self.assertEqual([gap["missing"] for gap in facts["gaps"]], [3, 2, 1])
         rows = {row["company"]: row for row in self.markets.targets("head-of-events")}
-        self.assertEqual(rows["Dana Whitcombe"]["detail"]["uses"], "PCBC (California Building Industry Association)")      # an employer's name is kept whole
+        self.assertEqual(rows["Dana Whitcombe"]["detail"]["uses"], "HVBC (Halden Valley Building Trades Association)")      # an employer's name is kept whole
         self.assertNotIn("uses", rows["Priya Nand"]["detail"])                                                                # a guess still is not
         self.assertIn("Priya Nand", added["uses_not_saved"])
         self.assertIn("the company the person works at now", added["uses_not_saved"])
@@ -1132,7 +1132,7 @@ class CandidateMapTests(unittest.TestCase):
         done = self.markets.track({"market": made["market"]["id"], "targets": ["Dana Whitcombe"]}, actor="tester")
         record = self.desk.store.get(done["added_to_pipeline"][0]["deal"])
         self.assertEqual((record["name"], record["company"], record["grp"], record["next_step"]),
-                         ("Dana Whitcombe", "PCBC (California Building Industry Association)", "Head of Events", "First approach"))
+                         ("Dana Whitcombe", "HVBC (Halden Valley Building Trades Association)", "Head of Events", "First approach"))
         self.assertEqual((record["fields"]["title"], record["linkedin"]), ("Director of Events", "https://www.linkedin.com/in/dana-whitcombe"))
         self.assertEqual((record["value"], self.desk.sum(self.desk.store.list(status="open"))), (36000, 36000))    # the search's fee, in play once
         groups = {group["name"]: group for group in self.desk.groups()}
@@ -1160,7 +1160,7 @@ class CandidateMapTests(unittest.TestCase):
         self.assertEqual((first["deal"], first.get("existing_record")), (by_hand, True))
         hers = self.desk.store.get(by_hand)                                              # and what the map found is on her record
         self.assertEqual((hers["company"], hers["fields"].get("title"), hers["linkedin"]),
-                         ("PCBC (California Building Industry Association)", "Director of Events", "https://www.linkedin.com/in/dana-whitcombe"))
+                         ("HVBC (Halden Valley Building Trades Association)", "Director of Events", "https://www.linkedin.com/in/dana-whitcombe"))
         self.assertFalse(second.get("existing_record"))
         self.assertIn("already in that search", done["note"])
         names = sorted(d["name"].lower() for d in self.desk.store.list(status="open"))
@@ -1182,7 +1182,7 @@ class CandidateMapTests(unittest.TestCase):
             self.assertEqual(m.uses_name(text, employer=True), ("", "refuse"), text)
         for text in ("Between jobs", "Open to work", "unemployed."):                      # not working anywhere: nothing to keep, nothing to complain of
             self.assertEqual(m.uses_name(text, employer=True), ("", "clear"), text)
-        for text in ("AT&T Inc. (Mobility)", "Ernst & Young LLP: Advisory", "PCBC (California Building Industry Association)", "Now Health International", "Vision 2030 Partners",
+        for text in ("AT&T Inc. (Mobility)", "Ernst & Young LLP: Advisory", "HVBC (Halden Valley Building Trades Association)", "Now Health International", "Vision 2030 Partners",
                      "Between the Lines Ltd", "Stripe", "X (formerly Twitter)", "Twitter (now X)", "Left Lane Capital", "Left Field Labs", "Formerly Known As Records",
                      "Ex-Lab Tools", "UPS: Now Hiring", "Levi Strauss & Co.", "20th Century Studios", "Self-employed", "Mo\u00ebt Hennessy / LVMH", "Deloitte / Monitor",
                      "Roche / Genentech", "Stripe, Inc.", "Meta (formerly Facebook)", "This Week Health", "Last Week Tonight", "This Month Media"):
@@ -1193,7 +1193,7 @@ class CandidateMapTests(unittest.TestCase):
         self.assertEqual(made["rows"], "companies")
         self.assertNotIn("PERSON", made["next"])
         added = self.markets.add({"market": "Where they work", "companies": [{"company": "Ironbridge Payments", "segment": "Payments", "fit": 4, "why": "Rebuilt its ledger.",
-                                                                              "uses": "PCBC (California Building Industry Association)", "people": [{"name": "Samira Costa", "title": "Staff Engineer"}]}]})
+                                                                              "uses": "HVBC (Halden Valley Building Trades Association)", "people": [{"name": "Samira Costa", "title": "Staff Engineer"}]}]})
         self.assertIn("Ironbridge Payments", added["uses_not_saved"])                      # `uses` is a tool's name here, as before
         done = self.markets.track({"market": "Where they work", "targets": ["Ironbridge Payments"]}, actor="tester")
         record = self.desk.store.get(done["added_to_pipeline"][0]["deal"])
@@ -1546,6 +1546,9 @@ class RecruitingBillingTests(unittest.TestCase):
         put("Stray", "Controller", 50000, "a_stage_from_another_playbook"), put("Here", "Controller", 20000, stages[0])
         funnel = {stage["id"]: stage["value"] for stage in self.desk.flow()["stages"]}
         self.assertEqual((funnel[stages[0]], sum(funnel.values())), (50000.0, self.desk.sum(self.desk.store.list(status="open"))))
+        # The board as text gives what is left at such a stage its amount, so it still adds up to its head.
+        put("Alone there", "Head of Ops", 25000, "a_stage_from_another_playbook")
+        self.assertIn("Other stages (2)  $25k", self.desk.pipeline({"action": "board"})["board"])
 
     def test_a_sales_pipeline_adds_up_as_it_always_did(self):
         tmp = tempfile.TemporaryDirectory()
@@ -4535,6 +4538,51 @@ class DashboardApiTests(unittest.TestCase):
                 done = subprocess.run([node, "--check", str(copy)], capture_output=True, text=True, timeout=60)
                 self.assertEqual(done.returncode, 0, "%s does not parse:\n%s" % (source.name, done.stderr[:600]))
 
+    def test_the_talk_box_takes_out_only_the_transcript_it_is_owed(self):
+        """What was dictated and sent can come back as the Mac's last transcript. That one commit is taken out; what a
+        person says, types or composes next is never lost for resembling it."""
+        import shutil, subprocess
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is not installed")
+        source = (ROOT / "desktop" / "plugin.js").read_text(encoding="utf-8")
+        start = source.index("function lateWords() {")
+        script = source[start:source.index("\n}\n", start) + 3] + """
+const kinds = { text: 'insertText', marking: 'insertCompositionText', committed: 'insertFromComposition' }
+const out = JSON.parse(process.argv[1]).map(([was, marked, now, kind, left]) => {
+  globalThis.__stoaLateWords = null
+  const guard = lateWords()
+  if (marked) guard.marks.onCompositionUpdate({ data: was })
+  let kept = null
+  guard.leaving(was, left ? said => { kept = said } : undefined)
+  const got = guard.late({ nativeEvent: { data: now, inputType: kinds[kind] }, target: { value: now } })
+  return left ? [got, kept] : got
+})
+console.log(JSON.stringify(out))"""
+        cases = [
+            # the transcript that is owed
+            (["is there an update", True, "Is there an update?", "text"], ""),
+            (["is there an update", True, "Is there an update.", "committed"], ""),
+            (["is there an update", True, "is there an update", "marking"], ""),
+            (["call jon tomorrow", True, "Call John tomorrow.", "text"], ""),
+            (["set fee to twenty percent", True, "Set fee to 20%.", "text"], ""),
+            (["whats due", True, "What's due?", "text"], ""),
+            (["follow up", True, "Follow up with Dana tomorrow", "text"], "with Dana tomorrow"),
+            (["is there an update", True, "is there an update and who", "marking"], "and who"),        # still talking
+            (["call jon tomorrow", True, "Call John tomorrow and ask about price", "text"], "and ask about price"),
+            (["call jon tomorrow", True, "Call John tomorrow.", "text", True], ["", "Call John tomorrow."]),
+            # what is the person's
+            (["move the Acme deal to won", False, "move the Birch deal to won", "text"], None),
+            (["yes", False, "yes do that now", "text"], None), (["yes", False, "yes", "text"], None),
+            (["move the Acme deal to won", True, "move", "marking"], None),
+            (["move the Acme deal to won", True, "move the Birch deal to won", "marking"], None),
+            (["yes", True, "yes", "marking"], None), (["\u306f\u3044", True, "\u306f", "marking"], None),
+            (["move the Acme deal to won", True, "who has gone quiet", "text"], None),
+            (["\u0939\u094b", True, "\u0939\u0948", "text"], None),
+        ]
+        done = subprocess.run([node, "-e", script, json.dumps([case for case, _ in cases])], capture_output=True, text=True, timeout=60)
+        self.assertEqual((done.returncode, json.loads(done.stdout or "[]")), (0, [want for _, want in cases]), done.stderr[:400])
+
     def test_a_card_names_the_first_person_on_its_record(self):
         ingrid = self.desk.store.find("Ingrid Solberg")["id"]
         self.assertNotIn("contact", next(card for card in self.api.state()["deals"] if card["id"] == ingrid))      # nobody on it but itself
@@ -5163,7 +5211,7 @@ class MapOnThePageTests(unittest.TestCase):
         from stoa import market as m
         for text, verdict in (("Cvent", "keep"), ("Spreadsheets", "keep"), ("In-house tool", "keep"), ("Cvent / Swoogo", "keep"), ("", "none"), (None, "none"),
                               ("Unknown", "clear"), ("not known yet", "clear"), ("N/A", "clear"),
-                              ("Converve (event site; may be only the appointment/matchmaking tool)", "refuse"), ("Online registration (platform not identified)", "refuse"),
+                              ("Brindleform (event site; may be only the appointment/matchmaking tool)", "refuse"), ("Online registration (platform not identified)", "refuse"),
                               ("Probably Cvent", "refuse"), ("Cvent?", "refuse"), ("Novi AMS runs its site, event registration tool not confirmed", "refuse"),
                               ("A registration system the association built for itself years ago", "refuse")):
             self.assertEqual(m.uses_name(text)[1], verdict, text)
@@ -5171,7 +5219,7 @@ class MapOnThePageTests(unittest.TestCase):
         uses = lambda company: next(r for r in self.desk.markets.targets(mid) if r["company"] == company)["detail"].get("uses", "")      # noqa: E731
         out = self.desk.markets.add({"market": mid, "companies": [
             {"company": "Named Events", "segment": "Digital-first", "uses": "Cvent"},
-            {"company": "Noted Events", "segment": "Digital-first", "why": "Runs two trade shows a year.", "uses": "MemberClicks (link on the trade show page; not confirmed)"}]})
+            {"company": "Noted Events", "segment": "Digital-first", "why": "Runs two trade shows a year.", "uses": "Brindledesk (link on the trade show page; not confirmed)"}]})
         self.assertEqual(sorted(out["added"]), ["Named Events", "Noted Events"])                    # the company is saved either way
         self.assertEqual((uses("Named Events"), uses("Noted Events")), ("Cvent", ""))
         why = next(r for r in self.desk.markets.targets(mid) if r["company"] == "Noted Events")["why"]
@@ -5810,7 +5858,7 @@ class CommandTests(unittest.TestCase):
 
     def test_the_talk_box_takes_a_command_to_a_chat_instead_of_sending_it(self):
         send = self.page[self.page.index("const send = line => {"):]
-        send = send[:send.index("say(words, files)")]
+        send = send[:send.index("say(words, files, 'desk'")]
         self.assertIn("isCommand(words)", send)
         self.assertIn("typeInChat(words.trim())", send)
 
@@ -5845,8 +5893,8 @@ class CommandTests(unittest.TestCase):
     def test_a_send_that_never_reached_hermes_gives_the_words_and_files_back(self):
         say = self.page[self.page.index("async function say("):self.page.index("function openTalk()")]
         self.assertLess(say.index("host.request('prompt.submit'"), say.index("reached = true"))
-        self.assertIn("const back = !reached && lane === 'desk' && files.length > 0", say)
-        self.assertIn("if (!$attached.get().length) $attached.set(files)", say)
+        self.assertIn("const back = !reached && lane === 'desk' && (files.length > 0 || fromBox)", say)      # words typed in the box as well as files; never a button's own prompt
+        self.assertIn("if (files.length && !$attached.get().length) $attached.set(files)", say)
         self.assertIn("if (line) $draft.set(line)", say)
 
     def test_resuming_a_conversation_does_not_set_its_model_again(self):
