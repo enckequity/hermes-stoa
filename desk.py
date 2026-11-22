@@ -2085,6 +2085,14 @@ class Desk:
         Returns ``{"deal", "followup", "notice"}``: ``followup`` is an instruction for the agent
         (the writing half), ``notice`` a short line for the person who clicked.
         """
+        if verb == "enrich":
+            # The lookup goes over the network and can take a while. An operation holds the desk's write lock until it
+            # ends, so the lookup happens outside one; what it writes is one action of its own (``_apply_profile``).
+            if self.store.get(deal_id) is None:
+                return {"deal": None, "notice": "That record is no longer on the desk."}
+            result = self.enrich({"deal": deal_id})
+            return {"deal": self.store.get(deal_id), "followup": "",
+                    "notice": result.get("summary") or result.get("error") or "No match found."}
         with self.store.operation():
             return self._click(verb, deal_id, extra, actor)
 
@@ -2143,10 +2151,6 @@ class Desk:
         elif verb in ("snooze3", "snooze7"):
             out["deal"] = self.store.snooze(deal_id, 3 if verb == "snooze3" else 7, actor=actor)
             out["notice"] = "Snoozed until %s." % out["deal"]["snoozed_until"]
-        elif verb == "enrich":
-            result = self.enrich({"deal": deal_id})
-            out["deal"] = self.store.get(deal_id)
-            out["notice"] = result.get("summary") or result.get("error") or "No match found."
         return out
 
     def park_followup(self, deal_id: str, followup: str) -> None:
@@ -3548,8 +3552,9 @@ class Desk:
             for key, source in (("industry", "industry"), ("company_size", "size"), ("location", "location")):
                 if key in keys and not deal["fields"].get(key) and profile.get(source):
                     fields[key] = profile[source]
-        self.store.update(deal["id"], actor="People Data Labs", fields=fields, **values)
-        self.store.log(deal["id"], "note", "Enriched: " + _profile_line(kind, profile), actor="People Data Labs")
+        with self.store.operation():         # one action: what was filled in and the note that says so
+            self.store.update(deal["id"], actor="People Data Labs", fields=fields, **values)
+            self.store.log(deal["id"], "note", "Enriched: " + _profile_line(kind, profile), actor="People Data Labs")
 
     # -- gtm_notes ------------------------------------------------------------------------------
     def _note_sources(self, days: int) -> tuple:

@@ -396,6 +396,25 @@ class EnrichTests(unittest.TestCase):
             return (200, self.PERSON) if params.get("email") != "nobody@example.com" else (404, {})
         self.desk = make_desk(self.tmp.name, secrets={"PDL_API_KEY": "k"}, http=http, config={"pdl_monthly_cap": 2})
 
+    def test_a_card_click_looks_up_outside_the_write_lock(self):
+        # 0.28.2 made an operation hold the desk's write lock to its end; the card's Enrich button opened one around a
+        # network lookup, so every other read in the process (the page, the agent) waited for the lookup.
+        deal = self.desk.deal({"action": "add", "name": "Dana Whitfield", "email": "dana@example.com"})["deal"]
+        waited = []
+
+        def http(url, headers=None, params=None, timeout=30):
+            done = threading.Event()
+            threading.Thread(target=lambda: (self.desk.store.get(deal["id"]), done.set()), daemon=True).start()
+            waited.append(done.wait(2))
+            return 200, self.PERSON
+        self.desk.http = http
+        out = self.desk.click("enrich", deal["id"], "", "U1")
+        self.assertEqual(waited, [True])
+        self.assertEqual(out["deal"]["company"].lower(), "kestrel labs")
+        undo = self.desk.undo(deal["id"])
+        self.assertTrue(undo["ok"], undo)
+        self.assertEqual(self.desk.store.get(deal["id"])["company"], "")      # filled-in fields and its note went back as one
+
     def test_no_key_means_no_call(self):
         desk = make_desk(self.tmp.name, http=lambda *a, **k: self.fail("network call without a key"))
         self.assertFalse(desk.enrich({"email": "a@b.co"})["ok"])
