@@ -2773,83 +2773,59 @@ function ModelPickPlain({ lane = 'desk' }) {
 
 // The Mac's own dictation (and anything else that types through an input method) keeps the words marked while it
 // listens and puts its final transcript in afterwards, at the cursor. If they were sent in between, the box filled up
-// again with what had just been sent. So: only where words were still marked as they went, the one commit
-// that follows within five seconds, with nothing typed since, is not taken if it is those words; what was heard after them is.
+// again with what had just been sent. So: where words were still marked as they went, the caret leaves
+// the box for a moment and what comes late has nowhere to land. What anyone says or types is never read or compared.
 function lateWords() {
   // One for the window, and the same one for Stoa's other box: a box can be gone by the time its last words arrive.
-  const watch = globalThis.__stoaLateWords || (globalThis.__stoaLateWords = { owed: null })
-  const split = value => String(value || '').toLowerCase().replace(/['’]/g, '').split(/[^\p{L}\p{M}\p{N}]+/u).filter(Boolean)
-  let marked = '', at = 0, composing = false
-  // Whether `said` can be the last transcript of `was`: the same, the same with more on the end, or the same put right.
-  const again = (said, was) => {
-    if (said.join('') === was.join('')) return true
-    const left = said.slice()
-    let both = 0
-    for (const word of was) { const index = left.indexOf(word); if (index >= 0) { left.splice(index, 1); both++ } }
-    return both * 2 >= was.length && both > 0
+  const watch = globalThis.__stoaLateWords || (globalThis.__stoaLateWords = { until: 0, box: null, timer: 0 })
+  let composing = false, at = 0
+  const free = () => !document.activeElement || document.activeElement === document.body
+  const back = () => {
+    clearTimeout(watch.timer)
+    document.removeEventListener('keydown', key, true)
+    const el = watch.box
+    watch.until = 0
+    watch.box = null
+    if (el && el.isConnected && !el.disabled && free()) el.focus()
   }
-  const opens = (said, was) => said.length >= was.length && was.every((word, index) => said[index] === word)
-  // What follows the words that went, where more was heard after them (a word of them put right is still them).
-  const more = (data, was, theirs) => {
-    const said = split(data)
-    if (said.length <= was.length || !(theirs || opens(said, was) || said.length - was.length > 1)) return ''
-    let seen = 0
-    for (const part of data.matchAll(/\S+/g)) {
-      seen += split(part[0]).length
-      if (seen >= was.length) return seen === was.length ? data.slice(part.index + part[0].length).trim() : ''
-    }
-    return ''
+  // Typing puts the caret back at once, and the key lands in the box.
+  function key(event) {
+    const typed = event.key.length === 1 || event.key === 'Backspace' || event.keyCode === 229
+    if (event.metaKey || event.ctrlKey ? event.key === 'v' : typed) back()          // typing, or a paste
+  }
+  const away = el => {
+    clearTimeout(watch.timer)
+    document.removeEventListener('keydown', key, true)
+    watch.until = Date.now() + 2500
+    watch.box = el || null
+    if (el) el.blur()
+    document.addEventListener('keydown', key, true)
+    watch.timer = setTimeout(back, 2500)
   }
   return {
     marks: {
       onCompositionStart: () => { composing = true },
-      onCompositionUpdate: event => { composing = true; if (event.data) marked = event.data },
-      onCompositionEnd: event => { composing = false; at = Date.now(); if (event.data) marked = event.data }      // a click elsewhere ends it a moment before the box is left
-    },
-    /** A key pressed: what follows typing is the person's. */
-    typed: event => {
-      if (event.metaKey || event.ctrlKey) return
-      if (event.key.length === 1 || event.key === 'Backspace') { watch.owed = null; if (!composing) marked = '' }
+      onCompositionUpdate: () => { composing = true },
+      onCompositionEnd: () => { composing = false; at = Date.now() }
     },
     /** Return sends, also while dictated words are still marked, but not a Return an input method took for itself (229). */
     sends: event => event.key === 'Enter' && !event.shiftKey && event.keyCode !== 229 && (!event.nativeEvent.isComposing || event.keyCode === 13),
-    /** The box's words are being sent, or left. Only words still marked (or until a moment ago) have a transcript to
-        come. `keep`, when the box was left and not sent: given the last transcript, for the place it was said in. */
-    leaving: (text, keep) => {
-      const still = watch.owed && watch.owed.heard && Date.now() < watch.owed.until && text     // still talking, and sent again
-      if (still) marked = watch.owed.heard
-      if (marked && (still || composing || Date.now() - at < 1000)) {
-        watch.owed = { marked, words: [split(marked), split(text)].filter(words => words.length), until: Date.now() + 5000, keep: keep || null }
-      }
-      marked = ''
+    /** The box's words are being sent. Call it before the box is emptied. */
+    sending: el => { if (composing) { composing = false; away(el) } },
+    /** The box is being left for another conversation or screen. True if words were still marked in it (the click that
+        left it ends the marking a moment before). */
+    leaving: el => {
+      if (!(composing || Date.now() - at < 1000)) return false
       composing = false
+      at = 0
+      away(el)
+      return true
     },
-    /** They did not go after all: the same words said again are meant. */
-    forget: () => { watch.owed = null },
-    /** What the box should hold if this change is those words coming back, or null if it is the person's. Either the
-        next commit, whole, or a dictation still running that marks them again whole, with what it has heard since:
-        that keeps only what is new, as it grows. New words being marked end the watch. */
-    late: event => {
-      const owed = watch.owed, { inputType = '', data = '' } = event.nativeEvent || {}
-      if (!owed || !data) return null
-      const marking = inputType === 'insertCompositionText'
-      if (!marking && !['insertText', 'insertFromComposition', 'insertReplacementText'].includes(inputType)) return null
-      const said = split(data)
-      if (!said.length) return null
-      const running = owed.before !== undefined           // it has marked them again once already
-      const mine = Date.now() < owed.until && owed.words.find(was => (marking
-        ? (running ? again(said, was) : was.join('').length >= 12 && opens(said, was))      // a short word being composed is new ("yes" again)
-        : again(said, was)))
-      if (!mine) { watch.owed = null; return null }
-      const value = String((event.target && event.target.value) || ''), end = value.lastIndexOf(data)
-      if (end < 0) return null
-      const before = running ? owed.before : value.slice(0, end), after = running ? owed.after : value.slice(end + data.length)
-      if (marking) Object.assign(owed, { before, after, until: Date.now() + 5000 })
-      else watch.owed = null
-      let rest = ''
-      if (owed.keep) { owed.keep(data, owed.marked); owed.marked = data } else rest = more(data, mine, running)
-      if (marking && !owed.keep) owed.heard = data
-      return before + rest + after
+    /** Put the caret in a box, unless it is being kept out for a moment: then it follows. */
+    focus: el => {
+      if (!el) return
+      if (Date.now() < watch.until) watch.box = el
+      else el.focus()
     }
   }
 }
@@ -2863,24 +2839,16 @@ function Dock({ state }) {
   const area = useRef(null), picker = useRef(null), sheet = useRef(null), ear = useRef(null), before = useRef('')
   const draft = useValue($draft)
   const [late] = useState(lateWords)
-  const failed = Boolean(talk.turns.length && talk.turns[talk.turns.length - 1].error)
-  useEffect(() => { if (failed) late.forget() }, [failed])
   const held = useRef('')
   held.current = text
-  // Left with words still marked: their last transcript is for this box, when it is shown again.
-  useEffect(() => () => {
-    let was = held.current
-    late.leaving(was, (said, marked) => {
-      was = was.includes(marked) ? was.slice(0, was.lastIndexOf(marked)) + said : was + said
-      $draft.set(was)
-    })
-  }, [])
+  // Left with words still marked: they stay out of the box on the next screen, and are here when this one is back.
+  useEffect(() => () => { if (late.leaving(null) && held.current) $draft.set(held.current) }, [])
   useEffect(() => {
     if (!draft) return
     setText(draft)
     $draft.set('')
     const el = area.current
-    if (el) { el.focus(); setTimeout(() => el.setSelectionRange(draft.length, draft.length), 0) }
+    if (el) { late.focus(el); setTimeout(() => el.setSelectionRange(draft.length, draft.length), 0) }
   }, [draft])
   useEffect(() => {
     const el = area.current
@@ -2907,14 +2875,14 @@ function Dock({ state }) {
     const words = typeof line === 'string' ? line : text
     if (isCommand(words) && !files.length) {          // a command is for a chat, not for the agent (see typeInChat)
       unhear()
-      late.leaving(words)
+      late.sending(area.current)
       setText('')
       typeInChat(words.trim())
       return
     }
     if ((!words.trim() && !files.length) || talk.busy) return
     unhear()
-    late.leaving(words)
+    late.sending(area.current)
     say(words, files, 'desk', typeof line !== 'string')
     setText('')
     $attached.set([])
@@ -2984,9 +2952,8 @@ function Dock({ state }) {
         h('textarea', { ref: area, rows: 1, value: text, disabled: talk.busy, 'aria-label': 'Talk to the desk',
           placeholder: listening ? 'Listening…' : 'Tell Stoa what happened, ask it anything, or drop a list on the page…',
           ...late.marks,
-          onChange: event => { const without = late.late(event); setText(without === null ? event.target.value : without) },
+          onChange: event => setText(event.target.value),
           onKeyDown: event => {
-            late.typed(event)
             if (late.sends(event)) { event.preventDefault(); send() }
             else if (event.key === 'Escape' && talk.open) { event.preventDefault(); setTalk({ open: false }) }
           } }),

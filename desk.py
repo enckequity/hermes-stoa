@@ -1592,7 +1592,7 @@ class Desk:
                 from_map += 1
             for index in range(far + 1):
                 reached[index] += 1
-        if self.billing_kind() == BILL_CONTINGENT:      # each search once, where its furthest-along candidate is: the stages add up to what is in play
+        if self.billing_kind() == BILL_CONTINGENT:      # each search once, where its furthest-along candidate is: these add up to what is in play, less what sits at a stage the funnel does not draw
             sums = self.stage_sums([deal for mine in at for deal in mine] + off)
             value = [round(sums.get(stage["id"], 0) * 100) for stage in stages]
         return {"stages": [{"id": s["id"], "label": s["label"], "reached": reached[i], "here": here[i], "lost": lost[i],

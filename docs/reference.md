@@ -477,9 +477,10 @@ tab says which and changes it. Each pipeline keeps its own.
   contract work keeps its fee and is billed and paid as before; a candidate placed while it is
   contract work brings none, and is marked so. Fees that candidates carried from before are left
   out, not lost: an open candidate's is back if the pipeline is made contingent again, unless
-  you clear them. Clearing writes to zero the amounts on open and passed records, on placements
-  made on contract work and on every search. Undo on a record brings its amount back (a search's
-  has to be typed again), and the ledger and daily copies keep what each was. The Cash tab shows the contract, the month
+  you clear them. Clearing writes to zero the amounts on open and passed records still on the
+  desk, on placements made on contract work and on every search. Undoing the clearing on a record
+  puts its amount back (a placement made on contract work still shows none; a search's has to be
+  typed again), and the ledger keeps what each was. The Cash tab shows the contract, the month
   in progress at the hours agreed, and each month that has ended, ready to bill; you can correct
   a month's hours before recording its invoice.
 

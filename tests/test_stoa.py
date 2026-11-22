@@ -1299,7 +1299,7 @@ class RecruitingBillingTests(unittest.TestCase):
         self.assertNotIn("$", cards.board_text(self.desk.playbook(), everyone))
         self.assertEqual(self.desk.cash()["forecast"]["value"], 0)
         self.assertEqual(self.desk.billing()["fees_kept"], 1)                             # the one from before; nothing new got in
-        # Made contingent again, that fee is as it was. Cleared in so many words, it is gone for good.
+        # Made contingent again, that fee is as it was. Cleared in so many words, it is set to zero.
         self.desk.set_billing({"type": "contingent"})
         self.assertEqual((self.desk.store.get(kept["id"])["value"], self.desk.sum(self.desk.store.list(status="open"))), (30000, 30000))
         self.desk.set_billing({"type": "contract", "client": "Halden Group", "rate": 95, "hours_week": 25, "clear_fees": True})
@@ -1388,7 +1388,7 @@ class RecruitingBillingTests(unittest.TestCase):
         # A list of past placements brought onto contract work: each keeps the fee it earned; an open row gets none.
         listed = Path(self.tmp.name) / "past.csv"
         listed.write_text("name,group,stage,value\nPast Placement,Old Search,%s,25000\nOpen Row,Old Search,%s,25000\n" % (won["label"], first), encoding="utf-8")
-        self.assertEqual(self.desk.import_csv(listed, history=True)["added"], 2)          # as `hermes stoa import` does, typed by a person
+        self.assertEqual(self.desk.import_csv(listed, history=True)["added"], 2)          # as `hermes stoa import` does, from the terminal
         rows = {d["name"]: (d["status"], d["value"]) for d in self.desk.store.list(status="all")}
         self.assertEqual((rows["Past Placement"], rows["Open Row"]), (("won", 25000), ("open", 0)))
         # The agent's own import, and a row approved from a list or a proposal, are about now: a placement brings no fee.
@@ -4538,50 +4538,39 @@ class DashboardApiTests(unittest.TestCase):
                 done = subprocess.run([node, "--check", str(copy)], capture_output=True, text=True, timeout=60)
                 self.assertEqual(done.returncode, 0, "%s does not parse:\n%s" % (source.name, done.stderr[:600]))
 
-    def test_the_talk_box_takes_out_only_the_transcript_it_is_owed(self):
-        """What was dictated and sent can come back as the Mac's last transcript. That one commit is taken out; what a
-        person says, types or composes next is never lost for resembling it."""
+    def test_the_talk_box_keeps_the_caret_out_only_while_dictated_words_are_still_to_come(self):
+        """What was dictated and sent can come back as the Mac's last transcript. The caret leaves the box for a moment
+        if words were still marked as they went; nothing typed or said is compared, changed or dropped."""
         import shutil, subprocess
         node = shutil.which("node")
         if not node:
             self.skipTest("node is not installed")
         source = (ROOT / "desktop" / "plugin.js").read_text(encoding="utf-8")
         start = source.index("function lateWords() {")
-        script = source[start:source.index("\n}\n", start) + 3] + """
-const kinds = { text: 'insertText', marking: 'insertCompositionText', committed: 'insertFromComposition' }
-const out = JSON.parse(process.argv[1]).map(([was, marked, now, kind, left]) => {
-  globalThis.__stoaLateWords = null
-  const guard = lateWords()
-  if (marked) guard.marks.onCompositionUpdate({ data: was })
-  let kept = null
-  guard.leaving(was, left ? said => { kept = said } : undefined)
-  const got = guard.late({ nativeEvent: { data: now, inputType: kinds[kind] }, target: { value: now } })
-  return left ? [got, kept] : got
-})
+        body = source[start:source.index("\n}\n", start) + 3]
+        self.assertNotIn("target", body)                # it never reads the box's words, or an input's
+        self.assertNotIn("data", body)
+        script = body + """
+let on, key
+globalThis.document = { body: {}, get activeElement() { return on }, addEventListener: (_n, f) => { key = f }, removeEventListener: () => { key = null } }
+on = document.body
+const box = { isConnected: true, focus() { on = box }, blur() { on = document.body } }
+const out = []
+let g = lateWords()
+box.focus(); g.sending(box); out.push(on === box)                                                   // typed: the caret stays
+g.marks.onCompositionStart(); g.marks.onCompositionEnd(); g.sending(box); out.push(on === box)      // committed already: stays
+g.marks.onCompositionUpdate(); g.sending(box); out.push(on === box)                                 // still marked: out
+g.focus(box); out.push(on === box)                                                                  // not put back by the page
+key({ key: 'F5' }); out.push(on === box)
+key({ key: 'a' }); out.push(on === box)                                                             // typing puts it back
+g.marks.onCompositionStart(); g.marks.onCompositionEnd(); out.push(g.leaving(box), on === box)      // left just as it was committed: out
+key({ key: 'a' })
+const enter = (isComposing, keyCode) => g.sends({ key: 'Enter', keyCode, nativeEvent: { isComposing } })
+out.push(enter(false, 13), enter(true, 13), enter(false, 229), enter(true, 229))
 console.log(JSON.stringify(out))"""
-        cases = [
-            # the transcript that is owed
-            (["is there an update", True, "Is there an update?", "text"], ""),
-            (["is there an update", True, "Is there an update.", "committed"], ""),
-            (["is there an update", True, "is there an update", "marking"], ""),
-            (["call jon tomorrow", True, "Call John tomorrow.", "text"], ""),
-            (["set fee to twenty percent", True, "Set fee to 20%.", "text"], ""),
-            (["whats due", True, "What's due?", "text"], ""),
-            (["follow up", True, "Follow up with Dana tomorrow", "text"], "with Dana tomorrow"),
-            (["is there an update", True, "is there an update and who", "marking"], "and who"),        # still talking
-            (["call jon tomorrow", True, "Call John tomorrow and ask about price", "text"], "and ask about price"),
-            (["call jon tomorrow", True, "Call John tomorrow.", "text", True], ["", "Call John tomorrow."]),
-            # what is the person's
-            (["move the Acme deal to won", False, "move the Birch deal to won", "text"], None),
-            (["yes", False, "yes do that now", "text"], None), (["yes", False, "yes", "text"], None),
-            (["move the Acme deal to won", True, "move", "marking"], None),
-            (["move the Acme deal to won", True, "move the Birch deal to won", "marking"], None),
-            (["yes", True, "yes", "marking"], None), (["\u306f\u3044", True, "\u306f", "marking"], None),
-            (["move the Acme deal to won", True, "who has gone quiet", "text"], None),
-            (["\u0939\u094b", True, "\u0939\u0948", "text"], None),
-        ]
-        done = subprocess.run([node, "-e", script, json.dumps([case for case, _ in cases])], capture_output=True, text=True, timeout=60)
-        self.assertEqual((done.returncode, json.loads(done.stdout or "[]")), (0, [want for _, want in cases]), done.stderr[:400])
+        done = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=60)
+        self.assertEqual((done.returncode, json.loads(done.stdout or "[]")),
+                         (0, [True, True, False, False, False, True, True, False, True, True, False, False]), done.stderr[:400])
 
     def test_a_card_names_the_first_person_on_its_record(self):
         ingrid = self.desk.store.find("Ingrid Solberg")["id"]
