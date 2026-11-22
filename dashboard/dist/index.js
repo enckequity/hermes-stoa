@@ -247,7 +247,7 @@
     };
     return h(Section, { title: "Market maps", note: rows.length ? "limits are set on the Stoa page, under Map facts" : "" },
       o.tour ? h("p", { className: "stoa-p" }, "Sample data is on show, so your own maps are not listed. Leave the tour to see them.")
-        : !rows.length ? h("p", { className: "stoa-p" }, "No map yet. In a Hermes chat, or on the Stoa page's Market map tab, say what you sell and who you are after; Hermes researches it and saves the map.")
+        : !rows.length ? h("p", { className: "stoa-p" }, "No map yet. In a Hermes chat, or on the Stoa page's GTM tab, say what you sell and who you are after; Hermes researches it and saves the map.")
         : h("div", { className: "stoa-scroll" }, h("table", { className: "stoa-table" },
           h("thead", null, h("tr", null, ["Map", "Companies", "In pipeline", "Buyers named", "Hermes's work", "This month", "Lookups", "Searches", "Limits"].map(function (label, i) {
             return h("th", { key: label, "data-num": i >= 1 && i <= 7 ? "1" : "0" }, label);

@@ -657,7 +657,7 @@ def overview() -> dict:
 
 @router.get("/database")
 def database() -> dict:
-    """The Database tab: every account, deal and person on this pipeline as rows, and the views kept of them.
+    """The Data tab: every account, deal and person on this pipeline as rows, and the views kept of them.
     Worked out from the plugin's own database; the page filters and sorts them itself."""
     return desk().database.rows()
 
@@ -684,7 +684,7 @@ def database_view(body: dict = Body(...)) -> dict:
 
 @router.get("/reports")
 def reports(period: str = "", compare: int = 1) -> dict:
-    """The Reports tab: the reports on the dashboard, worked out, and the list of every report this pipeline has.
+    """The Dashboard tab: the reports on the dashboard, worked out, and the list of every report this pipeline has.
     Counted by the plugin from its own database; no model and no outside service is asked anything."""
     return desk().reports.dashboard(period, bool(compare))
 

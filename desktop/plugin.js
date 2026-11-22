@@ -754,10 +754,10 @@ function MapPerson({ c, market, busy, actions, open, move, close }) {
 
 const BILLING_KINDS = [
   ['contingent', 'Contingent', 'A fee for each placement, a share of the salary. The pipeline counts in money: what is in play, what was placed.'],
-  ['contract', 'Contract', 'Paid by the hour by one company, on any number of searches, and billed each month. The pipeline counts candidates; the money is on the Cash tab only.']]
+  ['contract', 'Contract', 'Paid by the hour by one company, on any number of searches, and billed each month. The pipeline counts candidates; the money is on the Production tab only.']]
 
 /** At the head of the Pipeline tab on a recruiting pipeline: one line on how it is paid for, and the form that changes
-    it. A contract needs the company, the hourly rate and the hours a week: the Cash tab bills from them. */
+    it. A contract needs the company, the hourly rate and the hours a week: the Production tab bills from them. */
 function Billing({ state }) {
   const billing = state.billing || {}
   const [open, setOpen] = useState(false)
@@ -770,7 +770,7 @@ function Billing({ state }) {
   const line = h('div', { className: 'stoa-billing' },
     h('span', { className: 'stoa-eyebrow' }, 'Billing'), h('b', null, hourly ? 'Contract' : 'Contingent'),
     hourly ? (billing.client ? h('span', null, 'with ' + billing.client) : null) : billing.fee_pct ? h('span', null, billing.fee_pct + '% of salary') : null,
-    h('span', { className: 'stoa-sub' }, hourly ? 'Paid by the hour and billed each month. This side counts ' + pb.terms.deals + '; the hours and the bills are on the Cash tab.'
+    h('span', { className: 'stoa-sub' }, hourly ? 'Paid by the hour and billed each month. This side counts ' + pb.terms.deals + '; the hours and the bills are on the Production tab.'
       : 'A fee for each placement. What is in play counts each ' + pb.terms.group + ' once, for each opening left.'),
     billing.fixed || open ? null : h(Btn, { kind: 'quiet', onClick: start }, 'Change'))
   if (!open || !v) return line
@@ -794,14 +794,14 @@ function Billing({ state }) {
       h(Field, { label: 'Billed from the month of', type: 'month', value: v.from, onChange: event => setV({ ...v, from: event.target.value, moved: true }) }))
       : h('div', { className: 'stoa-form' }, h(Field, { label: 'Your usual fee, % of salary (optional)', type: 'number', min: 0, max: 100, value: v.pct, onChange: set('pct') })),
     h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, contract
-      ? 'Each month that ends is put on the Cash tab to bill: the rate times that month’s hours (the hours a week, over its working days), which you can correct before you record the invoice. A month that is not over shows there as the month in progress. Leave the month empty to start with this one; a company you already bill by the hour keeps the month it started. No fee is asked for or shown on a ' + pb.terms.deal + ' here.'
+      ? 'Each month that ends is put on the Production tab to bill: the rate times that month’s hours (the hours a week, over its working days), which you can correct before you record the invoice. A month that is not over shows there as the month in progress. Leave the month empty to start with this one; a company you already bill by the hour keeps the month it started. No fee is asked for or shown on a ' + pb.terms.deal + ' here.'
       : 'Give a ' + pb.terms.group + ' the fee each ' + pb.terms.deal + ' in it would bring, and how many openings it has; what is in play counts that fee once for each opening left.'),
     contract && carried ? h('label', { className: 'stoa-billclear' }, h('input', { type: 'checkbox', checked: v.clear, onChange: event => setV({ ...v, clear: event.target.checked }) }),
       h('span', null, 'Some ' + pb.terms.deals + ' or ' + pb.terms.groups + ' here carry fees from before. On contract work they are not counted or shown anywhere. Tick this to set them to zero (Undo on a record can bring its fee back; a search\'s has to be typed again). Left alone, open and passed ' + pb.terms.deals + '\' fees show again if this pipeline is made contingent.')) : null,
     h('div', { className: 'stoa-btns', style: { marginTop: 10 } }, h(Btn, { kind: 'primary', disabled: busy || !ready, onClick: save }, busy ? 'Saving…' : 'Save'), h(Btn, { kind: 'quiet', onClick: () => setOpen(false) }, 'Cancel'))))
 }
 
-/** At the head of the Cash tab: every pipeline at once (a contract's month of hours beside the others' fees), then, on
+/** At the head of the Production tab: every pipeline at once (a contract's month of hours beside the others' fees), then, on
     a contract pipeline, the contract itself and the month in progress. A month is put on the tab to bill only once it
     has ended, so without that the tab would have nothing to show for a contract until the first of next month. */
 function ProductionHead({ state, openClient, showPipe }) {
@@ -3669,7 +3669,7 @@ const Chip = ({ tone, wrap, children }) => h('span', { className: 'stoa-chip', '
 const Btn = ({ kind, children, ...props }) => h('button', { type: 'button', className: 'stoa-btn', 'data-kind': kind || '', ...props }, children)
 
 /** Delete, beside a record's Edit. Two presses. The record is taken off the desk, not destroyed: everything on it is
- *  kept, and it is put back from the Activity tab or from Your data in Setup, where it can also be deleted for good. */
+ *  kept, and it is put back from the Log tab or from Your data in Setup, where it can also be deleted for good. */
 function RemoveRecord({ deal, after }) {
   const pipe = useContext(InPipe)
   const [sure, setSure] = useState(false)
@@ -3680,7 +3680,7 @@ function RemoveRecord({ deal, after }) {
     try {
       await rest('/deal/' + encodeURIComponent(deal.id) + '/remove', { method: 'POST', body: {}, ...inPipe(pipe) })
       refresh()
-      host.notify({ kind: 'success', message: deal.name + ' was taken off the desk. Nothing on it was lost: put it back from the Activity tab, or from Your data in Setup.' })
+      host.notify({ kind: 'success', message: deal.name + ' was taken off the desk. Nothing on it was lost: put it back from the Log tab, or from Your data in Setup.' })
       if (after) after()
     } catch (error) {
       host.notifyError(error, 'Stoa could not take that off the desk')
@@ -4577,7 +4577,7 @@ function ModelPickApp({ lane }) {
     h(DropdownMenuTrigger, { asChild: true },
       h('button', { type: 'button', className: maps ? 'stoa-btn' : 'stoa-footbtn', 'aria-label': maps ? 'The model for map research' : 'The model for the desk\'s conversation',
         title: maps ? 'The model Hermes researches your maps with: starting a map, growing it, filling in what is missing. It is kept apart from the talk box\'s model, and has a conversation of its own.'
-          : 'The model the desk\'s conversation runs on. Map research has its own, beside Map facts on the Market map tab.' },
+          : 'The model the desk\'s conversation runs on. Map research has its own, beside Map facts on the GTM tab.' },
         (maps ? 'Research: ' : '') + (short(now.model) || 'Model'), '\u00a0', h('span', { className: 'stoa-menucaret', 'aria-hidden': true }, '▾'))),
     h(DropdownMenuContent, { align: maps ? 'end' : 'start', side: maps ? 'bottom' : 'top', className: 'w-72 p-0' },
       h(ModelMenuCloseContext.Provider, { value: () => setOpen(false) },
@@ -4607,7 +4607,7 @@ function ModelPickPlain({ lane = 'desk' }) {
   const maps = lane === 'maps'
   return h(Menu, { kind: maps ? '' : 'foot', up: !maps, right: maps, label: maps ? 'Research: ' + name : name,
     title: maps ? 'The model Hermes researches your maps with: starting a map, growing it, filling in what is missing. It is kept apart from the talk box\'s model, and has a conversation of its own.'
-      : 'The model the desk\'s conversation runs on. Map research has its own, beside Map facts on the Market map tab.' },
+      : 'The model the desk\'s conversation runs on. Map research has its own, beside Map facts on the GTM tab.' },
     h(MenuItem, { title: 'Hermes\'s default', sub: picked ? 'Whatever this profile is set to use' : (usual ? short(usual) + ' · in use' : 'In use'), on: !picked,
       onClick: () => { if (picked) pickModel(null, false, data.model && data.provider ? { model: String(data.model), provider: String(data.provider) } : null, lane) } }),
     query.isLoading ? h('div', { className: 'stoa-sub', style: { padding: '8px 10px' } }, 'Asking Hermes for its models…') : null,
@@ -6092,7 +6092,7 @@ const BASIS = {
   even: 'Each stage counts for an even step toward closing. Your own history takes over once twelve have closed.'
 }
 
-/** The Cash tab: what came in and what is owed, what the open pipeline is likely to bring, and where won work stands. */
+/** The Production tab: what came in and what is owed, what the open pipeline is likely to bring, and where won work stands. */
 function Cash({ state, openId, setOpenId, openClient }) {
   const cash = state.cash, pb = state.playbook
   const [over, setOver] = useState('')
@@ -6334,7 +6334,7 @@ function Timeline({ deal, sessionId }) {
         h('div', { className: 'stoa-tltext' }, entry.text),
         h('div', { className: 'stoa-sub' }, [clock(entry.at), entry.by, entry.undone ? 'taken back' : ''].filter(Boolean).join(' · ')))))
   })
-  return h(Section, { main: true, title: 'Activity',
+  return h(Section, { main: true, title: 'Log',
     aside: deal.undo ? h(Btn, { kind: 'quiet', disabled: undoing, title: 'Put the record back as it was before: ' + deal.undo.text,
       onClick: () => { setUndoing(true); undo(deal.id, deal.undo.op).then(() => setUndoing(false)) } },
     h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } }, h(Icon, { name: 'back', size: 13 }), 'Take back the last change')) : null },
@@ -6684,7 +6684,7 @@ function CompanyPage({ name, state, back, backLabel, openRecord, openGroup }) {
 }
 
 // -- a client: the company the work is for, its searches, and how it is billed when that is by the month ----
-/** Whether the desk keeps money for clients billed by the month: then there is a Cash tab even where records are never billed. */
+/** Whether the desk keeps money for clients billed by the month: then there is a Production tab even where records are never billed. */
 const hasClientMoney = data => Boolean(data.cash && (((data.cash.strip || {}).to_bill || { count: 0 }).count || (data.cash.invoices || []).some(item => item.client)))
   || (data.clients || []).some(row => row.terms && row.terms.kind)
 
@@ -7795,8 +7795,8 @@ function ReportOpen({ id, state, choices, back, openRecord }) {
     const first = (result.rows || []).find(row => row.records && row.records.length)
     if (first && result.draw === 'bars') setSel(first.key)
   }, [Boolean(result), id])
-  if (query.error && !result) return h('div', { className: 'stoa-rep' }, h(BackRow, { back, label: 'Reports' }), h('p', { className: 'stoa-sub' }, 'That report is not here any more.'))
-  if (!result) return h('div', { className: 'stoa-rep' }, h(BackRow, { back, label: 'Reports' }), h('p', { className: 'stoa-sub' }, 'Working it out…'))
+  if (query.error && !result) return h('div', { className: 'stoa-rep' }, h(BackRow, { back, label: 'Dashboard' }), h('p', { className: 'stoa-sub' }, 'That report is not here any more.'))
+  if (!result) return h('div', { className: 'stoa-rep' }, h(BackRow, { back, label: 'Dashboard' }), h('p', { className: 'stoa-sub' }, 'Working it out…'))
   const row = (result.rows || []).find(item => item.key === sel) || null
   const run = async (body, done) => { setBusy(true); await repAct(result.id, body, done); setBusy(false) }
   const savePage = () => rest('/reports/' + encodeURIComponent(result.id) + '/page' + repQuery(rep))
@@ -7820,7 +7820,7 @@ function ReportOpen({ id, state, choices, back, openRecord }) {
     h('tbody', null, result.csv.rows.map((cells, index) => h('tr', { key: index }, cells.map((cell, at) => h('td', { key: at, 'data-num': at ? '1' : '0' },
       at && result.csv.header[at] === 'Value' ? money(cell, pb.currency) || '–' : cell === '' || cell === null ? '–' : String(cell))))))))
   return h('div', { className: 'stoa-rep' },
-    h(BackRow, { back, label: 'Reports' }),
+    h(BackRow, { back, label: 'Dashboard' }),
     result.draft ? h('div', { className: 'stoa-repdraft', role: 'status' },
       h('span', null, h('b', null, result.replaces ? 'Hermes made a new version of a report.' : 'Hermes made this report.'),
         result.asked ? ' You asked: “' + result.asked + '”.' : '', ' It is a draft until you keep it.'),
@@ -7926,7 +7926,7 @@ function Reports({ state, openRecord }) {
   const hints = ['Value of open ' + pb.terms.deals + ' by owner', 'Lost ' + pb.terms.deals + ' by stage', 'New ' + pb.terms.deals + ' each month, and how they ended']
   return h('div', { className: 'stoa-rep' },
     h('div', { className: 'stoa-repbar' },
-      h('div', null, h('div', { className: 'stoa-tabs', role: 'group', 'aria-label': 'Reports' },
+      h('div', null, h('div', { className: 'stoa-tabs', role: 'group', 'aria-label': 'Dashboard' },
         h('button', { type: 'button', className: 'stoa-tab', 'data-on': rep.list ? '0' : '1', 'aria-pressed': !rep.list, onClick: () => setRep({ list: false }) }, 'Dashboard'),
         h('button', { type: 'button', className: 'stoa-tab', 'data-on': rep.list ? '1' : '0', 'aria-pressed': rep.list, onClick: () => setRep({ list: true }) }, 'All reports', h('small', null, String(data.reports.length))))),
       h('div', null,
@@ -8580,7 +8580,7 @@ function Page() {
     }, 260)
     return () => clearTimeout(timer)
   }, [adding, tab])
-  // A desk whose records are never billed has no Cash tab: if that was the last one shown, show Today.
+  // A desk whose records are never billed has no Production tab: if that was the last one shown, show Today.
   const cashShown = Boolean(query.data && query.data.playbook && (query.data.playbook.billing !== 'none' || hasClientMoney(query.data)))
   useEffect(() => { if (tab === 'cash' && query.data && !cashShown) $tab.set('today') }, [tab, cashShown, Boolean(query.data)])
   // A map that was not there a moment ago (Hermes has just saved it) is the one to show.
@@ -8633,7 +8633,7 @@ function Page() {
     ['From the map', totals.tracked, cap(pb.terms.deals) + ' that started on a market map.', ''],
     ['Won', totals.won + (totals.won_value ? ' · ' + money(totals.won_value, pb.currency) : ''), 'Closed as ' + pb.won.label.toLowerCase() + ', all time.', '']]
   const side = adding ? h(NewRecord, { state, close: () => setAdding(false), opened: id => { setAdding(false); openRecord(id) } }) : null
-  const tabLabel = { today: 'Today', pipeline: view === 'groups' ? cap(pb.terms.groups) : view === 'companies' ? 'Companies' : view === 'clients' ? 'Clients' : 'Pipeline', database: 'Database', cash: 'Cash', reports: 'Reports', activity: 'Activity' }[tab] || 'Back'
+  const tabLabel = { today: 'Today', pipeline: view === 'groups' ? cap(pb.terms.groups) : view === 'companies' ? 'Companies' : view === 'clients' ? 'Clients' : 'Pipeline', database: 'Data', cash: 'Production', reports: 'Dashboard', activity: 'Log' }[tab] || 'Back'
   const before = stack.length > 1 ? stack[stack.length - 2] : null
   const backLabel = !before ? tabLabel : before.kind === 'record' ? ((state.deals.find(item => item.id === before.id) || {}).name || 'Back') : before.id
   const sheet = !top ? null
@@ -8672,8 +8672,8 @@ function Page() {
         onClick: item[3] ? () => setTab(item[3]) : undefined }, h('span', { className: 'stoa-eyebrow' }, item[0]), h('b', null, String(item[1])))))),
     h('div', { className: 'stoa-rule' }),
     h('div', { className: 'stoa-tabsrow' },
-      h('div', { className: 'stoa-tabs', role: 'tablist' }, [['today', 'Today', day.needs], ['market', 'GTM', totals.mapped], ['pipeline', 'Pipeline', totals.open], ['reports', 'Reports', 0], ['database', 'Database', 0], ['activity', 'Activity', 0]]
-        .concat(cashShown ? [['cash', 'Cash', state.cash ? state.cash.strip.overdue.count + (state.cash.strip.to_bill || { count: 0 }).count : 0]] : [])
+      h('div', { className: 'stoa-tabs', role: 'tablist' }, [['today', 'Today', day.needs], ['market', 'GTM', totals.mapped], ['pipeline', 'Pipeline', totals.open], ['reports', 'Dashboard', 0], ['database', 'Data', 0], ['activity', 'Log', 0]]
+        .concat(cashShown ? [['cash', 'Production', state.cash ? state.cash.strip.overdue.count + (state.cash.strip.to_bill || { count: 0 }).count : 0]] : [])
         .concat([['setup', 'Setup', 0]]).map(item =>
         h('button', { type: 'button', key: item[0], role: 'tab', 'aria-selected': tab === item[0], className: 'stoa-tab', 'data-on': tab === item[0] ? '1' : '0',
           onClick: () => setTab(item[0]) }, item[1], item[2] ? h('small', null, String(item[2])) : null))),
@@ -8864,7 +8864,7 @@ function ReportInChat({ attrs, sessionId }) {
       else if (verb === 'discard') setGone(true)
       else {
         if (out && out.id && out.id !== id) setId(out.id)
-        host.notify({ kind: 'success', message: 'Kept. It is on the Reports tab.' })
+        host.notify({ kind: 'success', message: 'Kept. It is on the Dashboard tab.' })
       }
       refresh()
     } catch (error) {

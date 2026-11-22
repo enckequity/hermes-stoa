@@ -533,7 +533,7 @@ GTM_REPORT = {
         "stage, group, company, reason, month, or field:<key> for one of the pipeline's own fields), `when` (which records: "
         "entered in the period, closed in the period, or open now), optional `split` (colour each bar by the furthest stage "
         "reached, or by how it ended) and `only` (narrow it: status, owner, source, stage, group, company, min_value). It "
-        "is saved as a draft on the Reports tab, where the person keeps or discards it, and comes back worked out, so say "
+        "is saved as a draft on the Dashboard tab, where the person keeps or discards it, and comes back worked out, so say "
         "what it shows. To change a report made here, save again with `replaces` naming it. 'remove' deletes one made here."
     ),
     "parameters": {

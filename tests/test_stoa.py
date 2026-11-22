@@ -6288,7 +6288,7 @@ class ReportTests(unittest.TestCase):
     def test_what_the_map_turned_into_follows_its_companies_into_the_pipeline(self):
         bare = tempfile.TemporaryDirectory()
         self.addCleanup(bare.cleanup)
-        self.assertEqual(make_desk(bare.name).reports.run("map")["empty"], "No market map yet. Make one on the Market map tab.")
+        self.assertEqual(make_desk(bare.name).reports.run("map")["empty"], "No market map yet. Make one on the GTM tab.")
         market = self.desk.markets.list_markets()[0]
         self.assertEqual(self.reports.run("map")["says"][0], "Nothing from the map is in the pipeline yet.")
         self.desk.market({"action": "track", "targets": ["Brightside Freight", "Tidewater Logistics"]})

@@ -702,7 +702,7 @@ class Reports:
                          ["Then", "The ones put in the pipeline, how far each got, and which were %s" % playbook.won["label"].lower()],
                          ["Cost", "What Hermes estimates its own work on the maps cost, as on Map facts. Not an invoice"], ["Which", "All time"]],
                 "total": {"count": mapped, "value": self.desk.sum(won)}, "squares": mapped <= 60, "period": None, "before": None, "says": [point, rest],
-                **({} if maps else {"empty": "No market map yet. Make one on the Market map tab."})}
+                **({} if maps else {"empty": "No market map yet. Make one on the GTM tab."})}
 
     @staticmethod
     def _proposal_kind(row: dict) -> str:
@@ -791,7 +791,7 @@ class Reports:
         return out
 
     def dashboard(self, period: Any = "", compare: bool = True) -> dict:
-        """The Reports tab in one answer: the pinned reports worked out, and the list of all of them."""
+        """The Dashboard tab in one answer: the pinned reports worked out, and the list of all of them."""
         listed = self.catalog()
         saved = self._saved()
         order = {ref: index for index, ref in enumerate(self._pins(saved))}
@@ -921,7 +921,7 @@ class Reports:
         if action == "save":
             out = self.save(args, by=self.desk.actor(), draft=True)
             if out.get("ok"):
-                out["note"] = ("Saved as a draft on the Reports tab: the person keeps it or discards it there. Say in one line what it shows, "
+                out["note"] = ("Saved as a draft on the Dashboard tab: the person keeps it or discards it there. Say in one line what it shows, "
                                "from the figures here. Do not save it again.")
                 if self.desk.desktop_open(session):
                     found = self.find(out.get("id"))
