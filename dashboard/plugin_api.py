@@ -32,6 +32,7 @@ router = APIRouter(dependencies=[Depends(_note_request)])
 PLUGIN_DIR = Path(__file__).resolve().parent.parent
 PACKAGE = "stoa_dashboard_pkg"
 _own_desks: dict = {}
+_own_desks_lock = threading.Lock()
 
 
 _package_lock = threading.Lock()
@@ -132,10 +133,12 @@ def _profile_desk():
                         return live
         except Exception:
             continue
-    if str(home) not in _own_desks:
-        _own_desks[str(home)] = package.build_desk(_settings, lambda key, value: None)
-        _own_desks[str(home)].can_configure = False     # no way to save a setting from here: the page hands that to Hermes
-    return _own_desks[str(home)]
+    with _own_desks_lock:
+        if str(home) not in _own_desks:
+            built = package.build_desk(_settings, lambda key, value: None)
+            built.can_configure = False     # no way to save a setting from here: the page hands that to Hermes
+            _own_desks[str(home)] = built
+        return _own_desks[str(home)]
 
 
 def _mod(name: str):

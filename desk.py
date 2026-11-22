@@ -938,10 +938,15 @@ class Desk:
     def _changed(self, deal: dict) -> None:
         """A record changed: bring any card already posted for it up to date."""
         if self.slack is not None:
-            try:
-                self.slack.refresh(deal["id"])
-            except Exception:
-                log.debug("stoa: card refresh failed", exc_info=True)
+            deal_id = deal["id"]
+
+            def refresh() -> None:
+                try:
+                    self.slack.refresh(deal_id)
+                except Exception:
+                    log.debug("stoa: card refresh failed", exc_info=True)
+
+            self.store.after_commit(refresh)
 
     # -- gtm_pipeline ---------------------------------------------------------------------------
     def pipeline(self, args: dict, session: Optional[dict] = None) -> dict:

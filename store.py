@@ -226,6 +226,31 @@ ADDED_COLUMNS = {
     "orgs": {"terms": "TEXT NOT NULL DEFAULT '{}'"},
 }
 
+SCHEMA_VERSION = 1
+
+# Indexes created after ADDED_COLUMNS so partial indexes on added columns (archived_at) work on every version.
+INDEXES = (
+    "CREATE INDEX IF NOT EXISTS deals_active ON deals (status, stage) WHERE archived_at = ''",
+    "CREATE INDEX IF NOT EXISTS deals_archived ON deals (archived_at) WHERE archived_at != ''",
+    "CREATE INDEX IF NOT EXISTS intakes_status ON intakes (status, at)",
+    "CREATE INDEX IF NOT EXISTS targets_deal ON targets (deal_id) WHERE deal_id != ''",
+)
+
+
+def _statements(sql: str) -> list:
+    """Split a multi-statement SQL script (including triggers) into single statements for transactional execution."""
+    out, buf = [], ""
+    for line in sql.splitlines(True):
+        buf += line
+        if sqlite3.complete_statement(buf):
+            stmt = buf.strip()
+            if stmt:
+                out.append(stmt)
+            buf = ""
+    if buf.strip():
+        out.append(buf.strip())
+    return out
+
 # An invoice to a client rather than on a record (hourly contract work, a retainer) carries the client's key in
 # place of a record id: "client:<key>". It has no record, so it writes no activity line; its ledger entries are
 # kept under that same id, so it is taken back the way a record's change is.
@@ -513,86 +538,159 @@ class Store:
         self.path = str(path)
         self._memory = None
         self._lock = threading.RLock()
-        self._ops = threading.local()       # the action in progress on this thread, if a caller opened one
+        self._ops = threading.local()       # the action and connection in progress on this thread, if a caller opened one
         if self.path == ":memory:":  # one shared connection, for tests
-            self._memory = sqlite3.connect(":memory:", check_same_thread=False)
+            self._memory = sqlite3.connect(":memory:", check_same_thread=False, isolation_level=None)
             self._memory.row_factory = sqlite3.Row
+            self._memory.execute("PRAGMA busy_timeout=15000")
         with self._conn() as conn:
-            if self._memory is None:
-                conn.execute("PRAGMA journal_mode=WAL")     # kept in the file: every later connection gets it
-            conn.executescript(SCHEMA)
-            for table, columns in ADDED_COLUMNS.items():
-                have = {row[1] for row in conn.execute("PRAGMA table_info(%s)" % table)}
-                for column, declaration in columns.items():
-                    if column not in have:
-                        try:
-                            conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, column, declaration))
-                        except sqlite3.OperationalError as exc:     # another process added it a moment ago
-                            if "duplicate column" not in str(exc).lower():
-                                raise
-            # Cents are what counts. `value` is written beside them, so an older version can read the file; where the
-            # two disagree an older version wrote `value` last, and that is taken over.
-            conn.execute("UPDATE deals SET value_cents = CAST(ROUND(value * 100) AS INTEGER) "
-                         "WHERE value_cents != CAST(ROUND(value * 100) AS INTEGER)")
-        self._adopt_people()
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            if version < SCHEMA_VERSION:
+                if self._memory is None:
+                    conn.execute("PRAGMA journal_mode=WAL")     # kept in the file: every later connection gets it
+                with self._conn(write=True) as wconn:
+                    if wconn.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
+                        for stmt in _statements(SCHEMA):
+                            wconn.execute(stmt)
+                        for table, columns in ADDED_COLUMNS.items():
+                            have = {row[1] for row in wconn.execute("PRAGMA table_info(%s)" % table)}
+                            for column, declaration in columns.items():
+                                if column not in have:
+                                    try:
+                                        wconn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, column, declaration))
+                                    except sqlite3.OperationalError as exc:     # another process added it a moment ago
+                                        if "duplicate column" not in str(exc).lower():
+                                            raise
+                        for stmt in INDEXES:
+                            wconn.execute(stmt)
+                        # Cents are what counts. `value` is written beside them, so an older version can read the file; where the
+                        # two disagree an older version wrote `value` last, and that is taken over.
+                        wconn.execute("UPDATE deals SET value_cents = CAST(ROUND(value * 100) AS INTEGER) "
+                                      "WHERE value_cents != CAST(ROUND(value * 100) AS INTEGER)")
+                        self._adopt_people(wconn)
+                        wconn.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
+            else:
+                # Backward compatibility with pre-0.12 processes that do not touch user_version:
+                # read-only checks acquire no write lock unless drift is actually found.
+                if conn.execute("SELECT 1 FROM deals WHERE value_cents != CAST(ROUND(value * 100) AS INTEGER) LIMIT 1").fetchone():
+                    with self._conn(write=True) as wconn:
+                        wconn.execute("UPDATE deals SET value_cents = CAST(ROUND(value * 100) AS INTEGER) "
+                                      "WHERE value_cents != CAST(ROUND(value * 100) AS INTEGER)")
+                if conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'people'").fetchone():
+                    self._adopt_people()
 
-    def _adopt_people(self) -> None:
+    def _adopt_people(self, conn: Optional[sqlite3.Connection] = None) -> None:
         """Version 0.11 kept the other people on a record in a table of their own, one row per record. They
         become contacts, one per person (by email), linked to each record they were on."""
-        with self._conn() as conn:
-            conn.execute("BEGIN IMMEDIATE")         # two processes opening the file together: one does this, the other waits
-            if not conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'people'").fetchone():
-                return
-            for row in conn.execute("SELECT * FROM people ORDER BY id").fetchall():
-                person = dict(row)
-                email = (person.get("email") or "").strip().lower()
-                found = conn.execute("SELECT id FROM contacts WHERE lower(email) = ? AND archived_at = ''", (email,)).fetchone() if email else None
-                if found is None:
-                    contact_id = conn.execute(
-                        "INSERT INTO contacts (name, email, title, linkedin, phone, note, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
-                        (person["name"], email, person.get("title") or "", person.get("linkedin") or "", person.get("phone") or "",
-                         person.get("note") or "", person.get("created_at") or now(), person.get("updated_at") or now())).lastrowid
-                else:
-                    contact_id = found["id"]
-                if not conn.execute("SELECT 1 FROM deal_contacts WHERE deal_id = ? AND contact_id = ? AND archived_at = ''",
-                                    (person["deal_id"], contact_id)).fetchone():
-                    conn.execute("INSERT INTO deal_contacts (deal_id, contact_id, role, created_at) VALUES (?,?,?,?)",
-                                 (person["deal_id"], contact_id, person.get("role") or "", person.get("created_at") or now()))
-            conn.execute("DROP TABLE people")
+        if conn is None:
+            with self._conn(write=True) as wconn:
+                self._adopt_people(wconn)
+            return
+        if not conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'people'").fetchone():
+            return
+        for row in conn.execute("SELECT * FROM people ORDER BY id").fetchall():
+            person = dict(row)
+            email = (person.get("email") or "").strip().lower()
+            found = conn.execute("SELECT id FROM contacts WHERE lower(email) = ? AND archived_at = ''", (email,)).fetchone() if email else None
+            if found is None:
+                contact_id = conn.execute(
+                    "INSERT INTO contacts (name, email, title, linkedin, phone, note, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                    (person["name"], email, person.get("title") or "", person.get("linkedin") or "", person.get("phone") or "",
+                     person.get("note") or "", person.get("created_at") or now(), person.get("updated_at") or now())).lastrowid
+            else:
+                contact_id = found["id"]
+            if not conn.execute("SELECT 1 FROM deal_contacts WHERE deal_id = ? AND contact_id = ? AND archived_at = ''",
+                                (person["deal_id"], contact_id)).fetchone():
+                conn.execute("INSERT INTO deal_contacts (deal_id, contact_id, role, created_at) VALUES (?,?,?,?)",
+                             (person["deal_id"], contact_id, person.get("role") or "", person.get("created_at") or now()))
+        conn.execute("DROP TABLE people")
 
     # -- connection -----------------------------------------------------------------------------
+    def _open(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.path, timeout=15, isolation_level=None)    # waits up to 15 s on a busy file
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout=15000")
+            conn.execute("PRAGMA synchronous=NORMAL")
+        except BaseException:
+            conn.close()
+            raise
+        return conn
+
     class _Session:
-        def __init__(self, store: "Store"):
+        def __init__(self, store: "Store", write: bool = False):
             self.store = store
+            self.write = write
             self.conn = None
+            self.owns_conn = False
+            self.tx = None          # None | "tx" | "sp"
+            self.savepoint = ""
 
         def __enter__(self):
             self.store._lock.acquire()
             try:
-                if self.store._memory is not None:
-                    self.conn = self.store._memory
+                existing = getattr(self.store._ops, "conn", None)
+                if existing is None:
+                    self.conn = self.store._memory if self.store._memory is not None else self.store._open()
+                    self.owns_conn = True
+                    self.store._ops.conn = self.conn
+                    self.store._ops.sp = 0
+                    if self.write:
+                        self.conn.execute("BEGIN IMMEDIATE")
+                        self.tx = "tx"
                 else:
-                    self.conn = sqlite3.connect(self.store.path, timeout=15)    # waits up to 15 s on a busy file
-                    self.conn.row_factory = sqlite3.Row
-            except BaseException:       # never leave the lock held: every other thread would wait forever
-                self.store._lock.release()
+                    self.conn = existing
+                    self.owns_conn = False
+                    if self.conn.in_transaction:
+                        sp = getattr(self.store._ops, "sp", 0) + 1
+                        self.store._ops.sp = sp
+                        self.savepoint = "stoa_sp_%d" % sp
+                        self.conn.execute("SAVEPOINT " + self.savepoint)
+                        self.tx = "sp"
+                    elif self.write:
+                        self.conn.execute("BEGIN IMMEDIATE")
+                        self.tx = "tx"
+            except BaseException:       # never leave the lock held or connection leaked
+                try:
+                    if self.owns_conn:
+                        self.store._ops.conn = None
+                        if self.conn is not None and self.store._memory is None:
+                            self.conn.close()
+                finally:
+                    self.store._lock.release()
                 raise
             return self.conn
 
         def __exit__(self, exc_type, exc, tb):
             try:
-                if exc_type is None:
-                    self.conn.commit()
-                else:
-                    self.conn.rollback()
-                if self.store._memory is None:
-                    self.conn.close()
+                try:
+                    if self.tx == "sp":
+                        if self.conn.in_transaction:
+                            if exc_type is None:
+                                self.conn.execute("RELEASE SAVEPOINT " + self.savepoint)
+                            else:
+                                try:
+                                    self.conn.execute("ROLLBACK TO SAVEPOINT " + self.savepoint)
+                                finally:
+                                    self.conn.execute("RELEASE SAVEPOINT " + self.savepoint)
+                    elif (self.tx == "tx" or self.owns_conn) and self.conn.in_transaction:
+                        if exc_type is None:
+                            self.conn.execute("COMMIT")
+                        else:
+                            self.conn.execute("ROLLBACK")
+                finally:
+                    if self.owns_conn:
+                        self.store._ops.conn = None
+                        if self.store._memory is None:
+                            self.conn.close()
+                        elif self.conn.in_transaction:
+                            self.conn.execute("ROLLBACK")
             finally:
                 self.store._lock.release()
             return False
 
-    def _conn(self) -> "Store._Session":
-        return Store._Session(self)
+    def _conn(self, write: bool = False) -> "Store._Session":
+        return Store._Session(self, write=write)
 
     # A pipeline of contract work (a recruiter paid by the hour) keeps and shows no fee. The desk says so here, and the
     # ledger itself then leaves amounts out: nothing read from it carries one (an open or passed record, a search), and
@@ -634,8 +732,8 @@ class Store:
         """Write those amounts to zero (asked for in so many words): open and passed records, placements made on contract
         work, and every group's. Other placements stay as they are. The ledger keeps what each was: undo on a record
         brings its back."""
-        deals, groups = self._fees()
         with self.operation():
+            deals, groups = self._fees()
             for deal in deals:
                 try:
                     self.update(deal["id"], actor=actor, value=0, _clearing=True)
@@ -646,17 +744,46 @@ class Store:
         return len(deals) + len(groups)
 
     # -- actions: what one click or one tool call wrote, so it can be taken back together ---------
+    def after_commit(self, callback) -> None:
+        """Run ``callback`` once the current ``operation()`` commits, or right away if none is open."""
+        hooks = getattr(self._ops, "after_commit", None)
+        if hooks is not None:
+            hooks.append(callback)
+        else:
+            callback()
+
     @contextmanager
     def operation(self):
-        """Everything written inside is one action. Opened inside another, it joins that one."""
+        """Everything written inside is one action, and one atomic write transaction. Opened inside another, it joins that one."""
         if getattr(self._ops, "id", ""):
-            yield self._ops.id
+            hooks = getattr(self._ops, "after_commit", None)
+            mark = len(hooks) if hooks is not None else 0
+            try:
+                with self._conn(write=True):
+                    yield self._ops.id
+            except BaseException:
+                if hooks is not None:
+                    del hooks[mark:]
+                raise
             return
-        self._ops.id = uuid.uuid4().hex[:12]
+        hooks: list = []
+        committed = False
         try:
-            yield self._ops.id
+            with self._conn(write=True):
+                self._ops.id = uuid.uuid4().hex[:12]
+                self._ops.after_commit = hooks
+                try:
+                    yield self._ops.id
+                finally:
+                    self._ops.id = ""
+                    self._ops.after_commit = None
+            committed = True
         finally:
             self._ops.id = ""
+            self._ops.after_commit = None
+        if committed:
+            for callback in hooks:
+                callback()
 
     def _op(self) -> str:
         return getattr(self._ops, "id", "") or uuid.uuid4().hex[:12]
@@ -791,8 +918,7 @@ class Store:
         fields = {key: value for key, value in (values.pop("fields", None) or {}).items() if key not in self.OWN}        # the ledger's own marks are not a caller's to write
         base = slugify(name + ("-" + values["grp"] if values.get("grp") else ""))
         stamp, batch = now(), self._op()
-        with self._conn() as conn:
-            conn.execute("BEGIN IMMEDIATE")
+        with self._conn(write=True) as conn:
             deal_id, n = base, 1
             while conn.execute("SELECT 1 FROM deals WHERE id = ?", (deal_id,)).fetchone():
                 n += 1
@@ -811,67 +937,68 @@ class Store:
                         summary="Added at %s" % stage, at=stamp)
             conn.execute("INSERT INTO activities (deal_id, at, kind, actor, text, op) VALUES (?,?,?,?,?,?)",
                          (deal_id, stamp, "created", actor, "Added at %s" % stage, batch))
-        return self.get(deal_id)
+        return made
 
     def update(self, deal_id: str, *, actor: str = "", fields: Optional[dict] = None, **values: Any) -> dict:
-        deal = self.get(deal_id)
-        if deal is None:
-            raise KeyError(deal_id)
         if fields:                          # the ledger's own marks on a record are not a caller's to set or clear
             fields = {key: value for key, value in fields.items() if key not in self.OWN}
         clearing = bool(values.pop("_clearing", False))
-        if clearing:                        # the amount in the file is what is taken away, and what the ledger says was there
-            with self._conn() as conn:
-                deal = self._raw_deal(conn.execute("SELECT * FROM deals WHERE id = ?", (deal_id,)).fetchone())
-        elif not self.keeps_fee(deal):
-            if not self.no_fees and values.get("value") is not None:
-                # A contingent pipeline, and a person giving a fee to a record that was placed on contract work: theirs
-                # to give. The mark goes, and the change is measured against what the file has.
-                with self._conn() as conn:
-                    deal = self._raw_deal(conn.execute("SELECT * FROM deals WHERE id = ?", (deal_id,)).fetchone())
-                fields = dict(fields or {}, **{self.NO_FEE: ""})
-            else:
-                values.pop("value", None)   # no fee is kept here; what the file has is left as it is
-        sets, params, changed, before, after = [], [], [], {}, {}
-        for key in EDITABLE:
-            if key in values and values[key] is not None:
-                if key == "value":
-                    cents = to_cents(values[key])
-                    if cents != deal["value_cents"]:
-                        sets += ["value = ?", "value_cents = ?"]
-                        params += [cents / 100, cents]
-                        changed.append(key)
-                        before["value_cents"], after["value_cents"] = deal["value_cents"], cents
-                    continue
-                new = str(values[key]).strip()
-                if new != deal[key]:
-                    sets.append("%s = ?" % key)
-                    params.append(new)
-                    changed.append(key)
-                    before[key], after[key] = deal[key], new
-        if fields:
-            merged = dict(deal["fields"])
-            for key, val in fields.items():
-                if val in (None, ""):
-                    merged.pop(key, None)
-                else:
-                    merged[key] = val
-            if merged != deal["fields"]:
-                sets.append("fields = ?")
-                params.append(json.dumps(merged))
-                changed.append("fields")
-                for key in set(merged) | set(deal["fields"]):
-                    if merged.get(key) != deal["fields"].get(key):
-                        before["fields." + key], after["fields." + key] = deal["fields"].get(key), merged.get(key)
-        if not sets:
-            return deal
         stamp, batch = now(), self._op()
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
+            row = conn.execute("SELECT * FROM deals WHERE id = ? AND archived_at = ''", (deal_id,)).fetchone()
+            if row is None:
+                raise KeyError(deal_id)
+            raw = self._raw_deal(row)
+            deal = raw if clearing else self._deal(row)
+            req_fields = dict(fields) if fields else None
+            req_values = dict(values)
+            if not clearing and not self.keeps_fee(deal):
+                if not self.no_fees and req_values.get("value") is not None:
+                    # A contingent pipeline, and a person giving a fee to a record that was placed on contract work: theirs
+                    # to give. The mark goes, and the change is measured against what the file has.
+                    deal = raw
+                    req_fields = dict(req_fields or {}, **{self.NO_FEE: ""})
+                else:
+                    req_values.pop("value", None)   # no fee is kept here; what the file has is left as it is
+            sets, params, changed, before, after = [], [], [], {}, {}
+            for key in EDITABLE:
+                if key in req_values and req_values[key] is not None:
+                    if key == "value":
+                        cents = to_cents(req_values[key])
+                        if cents != deal["value_cents"]:
+                            sets += ["value = ?", "value_cents = ?"]
+                            params += [cents / 100, cents]
+                            changed.append(key)
+                            before["value_cents"], after["value_cents"] = deal["value_cents"], cents
+                        continue
+                    new = str(req_values[key]).strip()
+                    if new != deal[key]:
+                        sets.append("%s = ?" % key)
+                        params.append(new)
+                        changed.append(key)
+                        before[key], after[key] = deal[key], new
+            if req_fields:
+                merged = dict(deal["fields"])
+                for key, val in req_fields.items():
+                    if val in (None, ""):
+                        merged.pop(key, None)
+                    else:
+                        merged[key] = val
+                if merged != deal["fields"]:
+                    sets.append("fields = ?")
+                    params.append(json.dumps(merged))
+                    changed.append("fields")
+                    for key in set(merged) | set(deal["fields"]):
+                        if merged.get(key) != deal["fields"].get(key):
+                            before["fields." + key], after["fields." + key] = deal["fields"].get(key), merged.get(key)
+            if not sets:
+                return deal
             conn.execute("UPDATE deals SET %s, updated_at = ? WHERE id = ?" % ", ".join(sets), params + [stamp, deal_id])
             self._entry(conn, batch, "deal", deal_id, deal_id, "update", before, after, actor, "Updated " + ", ".join(changed), at=stamp)
             conn.execute("INSERT INTO activities (deal_id, at, kind, actor, text, op) VALUES (?,?,?,?,?,?)",
                          (deal_id, stamp, "updated", actor, "Updated " + ", ".join(changed), batch))
-        return self.get(deal_id)
+            updated = self._deal(conn.execute("SELECT * FROM deals WHERE id = ?", (deal_id,)).fetchone())
+        return updated
 
     def move(self, deal_id: str, stage: str, *, status: str = "open", reason: str = "", actor: str = "",
              label: str = "", expect: Optional[str] = None, delivery: Optional[str] = None, earned: bool = False) -> Optional[dict]:
@@ -882,8 +1009,7 @@ class Store:
         on the same record cannot both move it. Returns ``None`` when someone else got there first.
         """
         stamp, batch = now(), self._op()
-        with self._conn() as conn:
-            conn.execute("BEGIN IMMEDIATE")
+        with self._conn(write=True) as conn:
             row = conn.execute("SELECT stage, status, fields, lost_reason, snoozed_until, stage_at, delivery, value_cents FROM deals "
                                "WHERE id = ? AND archived_at = ''", (deal_id,)).fetchone()
             if row is None:
@@ -943,7 +1069,8 @@ class Store:
                         {key: after[key] for key in changed}, actor, text, at=stamp)
             conn.execute("INSERT INTO activities (deal_id, at, kind, actor, text, op) VALUES (?,?,?,?,?,?)",
                          (deal_id, stamp, "stage", actor, text, batch))
-        return self.get(deal_id)
+            moved = self._deal(conn.execute("SELECT * FROM deals WHERE id = ?", (deal_id,)).fetchone())
+        return moved
 
     def snooze(self, deal_id: str, days: int = 0, *, until: str = "", actor: str = "") -> dict:
         """Put a record aside for ``days``, or until the date ``until`` (YYYY-MM-DD). Neither clears it."""
@@ -955,7 +1082,7 @@ class Store:
         elif until <= today():
             until = ""
         stamp, batch = now(), self._op()
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             row = conn.execute("SELECT snoozed_until FROM deals WHERE id = ? AND archived_at = ''", (deal_id,)).fetchone()
             if row is None:
                 raise KeyError(deal_id)
@@ -966,37 +1093,41 @@ class Store:
                             {"snoozed_until": until}, actor, said, at=stamp)
             conn.execute("INSERT INTO activities (deal_id, at, kind, actor, text, op) VALUES (?,?,?,?,?,?)",
                          (deal_id, stamp, "snooze", actor, said, batch))
-        return self.get(deal_id)
+            snoozed = self._deal(conn.execute("SELECT * FROM deals WHERE id = ?", (deal_id,)).fetchone())
+        return snoozed
 
     def delete(self, deal_id: str, actor: str = "") -> bool:
         """Destroy a record and what hangs off it. Clearing out sample data does this, and a person deleting for good
         a record already taken off the desk. Everything else takes a record off the desk by archiving it, which can
         be put right."""
-        with self._conn() as conn:
+        stamp, batch = now(), self._op()
+        with self._conn(write=True) as conn:
             row = conn.execute("SELECT * FROM deals WHERE id = ?", (deal_id,)).fetchone()
             if row is None:
                 return False
-            self._entry(conn, self._op(), "deal", deal_id, deal_id, "delete", before=flat(self._raw_deal(row)), actor=actor, summary="Removed")
+            self._entry(conn, batch, "deal", deal_id, deal_id, "delete", before=flat(self._raw_deal(row)), actor=actor, summary="Removed", at=stamp)
             conn.execute("DELETE FROM deals WHERE id = ?", (deal_id,))
             conn.execute("DELETE FROM activities WHERE deal_id = ?", (deal_id,))
             conn.execute("DELETE FROM deal_contacts WHERE deal_id = ?", (deal_id,))
             conn.execute("DELETE FROM invoices WHERE deal_id = ?", (deal_id,))
             conn.execute("DELETE FROM cards WHERE deal_id = ?", (deal_id,))
             conn.execute("DELETE FROM meta WHERE k IN (?, ?)", ("pending:" + deal_id, "handoff:" + deal_id))
+            conn.execute("UPDATE targets SET deal_id = '', updated_at = ? WHERE deal_id = ?", (stamp, deal_id))
+            conn.execute("UPDATE notes_seen SET deal_id = '' WHERE deal_id = ?", (deal_id,))
         return True
 
     def take_off(self, deal_id: str, actor: str = "") -> Optional[dict]:
         """Take a record off the desk at a person's word. It is archived with everything on it, as a record is when
         its add is undone: every list and count leaves it out, and ``restore`` puts it back. Returns the record as it
         was, or None if it is not on the desk."""
-        stamp = now()
-        with self._conn() as conn:
+        stamp, batch = now(), self._op()
+        with self._conn(write=True) as conn:
             row = conn.execute("SELECT * FROM deals WHERE id = ? AND archived_at = ''", (deal_id,)).fetchone()
             if row is None:
                 return None
             conn.execute("UPDATE deals SET archived_at = ?, updated_at = ? WHERE id = ?", (stamp, stamp, deal_id))
             # On the ledger as "remove", which is not a change to take back with undo: putting it back is ``restore``.
-            self._entry(conn, self._op(), "deal", deal_id, deal_id, "remove", {"archived_at": ""}, {"archived_at": stamp}, actor, "Taken off the desk", at=stamp)
+            self._entry(conn, batch, "deal", deal_id, deal_id, "remove", {"archived_at": ""}, {"archived_at": stamp}, actor, "Taken off the desk", at=stamp)
             conn.execute("INSERT INTO activities (deal_id, at, kind, actor, text) VALUES (?,?,?,?,?)", (deal_id, stamp, "updated", actor, "Taken off the desk"))
         return self._deal(row)
 
@@ -1008,17 +1139,18 @@ class Store:
 
     def restore(self, deal_id: str, actor: str = "") -> Optional[dict]:
         """Put back a record that was taken off the desk (its add was undone, or a person took it off)."""
-        stamp = now()
-        with self._conn() as conn:
+        stamp, batch = now(), self._op()
+        with self._conn(write=True) as conn:
             row = conn.execute("SELECT archived_at FROM deals WHERE id = ? AND archived_at != ''", (deal_id,)).fetchone()
             if row is None:
                 return None
             conn.execute("UPDATE deals SET archived_at = '', updated_at = ? WHERE id = ?", (stamp, deal_id))
-            self._entry(conn, self._op(), "deal", deal_id, deal_id, "restore", {"archived_at": row["archived_at"]}, {"archived_at": ""},
+            self._entry(conn, batch, "deal", deal_id, deal_id, "restore", {"archived_at": row["archived_at"]}, {"archived_at": ""},
                         actor, "Put back on the desk", at=stamp)
             conn.execute("INSERT INTO activities (deal_id, at, kind, actor, text) VALUES (?,?,?,?,?)",
                          (deal_id, stamp, "updated", actor, "Put back on the desk"))
-        return self.get(deal_id)
+            restored = self._deal(conn.execute("SELECT * FROM deals WHERE id = ?", (deal_id,)).fetchone())
+        return restored
 
     def list(self, *, status: Optional[str] = "open", stage: str = "", grp: str = "", owner: str = "",
              query: str = "") -> list:
@@ -1049,7 +1181,7 @@ class Store:
     # -- activity -------------------------------------------------------------------------------
     def log(self, deal_id: str, kind: str, text: str, *, actor: str = "", ref: str = "") -> dict:
         stamp, batch = now(), self._op()
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             if not conn.execute("SELECT 1 FROM deals WHERE id = ? AND archived_at = ''", (deal_id,)).fetchone():
                 raise KeyError(deal_id)
             made = conn.execute("INSERT INTO activities (deal_id, at, kind, actor, text, ref, op) VALUES (?,?,?,?,?,?,?)",
@@ -1135,8 +1267,7 @@ class Store:
         because something the action set has been changed again since.
         """
         stamp, batch = now(), self._op()
-        with self._conn() as conn:
-            conn.execute("BEGIN IMMEDIATE")
+        with self._conn(write=True) as conn:
             standing = conn.execute("SELECT * FROM ledger WHERE deal_id = ? AND " + STANDING + " ORDER BY seq DESC", (deal_id,)).fetchall()
             if not standing:
                 return None
@@ -1160,6 +1291,14 @@ class Store:
                     for key, left in entry["after"].items():
                         if key not in SOFT and live.get(key) != left:
                             conflicts.append({"field": key, "then": left, "now": live.get(key)})
+                    if entry["entity"] == "contact" and "email" in entry["before"]:
+                        old_email = (entry["before"].get("email") or "").strip().lower()
+                        if old_email:
+                            clash = conn.execute(
+                                "SELECT name FROM contacts WHERE lower(email) = ? AND archived_at = '' AND id != ?",
+                                (old_email, entry["entity_id"])).fetchone()
+                            if clash is not None:
+                                conflicts.append({"field": "email", "then": old_email, "now": "in use by %s" % clash["name"]})
                 elif entry["entity"] == "link" and entry["op"] == "archive":
                     live = self._live(conn, entry)
                     if live and conn.execute("SELECT 1 FROM deal_contacts WHERE deal_id = ? AND contact_id = ? AND archived_at = ''",
@@ -1214,8 +1353,12 @@ class Store:
                     table, keys = {"contact": ("contacts", CONTACT), "link": ("deal_contacts", ("role",)), "invoice": ("invoices", INVOICE)}[kind]
                     put = {key: was for key, was in entry["before"].items() if key in keys}
                     if put:
-                        conn.execute("UPDATE %s SET %s WHERE id = ?" % (table, ", ".join(key + " = ?" for key in put)),
-                                     list(put.values()) + [entry["entity_id"]])
+                        sets = [key + " = ?" for key in put]
+                        params = list(put.values())
+                        if kind in ("contact", "invoice"):
+                            sets.append("updated_at = ?")
+                            params.append(stamp)
+                        conn.execute("UPDATE %s SET %s WHERE id = ?" % (table, ", ".join(sets)), params + [entry["entity_id"]])
                         before, after = {key: entry["after"].get(key) for key in put}, put
                 elif kind == "link" and what == "insert":
                     conn.execute("UPDATE deal_contacts SET archived_at = ? WHERE id = ?", (stamp, entry["entity_id"]))
@@ -1229,7 +1372,10 @@ class Store:
                 conn.execute("UPDATE activities SET undone = ? WHERE deal_id = ? AND op = ? AND undone = ''", (stamp, deal_id, target))
                 conn.execute("INSERT INTO activities (deal_id, at, kind, actor, text, op) VALUES (?,?,?,?,?,?)",
                              (deal_id, stamp, "undo", actor, "Took back: " + text, batch))
-        return {"text": text, "archived": archived, "deal": None if archived else self.get(deal_id), "conflicts": []}
+            row = None if archived or is_client(deal_id) else conn.execute(
+                "SELECT * FROM deals WHERE id = ? AND archived_at = ''", (deal_id,)).fetchone()
+            deal_out = self._deal(row) if row else None
+        return {"text": text, "archived": archived, "deal": deal_out, "conflicts": []}
 
     # -- the other people on a record ---------------------------------------------------------------
     # A person is kept once (a contact) and linked to each record they are on, with their part in
@@ -1270,8 +1416,7 @@ class Store:
         clean = {key: " ".join(str(values.get(key) or "").split())[:300] for key in PERSON if key != "name"}
         clean["email"] = clean["email"].lower()
         stamp, batch = now(), self._op()
-        with self._conn() as conn:
-            conn.execute("BEGIN IMMEDIATE")
+        with self._conn(write=True) as conn:
             if not conn.execute("SELECT 1 FROM deals WHERE id = ? AND archived_at = ''", (deal_id,)).fetchone():
                 raise KeyError(deal_id)
             contact_id, name, said = self._contact(conn, batch, name, clean, deal_id, actor, stamp)
@@ -1322,7 +1467,7 @@ class Store:
             return person
         stamp, batch = now(), self._op()
         said = "Updated %s: %s" % (person["name"], ", ".join(new))
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             about = {key: value for key, value in new.items() if key in CONTACT}
             if about:
                 try:
@@ -1344,7 +1489,7 @@ class Store:
         if person is None:
             return False
         stamp, batch = now(), self._op()
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             conn.execute("UPDATE deal_contacts SET archived_at = ? WHERE id = ?", (stamp, person["link"]))
             self._entry(conn, batch, "link", person["link"], person["deal_id"], "archive", {"archived_at": ""}, {"archived_at": stamp}, actor,
                         "Removed %s" % person["name"], at=stamp)
@@ -1424,7 +1569,7 @@ class Store:
         if period and not re.fullmatch(r"\d{4}-\d{2}", period):
             raise ValueError("the period is a month: YYYY-MM")
         stamp, batch = now(), self._op()
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             if not is_client(deal_id) and not conn.execute("SELECT 1 FROM deals WHERE id = ? AND archived_at = ''", (deal_id,)).fetchone():
                 raise KeyError(deal_id)
             made = conn.execute("INSERT INTO invoices (deal_id, number, amount_cents, status, issued_on, due_on, note, period, created_at, updated_at) "
@@ -1465,7 +1610,7 @@ class Store:
             return invoice
         stamp, batch = now(), self._op()
         said = said or "%s updated: %s" % (self._named(invoice), ", ".join(key.replace("_cents", "").replace("_on", " date") for key in new))
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             conn.execute("UPDATE invoices SET %s, updated_at = ? WHERE id = ?" % ", ".join(key + " = ?" for key in new),
                          list(new.values()) + [stamp, invoice_id])
             self._entry(conn, batch, "invoice", invoice_id, invoice["deal_id"], "update", {key: invoice[key] for key in new}, new, actor, said, at=stamp)
@@ -1517,7 +1662,7 @@ class Store:
         if invoice is None:
             return False
         stamp, batch = now(), self._op()
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             conn.execute("UPDATE invoices SET archived_at = ?, updated_at = ? WHERE id = ?", (stamp, stamp, invoice_id))
             self._entry(conn, batch, "invoice", invoice_id, invoice["deal_id"], "archive", {"archived_at": ""}, {"archived_at": stamp}, actor,
                         "%s removed" % self._named(invoice), at=stamp)
@@ -1545,7 +1690,7 @@ class Store:
                 clean[k] = str(values[k]).strip()[:4000] if k == "note" else " ".join(str(values[k]).split()).lower()[:200]
         if isinstance(values.get("terms"), dict):
             clean["terms"] = json.dumps(values["terms"], sort_keys=True)
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             conn.execute("INSERT INTO orgs (key, name, updated_at) VALUES (?,?,?) ON CONFLICT (key) DO NOTHING",
                          (key, " ".join(str(name).split())[:200], now()))
             was = dict(conn.execute("SELECT * FROM orgs WHERE key = ?", (key,)).fetchone())
@@ -1605,8 +1750,7 @@ class Store:
         if values.get("note") is not None:
             clean["note"] = str(values["note"]).strip()[:4000]
         stamp = now()
-        with self._conn() as conn:
-            conn.execute("BEGIN IMMEDIATE")
+        with self._conn(write=True) as conn:
             made = conn.execute("INSERT INTO grps (key, name, created_at, updated_at) VALUES (?,?,?,?) ON CONFLICT (key) DO NOTHING",
                                 (key, " ".join(str(name).split())[:200], stamp, stamp)).rowcount == 1
             was = dict(conn.execute("SELECT * FROM grps WHERE key = ?", (key,)).fetchone())
@@ -1634,15 +1778,15 @@ class Store:
         was, key, name = group_key(old), group_key(new), " ".join(str(new or "").split())[:200]
         if not was or not key:
             raise ValueError("a group has a name")
-        with self._conn() as conn:
-            ids = [row["id"] for row in conn.execute("SELECT id, grp FROM deals WHERE archived_at = ''").fetchall() if group_key(row["grp"]) == was]
-            if key != was and conn.execute("SELECT 1 FROM grps WHERE key = ?", (key,)).fetchone():
-                raise ValueError("there is already one called %s" % name)
         with self.operation():
+            with self._conn() as conn:
+                ids = [row["id"] for row in conn.execute("SELECT id, grp FROM deals WHERE archived_at = ''").fetchall() if group_key(row["grp"]) == was]
+                if key != was and conn.execute("SELECT 1 FROM grps WHERE key = ?", (key,)).fetchone():
+                    raise ValueError("there is already one called %s" % name)
             for deal_id in ids:
                 self.update(deal_id, actor=actor, grp=name)
             stamp = now()
-            with self._conn() as conn:
+            with self._conn(write=True) as conn:
                 row = conn.execute("SELECT * FROM grps WHERE key = ?", (was,)).fetchone()
                 if row is not None:
                     conn.execute("UPDATE grps SET key = ?, name = ?, updated_at = ? WHERE key = ?", (key, name, stamp, was))
@@ -1675,8 +1819,7 @@ class Store:
         clean["email"] = clean["email"].lower()
         self.grp_put(group, actor=actor)                    # the group has a row from here on
         stamp, batch = now(), self._op()
-        with self._conn() as conn:
-            conn.execute("BEGIN IMMEDIATE")
+        with self._conn(write=True) as conn:
             contact_id, name, said = self._contact(conn, batch, name, clean, "", actor, stamp)
             if not conn.execute("SELECT 1 FROM grp_contacts WHERE grp_key = ? AND contact_id = ? AND archived_at = ''", (key, contact_id)).fetchone():
                 link = conn.execute("INSERT INTO grp_contacts (grp_key, contact_id, role, created_at) VALUES (?,?,?,?)",
@@ -1699,7 +1842,7 @@ class Store:
             return person
         stamp, batch = now(), self._op()
         said = "Updated %s: %s" % (person["name"], ", ".join(new))
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             about = {key: value for key, value in new.items() if key in CONTACT}
             if about:
                 try:
@@ -1719,7 +1862,7 @@ class Store:
         if person is None:
             return False
         stamp = now()
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             conn.execute("UPDATE grp_contacts SET archived_at = ? WHERE id = ?", (stamp, person["link"]))
             self._entry(conn, self._op(), "group_link", person["link"], "", "archive", {"archived_at": ""}, {"archived_at": stamp}, actor,
                         "Removed %s" % person["name"], at=stamp)
@@ -1739,21 +1882,41 @@ class Store:
             if not conn.execute("SELECT (SELECT count(*) FROM deals) + (SELECT count(*) FROM ledger)").fetchone()[0]:
                 return ""                               # nothing has ever been put on this desk
         folder.mkdir(parents=True, exist_ok=True)
-        part = folder / (target.name + ".part")
-        source, copy = sqlite3.connect(self.path, timeout=15), sqlite3.connect(str(part))
+        part = folder / ("%s.%d.%s.part" % (target.name, os.getpid(), uuid.uuid4().hex[:8]))
+        source = copy = None
         try:
-            source.backup(copy)
-        finally:
-            copy.close()
-            source.close()
-        os.replace(str(part), str(target))
+            try:
+                source = sqlite3.connect(self.path, timeout=15, isolation_level=None)
+                source.execute("PRAGMA busy_timeout=15000")
+                copy = sqlite3.connect(str(part), timeout=15, isolation_level=None)
+                source.backup(copy, pages=256, sleep=0.05)
+                check = [row[0] for row in copy.execute("PRAGMA quick_check").fetchall()]
+                if check != ["ok"]:
+                    raise sqlite3.DatabaseError("snapshot quick_check failed: " + "; ".join(str(x) for x in check))
+            finally:
+                try:
+                    if copy is not None:
+                        copy.close()
+                finally:
+                    if source is not None:
+                        source.close()
+            os.replace(str(part), str(target))
+        except BaseException:
+            try:
+                part.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
         for old in sorted(folder.glob(stem + "-????-??-??.db"))[:-max(1, int(keep))]:
-            old.unlink()
+            try:
+                old.unlink()
+            except FileNotFoundError:
+                pass
         return str(target)
 
     # -- what was declined, so it is not proposed again ----------------------------------------------
     def decline(self, digest: str, deal_id: str = "", summary: str = "") -> None:
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             conn.execute("INSERT INTO declined (hash, at, deal_id, summary) VALUES (?,?,?,?) ON CONFLICT (hash) DO UPDATE SET at = excluded.at",
                          (digest, now(), deal_id, summary[:300]))
 
@@ -1768,7 +1931,7 @@ class Store:
             return [dict(row) for row in conn.execute("SELECT * FROM declined ORDER BY at DESC LIMIT ?", (int(limit),)).fetchall()]
 
     def declined_clear(self) -> int:
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             return conn.execute("DELETE FROM declined").rowcount
 
     # -- cards ----------------------------------------------------------------------------------
@@ -1776,7 +1939,7 @@ class Store:
         """Record where a card lives. ``session_key`` is the conversation it was posted from, which is
         where a later button click sends the agent's writing task; ``asked_by`` is the Slack user it
         was posted for, who may press its buttons. An empty one keeps what is stored."""
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             conn.execute(
                 "INSERT INTO cards (channel, ts, deal_id, session_key, asked_by) VALUES (?,?,?,?,?) "
                 "ON CONFLICT (channel, ts) DO UPDATE SET deal_id = excluded.deal_id, session_key = "
@@ -1806,7 +1969,7 @@ class Store:
                                                   (deal_id,)).fetchall()]
 
     def forget_card(self, channel: str, ts: str) -> None:
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             conn.execute("DELETE FROM cards WHERE channel = ? AND ts = ?", (channel, ts))
 
     # -- cache, notes, meta ---------------------------------------------------------------------
@@ -1824,7 +1987,7 @@ class Store:
             return None
 
     def cache_put(self, key: str, data: Any) -> None:
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             conn.execute("INSERT OR REPLACE INTO cache (key, at, data) VALUES (?,?,?)", (key, now(), json.dumps(data)))
 
     def note_seen(self, note_id: str) -> bool:
@@ -1832,7 +1995,7 @@ class Store:
             return conn.execute("SELECT 1 FROM notes_seen WHERE id = ?", (note_id,)).fetchone() is not None
 
     def mark_note(self, note_id: str, deal_id: str = "") -> None:
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             conn.execute("INSERT OR REPLACE INTO notes_seen (id, at, deal_id) VALUES (?,?,?)", (note_id, now(), deal_id))
 
     def note_handled(self, ids: list) -> Optional[dict]:
@@ -1849,7 +2012,7 @@ class Store:
         ids = [i for i in ids if i]
         if not ids:
             return 0
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             return conn.execute("DELETE FROM notes_seen WHERE id IN (%s)" % ",".join("?" * len(ids)), ids).rowcount
 
     def notes_handled(self, since: str) -> list:
@@ -1870,18 +2033,17 @@ class Store:
                 "SELECT k, v FROM meta WHERE substr(k, 1, ?) = ?", (len(prefix), prefix))}
 
     def meta_set(self, key: str, value: str) -> None:
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES (?,?)", (key, str(value)))
 
     def meta_pop(self, key: str) -> str:
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             row = conn.execute("SELECT v FROM meta WHERE k = ?", (key,)).fetchone()
             conn.execute("DELETE FROM meta WHERE k = ?", (key,))
         return row[0] if row else ""
 
     def bump(self, key: str, by: int = 1) -> int:
-        with self._conn() as conn:
-            conn.execute("BEGIN IMMEDIATE")
+        with self._conn(write=True) as conn:
             row = conn.execute("SELECT v FROM meta WHERE k = ?", (key,)).fetchone()
             value = (int(row[0]) if row and str(row[0]).isdigit() else 0) + by
             conn.execute("INSERT OR REPLACE INTO meta (k, v) VALUES (?,?)", (key, str(value)))
@@ -1899,7 +2061,7 @@ class Store:
         return intake
 
     def intake_put(self, intake_id: str, source: str, rows: list, origin: str = "list") -> None:
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             conn.execute("INSERT INTO intakes (id, at, source, status, rows, origin) VALUES (?,?,?,?,?,?)",
                          (intake_id, now(), source, "open", json.dumps(rows), origin if origin in ("list", "proposal") else "list"))
 
@@ -1916,13 +2078,12 @@ class Store:
 
     def intake_claim(self, intake_id: str) -> bool:
         """Take an open intake for applying. Only one caller ever gets it, so two clicks apply it once."""
-        with self._conn() as conn:
-            conn.execute("BEGIN IMMEDIATE")
+        with self._conn(write=True) as conn:
             cur = conn.execute("UPDATE intakes SET status = 'applying' WHERE id = ? AND status = 'open'", (intake_id,))
         return cur.rowcount == 1
 
     def intake_finish(self, intake_id: str, status: str, result: Optional[dict] = None, rows: Optional[list] = None) -> None:
-        with self._conn() as conn:
+        with self._conn(write=True) as conn:
             conn.execute("UPDATE intakes SET status = ?, result = ? WHERE id = ?", (status, json.dumps(result or {}), intake_id))
             if rows is not None:
                 conn.execute("UPDATE intakes SET rows = ? WHERE id = ?", (json.dumps(rows), intake_id))

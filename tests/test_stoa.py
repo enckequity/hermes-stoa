@@ -6429,5 +6429,249 @@ class HandedFilesTests(unittest.TestCase):
         self.assertEqual(api.files_remove(None)["removed_now"], 0)
 
 
+class StorageHardeningTests(unittest.TestCase):
+    """Concurrency, atomicity, snapshot integrity, undo/delete consistency, migrations, and indexes."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = str(Path(self.tmp.name) / "desk.db")
+        self.store = Store(self.path)
+
+    def test_concurrent_update_and_move_threads_and_processes_lose_no_fields(self):
+        import subprocess
+        deal = self.store.add("Dana Whitfield", "sourced", company="Kestrel Labs", fields={"seed": "ok"})
+        deal_id = deal["id"]
+        errors = []
+        barrier = threading.Barrier(8)
+
+        def updater(idx: int):
+            local = Store(self.path) if idx % 2 else self.store
+            try:
+                barrier.wait(timeout=10)
+                for step in range(8):
+                    local.update(deal_id, actor="t%d" % idx, fields={"t%d_%d" % (idx, step): "v%d" % step})
+            except BaseException as exc:
+                errors.append(exc)
+
+        def mover(idx: int):
+            local = Store(self.path)
+            stages = ("contacted", "screened", "submitted", "sourced")
+            try:
+                barrier.wait(timeout=10)
+                for step in range(8):
+                    if step % 4 == 3:
+                        local.move(deal_id, "won", status="won", actor="m%d" % idx)
+                        local.move(deal_id, "sourced", status="open", actor="m%d" % idx)
+                    else:
+                        local.move(deal_id, stages[step % len(stages)], status="open", actor="m%d" % idx)
+            except BaseException as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=updater, args=(i,)) for i in range(6)]
+        threads += [threading.Thread(target=mover, args=(i,)) for i in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+            self.assertFalse(t.is_alive())
+        self.assertEqual(errors, [])
+
+        # Multi-process concurrent update() + move() against the same disk file
+        worker_code = (
+            "import importlib.util, sys\n"
+            "from pathlib import Path\n"
+            "root, db, did, pid = Path(sys.argv[1]), sys.argv[2], sys.argv[3], int(sys.argv[4])\n"
+            "spec = importlib.util.spec_from_file_location('stoa', root / '__init__.py', submodule_search_locations=[str(root)])\n"
+            "mod = importlib.util.module_from_spec(spec); sys.modules['stoa'] = mod; spec.loader.exec_module(mod)\n"
+            "from stoa.store import Store\n"
+            "s = Store(db)\n"
+            "for step in range(6):\n"
+            "    s.update(did, actor='p%d' % pid, fields={'p%d_%d' % (pid, step): 'ok'})\n"
+            "    if step % 2 == 0:\n"
+            "        s.move(did, 'screened' if pid % 2 else 'contacted', status='open', actor='p%d' % pid)\n"
+        )
+        procs = [subprocess.Popen([sys.executable, "-c", worker_code, str(ROOT), self.path, deal_id, str(p)],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for p in range(4)]
+        for p in procs:
+            out, err = p.communicate(timeout=30)
+            self.assertEqual(p.returncode, 0, err or out)
+
+        final = self.store.get(deal_id)
+        self.assertIsNotNone(final)
+        self.assertEqual(final["fields"].get("seed"), "ok")
+        for idx in range(6):
+            for step in range(8):
+                self.assertEqual(final["fields"].get("t%d_%d" % (idx, step)), "v%d" % step)
+        for pid in range(4):
+            for step in range(6):
+                self.assertEqual(final["fields"].get("p%d_%d" % (pid, step)), "ok")
+
+    def test_mid_operation_exception_rolls_back_atomically_on_disk(self):
+        base = self.store.add("Anchor Deal", "sourced", value=10000)
+        before_ledger = len(self.store.ledger(limit=200))
+
+        # Nested savepoint rollback caught inside an outer operation preserves outer work
+        with self.store.operation():
+            self.store.update(base["id"], next_step="Outer survives")
+            with self.assertRaises(RuntimeError):
+                with self.store.operation():
+                    self.store.update(base["id"], next_step="Inner rolled back")
+                    self.store.add("Inner Ghost", "sourced")
+                    raise RuntimeError("abort inner")
+        self.assertEqual(self.store.get(base["id"])["next_step"], "Outer survives")
+        self.assertIsNone(self.store.find("Inner Ghost"))
+
+        # Unhandled exception mid-operation rolls back every step atomically (deals, groups, contacts, ledger, activities)
+        mid_ledger = len(self.store.ledger(limit=200))
+        with self.assertRaises(RuntimeError):
+            with self.store.operation():
+                ghost = self.store.add("Ghost Deal", "sourced", grp="Ghost Group", value=25000)
+                self.store.update(base["id"], next_step="Should vanish", fields={"tmp": "1"})
+                self.store.move(base["id"], "contacted")
+                self.store.person_add(base["id"], "Ghost Person", email="ghost@example.com")
+                self.store.grp_put("Ghost Group", client="Ghost Corp", value=5000)
+                # Nested read inside operation sees uncommitted writes on the same connection without deadlocking
+                self.assertIsNotNone(self.store.get(ghost["id"]))
+                raise RuntimeError("boom mid-operation")
+
+        fresh = Store(self.path)
+        self.assertIsNone(fresh.find("Ghost Deal"))
+        self.assertEqual(fresh.get(base["id"])["next_step"], "Outer survives")
+        self.assertEqual(fresh.get(base["id"])["stage"], "sourced")
+        self.assertNotIn("tmp", fresh.get(base["id"])["fields"])
+        self.assertEqual(fresh.people(base["id"]), [])
+        self.assertIsNone(fresh.grp_get("Ghost Group"))
+        self.assertEqual(len(fresh.ledger(limit=200)), mid_ledger)
+        self.assertGreater(mid_ledger, before_ledger)
+
+    def test_concurrent_snapshot_race_and_failure_cleanup(self):
+        deal = self.store.add("Snapshot Deal", "sourced", value=42000)
+        folder = Path(self.tmp.name) / "backups"
+        barrier = threading.Barrier(6)
+        results, errors = [], []
+
+        def snap():
+            local = Store(self.path)
+            try:
+                barrier.wait(timeout=10)
+                results.append(local.snapshot(folder))
+            except BaseException as exc:
+                errors.append(exc)
+
+        def writer():
+            local = Store(self.path)
+            try:
+                barrier.wait(timeout=10)
+                for i in range(15):
+                    local.update(deal["id"], fields={"w%d" % i: str(i)})
+            except BaseException as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=snap) for _ in range(5)] + [threading.Thread(target=writer)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+            self.assertFalse(t.is_alive())
+        self.assertEqual(errors, [])
+        self.assertTrue(any(results))
+        self.assertEqual(list(folder.glob("*.part")), [])
+
+        target = folder / ("desk-%s.db" % st.today())
+        self.assertTrue(target.exists())
+        copy = sqlite3.connect(str(target))
+        try:
+            self.assertEqual([r[0] for r in copy.execute("PRAGMA quick_check").fetchall()], ["ok"])
+            self.assertEqual(copy.execute("SELECT count(*) FROM deals").fetchone()[0], 1)
+        finally:
+            copy.close()
+
+        # Failure during os.replace cleans up the unique .part file and leaves no target
+        fail_folder = Path(self.tmp.name) / "fail_backups"
+        with mock.patch("os.replace", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                self.store.snapshot(fail_folder)
+        self.assertEqual(list(fail_folder.glob("*.part")), [])
+        self.assertFalse((fail_folder / ("desk-%s.db" % st.today())).exists())
+
+    def test_undo_contact_email_collision_and_updated_at_and_delete_cleanup(self):
+        deal = self.store.add("Dana Whitfield", "sourced", value=30000)
+        alice = self.store.person_add(deal["id"], "Alice One", email="alice@example.com")
+        self.store.person_update(alice["id"], deal_id=deal["id"], email="alice2@example.com")
+        bob = self.store.person_add(deal["id"], "Bob Two", email="alice@example.com")
+
+        # Reverting Alice's email update back to alice@example.com must report a conflict, not raise IntegrityError
+        op = next(line["batch"] for line in self.store.ledger(deal["id"])
+                  if line["entity"] == "contact" and line["op"] == "update" and line["entity_id"] == str(alice["id"]))
+        res = self.store.undo(deal["id"], op=op)
+        self.assertIsNotNone(res)
+        self.assertTrue(any(c["field"] == "email" for c in res["conflicts"]))
+        self.assertEqual(self.store.person(alice["id"], deal["id"])["email"], "alice2@example.com")
+        self.assertEqual(self.store.person(bob["id"], deal["id"])["email"], "alice@example.com")
+
+        # When there is no collision, reverting a contact or invoice update bumps updated_at
+        self.store.person_update(bob["id"], deal_id=deal["id"], title="VP Sales")
+        with self.store._conn(write=True) as conn:
+            conn.execute("UPDATE contacts SET updated_at = '2020-01-01T00:00:00Z' WHERE id = ?", (bob["id"],))
+        undone_contact = self.store.undo(deal["id"])
+        self.assertEqual(undone_contact["conflicts"], [])
+        self.assertGreater(self.store.person(bob["id"], deal["id"])["updated_at"], "2020-01-01T00:00:00Z")
+
+        inv = self.store.invoice_add(deal["id"], 5000, number="INV-1")
+        self.store.invoice_update(inv["id"], note="revised")
+        with self.store._conn(write=True) as conn:
+            conn.execute("UPDATE invoices SET updated_at = '2020-01-01T00:00:00Z' WHERE id = ?", (inv["id"],))
+        undone_inv = self.store.undo(deal["id"])
+        self.assertEqual(undone_inv["conflicts"], [])
+        self.assertGreater(self.store.invoice(inv["id"])["updated_at"], "2020-01-01T00:00:00Z")
+
+        # delete() clears dangling targets.deal_id and notes_seen.deal_id
+        with self.store._conn(write=True) as conn:
+            conn.execute("INSERT INTO targets (id, market_id, company, status, deal_id, created_at, updated_at) "
+                         "VALUES ('t-del', 'm1', 'Acme', 'tracked', ?, ?, ?)", (deal["id"], st.now(), st.now()))
+        self.store.mark_note("note-del-1", deal["id"])
+        self.assertTrue(self.store.delete(deal["id"]))
+        with self.store._conn() as conn:
+            self.assertEqual(conn.execute("SELECT deal_id FROM targets WHERE id = 't-del'").fetchone()[0], "")
+            self.assertEqual(conn.execute("SELECT deal_id FROM notes_seen WHERE id = 'note-del-1'").fetchone()[0], "")
+
+    def test_user_version_indexes_and_own_desks_lock(self):
+        with self.store._conn() as conn:
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], st.SCHEMA_VERSION)
+            indexes = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'").fetchall()}
+        self.assertTrue({"deals_active", "deals_archived", "intakes_status", "targets_deal"} <= indexes)
+
+        # Verify _own_desks initialization is serialized under a lock
+        try:
+            import fastapi  # noqa: F401
+        except ImportError:
+            return
+        spec = importlib.util.spec_from_file_location("stoa_dash_api_lock", ROOT / "dashboard" / "plugin_api.py")
+        api = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(api)
+        self.assertIsInstance(api._own_desks_lock, type(threading.Lock()))
+        calls = []
+        fake_pkg = types.SimpleNamespace(_home=lambda: Path(self.tmp.name),
+                                         build_desk=lambda *a: (time.sleep(0.05), calls.append(1), types.SimpleNamespace(can_configure=True))[2])
+        api._package = lambda: fake_pkg
+        api._own_desks.clear()
+        barrier = threading.Barrier(4)
+        got = []
+
+        def grab():
+            barrier.wait(timeout=5)
+            got.append(api._profile_desk())
+
+        threads = [threading.Thread(target=grab) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len({id(d) for d in got}), 1)
+        self.assertFalse(got[0].can_configure)
+
+
 if __name__ == "__main__":
     unittest.main()
