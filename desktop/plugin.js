@@ -2802,7 +2802,7 @@ function lateWords() {
     const typed = event.key.length === 1 || event.key === 'Backspace' || event.keyCode === 229
     const paste = event.code === 'KeyV' || event.key.toLowerCase() === 'v'          // whatever the case or the layout
     if (event.key === ' ' && !idle() && document.activeElement.matches('button, a')) return         // Space presses that
-    if (free() && (event.metaKey || event.ctrlKey ? paste : typed)) back()
+    if (event.metaKey || event.ctrlKey ? paste : typed) back()          // typing anywhere ends the wait; back() moves no caret unless free()
   }
   const away = el => {
     clearTimeout(watch.timer)
@@ -2834,11 +2834,12 @@ function lateWords() {
       away(el)
       return true
     },
-    /** Put the caret in a box, unless it is being kept out for a moment: then it follows. */
-    focus: el => {
+    /** Put the caret in a box, unless it is being kept out for a moment: then it follows. `unlessBusy`: nor when the
+        person has moved on to something else (words given back must not take their next Return). */
+    focus: (el, unlessBusy) => {
       if (!el) return
       if (Date.now() < watch.until) watch.box = el
-      else el.focus()
+      else if (!unlessBusy || idle()) el.focus()
     }
   }
 }
@@ -2861,7 +2862,7 @@ function Dock({ state }) {
     setText(draft)
     $draft.set('')
     const el = area.current
-    if (el) { late.focus(el); setTimeout(() => el.setSelectionRange(draft.length, draft.length), 0) }
+    if (el) { late.focus(el, true); setTimeout(() => el.setSelectionRange(draft.length, draft.length), 0) }
   }, [draft])
   useEffect(() => {
     const el = area.current
