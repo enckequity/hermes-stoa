@@ -2778,12 +2778,12 @@ function ModelPickPlain({ lane = 'desk' }) {
 function lateWords() {
   // One for the window, and the same one for Stoa's other box: a box can be gone by the time its last words arrive.
   const watch = globalThis.__stoaLateWords || (globalThis.__stoaLateWords = { until: 0, box: null, timer: 0 })
-  let composing = false, at = 0, keyed = false          // keyed: composed with keys (an input method), so not dictation
+  let composing = false, at = 0, keyed = false, pressed = 0          // keyed: composed with keys (an input method), so not dictation
   const idle = () => !document.activeElement || document.activeElement === document.body
-  // The caret may come back unless the person is in another field, a dialog or a menu. (A chat's row keeps the focus of
-  // the click that opened it: that is not another place to type.)
-  const free = () => idle() || (!document.querySelector('[aria-modal="true"]') &&
-    !document.activeElement.matches('input, textarea, select, [contenteditable]') && !document.activeElement.closest('[role="dialog"], [role="menu"], [role="listbox"]'))
+  // The caret comes back only where nothing has been focused since it left: to nothing, or to the row whose click left
+  // the box. Anything focused since (a button, a field, a frame) is where the person is, and its keys are its own.
+  const free = () => idle() || (document.activeElement === watch.from && !document.querySelector('[aria-modal="true"]') &&
+    !document.activeElement.matches('input, textarea, select, [contenteditable], iframe, webview') && !document.activeElement.closest('[role="dialog"], [role="menu"], [role="listbox"]'))
   const unwatch = () => {
     if (watch.key) document.removeEventListener('keydown', watch.key, true)          // whichever box put it there
     watch.key = null
@@ -2802,7 +2802,7 @@ function lateWords() {
     const typed = event.key.length === 1 || event.key === 'Backspace' || event.keyCode === 229
     const paste = event.code === 'KeyV' || event.key.toLowerCase() === 'v'          // whatever the case or the layout
     if (event.key === ' ' && !idle() && document.activeElement.matches('button, a')) return         // Space presses that
-    if (event.metaKey || event.ctrlKey ? paste : typed) back()
+    if (free() && (event.metaKey || event.ctrlKey ? paste : typed)) back()
   }
   const away = el => {
     clearTimeout(watch.timer)
@@ -2810,13 +2810,14 @@ function lateWords() {
     watch.until = Date.now() + 2500
     watch.box = el || null
     if (el) el.blur()
+    watch.from = document.activeElement
     document.addEventListener('keydown', watch.key = key, true)
     watch.timer = setTimeout(back, 2500)
   }
   return {
     marks: {
-      onCompositionStart: () => { composing = true; keyed = false },
-      onKeyDownCapture: event => { if (event.keyCode === 229) keyed = true },
+      onCompositionStart: () => { composing = true; keyed = Date.now() - pressed < 100 },       // Chromium: the key comes first
+      onKeyDownCapture: event => { if (event.keyCode === 229) { keyed = true; pressed = Date.now() } },
       onCompositionUpdate: () => { composing = true },
       onCompositionEnd: () => { composing = false; at = Date.now() }
     },

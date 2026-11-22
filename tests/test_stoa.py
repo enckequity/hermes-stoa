@@ -4556,6 +4556,7 @@ globalThis.document = { body: {}, get activeElement() { return on }, addEventLis
 on = document.body
 document.querySelector = () => null
 const box = { isConnected: true, matches: () => true, closest: () => null, focus() { on = box }, blur() { on = document.body } }
+globalThis.setTimeout = () => 0
 const out = []
 let g = lateWords()
 box.focus(); g.sending(box); out.push(on === box)                                                   // typed: the caret stays
@@ -4568,12 +4569,18 @@ g.marks.onCompositionStart(); g.marks.onCompositionEnd(); out.push(g.leaving(box
 key({ key: 'a' })
 g.marks.onCompositionStart(); g.marks.onKeyDownCapture({ keyCode: 229 }); g.sending(box)
 out.push(on === box)                                                                                // composed with keys (an input method): stays
+g.marks.onKeyDownCapture({ keyCode: 229 }); g.marks.onCompositionStart(); g.sending(box)
+out.push(on === box)                                                                                // the key first, as Chromium has it: stays
+const other = { matches: () => false, closest: () => null }
+let h = lateWords()
+box.focus(); h.marks.onCompositionUpdate(); h.sending(box); on = other; key({ key: 'x' })
+out.push(on === other)                                                                              // a button focused since keeps its keys
 const enter = (isComposing, keyCode) => g.sends({ key: 'Enter', keyCode, nativeEvent: { isComposing } })
 out.push(enter(false, 13), enter(true, 13), enter(false, 229), enter(true, 229))
 console.log(JSON.stringify(out))"""
         done = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=60)
         self.assertEqual((done.returncode, json.loads(done.stdout or "[]")),
-                         (0, [True, True, False, False, False, True, True, False, True, True, True, False, False]), done.stderr[:400])
+                         (0, [True, True, False, False, False, True, True, False, True, True, True, True, True, False, False]), done.stderr[:400])
 
     def test_a_command_that_went_is_not_put_back_when_its_box_goes(self):
         """A command opens the chat in the same tick, so the talk box can be gone before it is drawn empty: what it
