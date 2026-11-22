@@ -1382,7 +1382,7 @@ class RecruitingBillingTests(unittest.TestCase):
         self.desk.store.invoice_remove(number, actor="tester")                            # entered by mistake, and taken off again
         reopen(unbilled)
         self.assertEqual(place(unbilled)["value"], 0)                                     # nothing billed stands on it: placed now
-        # Cleared in so many words: what is unseen goes for good, the placements with their fees stay as they are.
+        # Cleared in so many words: what is unseen is set to zero, the placements with their fees stay as they are.
         self.desk.set_billing({"type": "contract", "client": "Halden Group", "rate": 85, "hours_week": 20, "clear_fees": True})
         self.assertEqual((self.desk.billing()["fees_kept"], value(invoiced), value(not_yet)), (0, 30000, 25000))
         # A list of past placements brought onto contract work: each keeps the fee it earned; an open row gets none.
@@ -4554,7 +4554,8 @@ class DashboardApiTests(unittest.TestCase):
 let on, key
 globalThis.document = { body: {}, get activeElement() { return on }, addEventListener: (_n, f) => { key = f }, removeEventListener: () => { key = null } }
 on = document.body
-const box = { isConnected: true, focus() { on = box }, blur() { on = document.body } }
+document.querySelector = () => null
+const box = { isConnected: true, matches: () => true, closest: () => null, focus() { on = box }, blur() { on = document.body } }
 const out = []
 let g = lateWords()
 box.focus(); g.sending(box); out.push(on === box)                                                   // typed: the caret stays
@@ -4565,12 +4566,22 @@ key({ key: 'F5' }); out.push(on === box)
 key({ key: 'a' }); out.push(on === box)                                                             // typing puts it back
 g.marks.onCompositionStart(); g.marks.onCompositionEnd(); out.push(g.leaving(box), on === box)      // left just as it was committed: out
 key({ key: 'a' })
+g.marks.onCompositionStart(); g.marks.onKeyDownCapture({ keyCode: 229 }); g.sending(box)
+out.push(on === box)                                                                                // composed with keys (an input method): stays
 const enter = (isComposing, keyCode) => g.sends({ key: 'Enter', keyCode, nativeEvent: { isComposing } })
 out.push(enter(false, 13), enter(true, 13), enter(false, 229), enter(true, 229))
 console.log(JSON.stringify(out))"""
         done = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=60)
         self.assertEqual((done.returncode, json.loads(done.stdout or "[]")),
-                         (0, [True, True, False, False, False, True, True, False, True, True, False, False]), done.stderr[:400])
+                         (0, [True, True, False, False, False, True, True, False, True, True, True, False, False]), done.stderr[:400])
+
+    def test_a_command_that_went_is_not_put_back_when_its_box_goes(self):
+        """A command opens the chat in the same tick, so the talk box can be gone before it is drawn empty: what it
+        puts back for later must already be empty."""
+        page = (ROOT / "desktop" / "plugin.js").read_text(encoding="utf-8")
+        send = page[page.index("  const send = line => {", page.index("function Dock({ state })")):]
+        self.assertLess(send.index("held.current = ''"), send.index("typeInChat("))
+        self.assertLess(send.index("held.current = ''", send.index("typeInChat(")), send.index("say(words, files, 'desk'"))
 
     def test_a_card_names_the_first_person_on_its_record(self):
         ingrid = self.desk.store.find("Ingrid Solberg")["id"]

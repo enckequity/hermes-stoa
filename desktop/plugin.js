@@ -2778,44 +2778,56 @@ function ModelPickPlain({ lane = 'desk' }) {
 function lateWords() {
   // One for the window, and the same one for Stoa's other box: a box can be gone by the time its last words arrive.
   const watch = globalThis.__stoaLateWords || (globalThis.__stoaLateWords = { until: 0, box: null, timer: 0 })
-  let composing = false, at = 0
-  const free = () => !document.activeElement || document.activeElement === document.body
+  let composing = false, at = 0, keyed = false          // keyed: composed with keys (an input method), so not dictation
+  const idle = () => !document.activeElement || document.activeElement === document.body
+  // The caret may come back unless the person is in another field, a dialog or a menu. (A chat's row keeps the focus of
+  // the click that opened it: that is not another place to type.)
+  const free = () => idle() || (!document.querySelector('[aria-modal="true"]') &&
+    !document.activeElement.matches('input, textarea, select, [contenteditable]') && !document.activeElement.closest('[role="dialog"], [role="menu"], [role="listbox"]'))
+  const unwatch = () => {
+    if (watch.key) document.removeEventListener('keydown', watch.key, true)          // whichever box put it there
+    watch.key = null
+  }
   const back = () => {
     clearTimeout(watch.timer)
-    document.removeEventListener('keydown', key, true)
+    unwatch()
     const el = watch.box
     watch.until = 0
     watch.box = null
-    if (el && el.isConnected && !el.disabled && free()) el.focus()
+    if (el && el.isConnected && !el.disabled && !document.querySelector('[aria-modal="true"]') && free()) el.focus()
   }
-  // Typing puts the caret back at once, and the key lands in the box.
+  // Typing puts the caret back at once, and the key lands in the box. (An input method is not engaged until the caret
+  // is back: the first key typed through one inside that moment lands as the plain letter.)
   function key(event) {
     const typed = event.key.length === 1 || event.key === 'Backspace' || event.keyCode === 229
-    if (event.metaKey || event.ctrlKey ? event.key === 'v' : typed) back()          // typing, or a paste
+    const paste = event.code === 'KeyV' || event.key.toLowerCase() === 'v'          // whatever the case or the layout
+    if (event.key === ' ' && !idle() && document.activeElement.matches('button, a')) return         // Space presses that
+    if (event.metaKey || event.ctrlKey ? paste : typed) back()
   }
   const away = el => {
     clearTimeout(watch.timer)
-    document.removeEventListener('keydown', key, true)
+    unwatch()
     watch.until = Date.now() + 2500
     watch.box = el || null
     if (el) el.blur()
-    document.addEventListener('keydown', key, true)
+    document.addEventListener('keydown', watch.key = key, true)
     watch.timer = setTimeout(back, 2500)
   }
   return {
     marks: {
-      onCompositionStart: () => { composing = true },
+      onCompositionStart: () => { composing = true; keyed = false },
+      onKeyDownCapture: event => { if (event.keyCode === 229) keyed = true },
       onCompositionUpdate: () => { composing = true },
       onCompositionEnd: () => { composing = false; at = Date.now() }
     },
     /** Return sends, also while dictated words are still marked, but not a Return an input method took for itself (229). */
     sends: event => event.key === 'Enter' && !event.shiftKey && event.keyCode !== 229 && (!event.nativeEvent.isComposing || event.keyCode === 13),
     /** The box's words are being sent. Call it before the box is emptied. */
-    sending: el => { if (composing) { composing = false; away(el) } },
+    sending: el => { if (composing && !keyed) { composing = false; away(el) } },
     /** The box is being left for another conversation or screen. True if words were still marked in it (the click that
         left it ends the marking a moment before). */
     leaving: el => {
-      if (!(composing || Date.now() - at < 1000)) return false
+      if (keyed || !(composing || Date.now() - at < 1000)) return false
       composing = false
       at = 0
       away(el)
@@ -2876,6 +2888,7 @@ function Dock({ state }) {
     if (isCommand(words) && !files.length) {          // a command is for a chat, not for the agent (see typeInChat)
       unhear()
       late.sending(area.current)
+      held.current = ''           // it went: this box can be gone before it is next drawn empty
       setText('')
       typeInChat(words.trim())
       return
@@ -2883,6 +2896,7 @@ function Dock({ state }) {
     if ((!words.trim() && !files.length) || talk.busy) return
     unhear()
     late.sending(area.current)
+    held.current = ''
     say(words, files, 'desk', typeof line !== 'string')
     setText('')
     $attached.set([])
