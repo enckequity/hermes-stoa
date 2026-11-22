@@ -2838,8 +2838,10 @@ function lateWords() {
         person has moved on to something else (words given back must not take their next Return). */
     focus: (el, unlessBusy) => {
       if (!el) return
-      if (Date.now() < watch.until) watch.box = el
-      else if (!unlessBusy || idle()) el.focus()
+      if (Date.now() < watch.until) {
+        watch.box = el
+        if (!unlessBusy) watch.from = document.activeElement          // the click that chose this box
+      } else if (!unlessBusy || idle()) el.focus()
     }
   }
 }
