@@ -158,7 +158,8 @@ counts as reached, and a meeting as a meeting, without anyone saying so.
 Stoa credits a motion by itself, across every pipeline, and gives the reason each time: one the
 list brought into the pipeline (from the map, or as a new lead) was sourced by it, and one that
 was already in a pipeline was influenced; a record off the list whose Source or notes mention the
-motion counts too. Being at a company on the map is not enough. A deal handed over from a
+motion counts too. What it won counts everyone on its list, new or not. Being at a company on
+the map is not enough. A deal handed over from a
 credited lead is credited too, and the two count once. Open a motion to confirm a record, set one
 aside, and log what it spent, reached, and the responses and meetings it got.
 

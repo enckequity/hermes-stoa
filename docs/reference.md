@@ -205,7 +205,10 @@ Stoa works out what each motion is owed, across every pipeline, and gives the re
    motion ran (from its start to thirty days past its end); one already in a pipeline is influenced.
 4. A deal handed over from a credited lead is credited the same way, and the two count once.
 
-Being at a company on the motion's map is not enough by itself. Where two motions would both be
+Its pipeline, won and return figures count everyone on its list, those who were in a pipeline
+already too (an email offer to leads you have is judged by what they do), with what it sourced;
+the totals across motions count a record on two lists once. Being at a company on the motion's
+map is not enough by itself. Where two motions would both be
 credited with bringing a record in, the list wins over a mention, and between two mentions the
 motion that started last before the record came in.
 

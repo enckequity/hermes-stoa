@@ -5828,6 +5828,15 @@ class GtmTabTests(unittest.TestCase):
         self.call("gtm_deal", action="log", deal=before, kind="email", text="Sent the offer.", pipeline="Client lead desk")
         listed = {row["name"]: row["status"] for row in self.call("gtm_motion", action="get", motion="Email offer")["motion"]["impact"]["members"]}
         self.assertEqual(listed, {"Priya Raman": "replied", "Ola Brandt": "reached", "Lena Ortiz": "added", "Corvid Health": "added"})
+        # Everyone on the list counts toward what it won, those already in a pipeline too: a motion run on people you have.
+        with self.desk.on(self.deals):
+            existing = self.desk.deal({"action": "add", "name": "Halden renewal", "company": "Halden Group", "value": 12000}, actor="Test")["deal"]["id"]
+        self.assertTrue(self.call("gtm_motion", action="enroll", motion="Email offer", deals=["Halden renewal"])["ok"])
+        self.call("gtm_deal", action="close", deal=existing, outcome="won", pipeline="Deals")
+        got_won = self.call("gtm_motion", action="get", motion="Email offer")["motion"]["impact"]
+        self.assertEqual((got_won["influenced"], got_won["from_list"], got_won["won"], got_won["won_value"]), (2, 2, 1, 12000.0))
+        self.assertEqual(self.call("gtm_motion", action="list")["totals"]["won_value"], 12000.0)
+        self.assertTrue(self.call("gtm_motion", action="drop", motion="Email offer", deal="Halden renewal")["ok"])
         tally = self.call("gtm_motion", action="get", motion="Email offer")["motion"]["impact"]["list"]
         self.assertEqual((tally["total"], tally["reached"], tally["replied"], tally["meeting"]), (4, 2, 1, 0))
         self.assertFalse(self.call("gtm_motion", action="mark", motion="Email offer", deal="Priya Raman", status="wonderful")["ok"])

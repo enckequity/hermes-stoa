@@ -1597,7 +1597,8 @@ function MotionPage({ id, data, state, path, back, open, toMap }) {
       h('div', { className: 'sd-m-figs' },
         h(Figure, { label: 'Sourced', value: count(impact.sourced), sub: [impact.leads ? impact.leads + ' still leads' : '', impact.handed_over ? impact.handed_over + ' handed over' : '',
           impact.influenced ? impact.influenced + ' more influenced' : '', impact.found ? impact.found + ' found by Stoa' : ''].filter(Boolean).join(' · ') || 'brought into the pipeline' }),
-        h(Figure, { label: 'In the pipeline', value: gtmMoney(impact.pipeline_value, cur), sub: impact.open + ' open ' + (impact.open === 1 ? 'deal' : 'deals') }),
+        h(Figure, { label: 'In the pipeline', value: gtmMoney(impact.pipeline_value, cur), sub: impact.open + ' open ' + (impact.open === 1 ? 'deal' : 'deals')
+          + (impact.from_list ? ' · counting ' + impact.from_list + ' from its list that were already in a pipeline' : '') }),
         h(Figure, { label: 'Won', value: gtmMoney(impact.won_value, cur), sub: impact.won + ' won' + (impact.win_rate !== null ? ' · ' + Math.round(impact.win_rate * 100) + '% win rate' : ''), tone: impact.won ? 'good' : '' }),
         h(Figure, { label: 'Spent', value: gtmMoney(impact.spend, cur), sub: impact.budget ? 'of ' + gtmMoney(impact.budget, cur) + ' budget' : 'no budget set', tone: impact.budget && impact.spend > impact.budget ? 'bad' : '' }),
         h(Figure, { label: 'Cost for each', value: gtmMoney(impact.cost_per_record, cur), sub: impact.cost_per_win ? gtmMoney(impact.cost_per_win, cur) + ' for each win' : 'record sourced' }),

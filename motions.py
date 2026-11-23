@@ -757,7 +757,11 @@ class Motions:
         def money(rows: list) -> float:
             return sum(int(row["value_cents"] or 0) for row in rows) / 100.0
 
-        deals = [deal for deal in sourced if kind(deal) == "deal"]
+        # What it is worked for: what it sourced, and everyone on its list, though some were in a pipeline already (a
+        # motion run on people you have, an email offer to leads, is judged by what they do). A mention alone is not.
+        on_it = {key for key in counted_keys if claims[key]["how"] == "influenced" and key in reading["members"].get(motion["id"], {})}
+        worked = sourced + [by_key[key] for key in counted_keys if key in on_it]
+        deals = [deal for deal in worked if kind(deal) == "deal"]
         leads = [deal for deal in sourced if kind(deal) == "lead"]
         open_, won, lost = ([deal for deal in deals if deal["status"] == status] for status in ("open", "won", "lost"))
         totals: dict = {}
@@ -766,6 +770,9 @@ class Motions:
             totals[row["metric"]] = totals.get(row["metric"], 0.0) + float(row["value"])
         spend = totals.get("spend", 0.0)
         pipeline_value, won_value = money(open_), money(won)
+        # Kept for the totals across motions, which count a record on two motions' lists once.
+        reading.setdefault("worked", {})[motion["id"]] = {"open": {deal["_key"]: int(deal["value_cents"] or 0) for deal in open_},
+                                                           "won": {deal["_key"]: int(deal["value_cents"] or 0) for deal in won}}
 
         # What the desk itself shows was done while the motion ran: nobody has to log these.
         start, end = self.window(motion)
@@ -798,6 +805,7 @@ class Motions:
             "found": sum(1 for key in counted_keys if claims[key]["auto"]), "confirmed": sum(1 for key in counted_keys if not claims[key]["auto"]),
             "set_aside": sum(1 for how in reading["said"].get(motion["id"], {}).values() if how == "none"),
             "pipeline_value": pipeline_value, "won_value": won_value, "influenced_value": money([deal for deal in influenced if kind(deal) == "deal"]),
+            "from_list": len(on_it),            # influenced, on its list, and counted in what it won
             "win_rate": round(len(won) / (len(won) + len(lost)), 3) if won or lost else None,
             "spend": spend, "budget": float(motion["budget"] or 0), "totals": totals, "counted": counted,
             "response_rate": round(totals["responses"] / totals["reach"], 4) if totals.get("reach") and "responses" in totals else None,
@@ -886,8 +894,9 @@ class Motions:
                            "sourced": sum(motion["impact"]["sourced"] for motion in motions),
                            "leads": sum(motion["impact"]["leads"] for motion in motions),
                            "influenced": sum(motion["impact"]["influenced"] for motion in motions),
-                           "pipeline_value": sum(motion["impact"]["pipeline_value"] for motion in live),
-                           "won_value": sum(motion["impact"]["won_value"] for motion in motions)}}
+                           # each record once, though it is on the lists of two motions
+                           "pipeline_value": sum({key: cents for motion in live for key, cents in reading["worked"][motion["id"]]["open"].items()}.values()) / 100.0,
+                           "won_value": sum({key: cents for motion in motions for key, cents in reading["worked"][motion["id"]]["won"].items()}.values()) / 100.0}}
 
     # -- the tool an agent uses -------------------------------------------------------------------------------
     def tool(self, args: dict, session: Optional[dict] = None) -> dict:
