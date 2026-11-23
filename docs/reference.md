@@ -166,15 +166,17 @@ long. **Draft outreach** is writing, not research, and goes to the talk box's co
 ![Map facts: what is on the map, where it came from, what it has cost, and its limits](map-facts.jpg)
 
 **A page to send.** **Download page** on the GTM tab saves the whole map as one
-self-contained web page, with a working map at its head: its views, a company opened by
-a click, and the requirements weighed on the spot. It makes no outside requests and depends on
-nothing; the one script in it is the map's own, written into the file with the companies beside it.
-A browser that runs no scripts shows a still picture instead. **Download a copy
+self-contained web page, laid out as a short report: what the map says (where we play, how we
+win, what has to be true), the dial itself, working, with a company opened by a click and the
+requirements weighed on the spot, who to call first, the segments, and every company with its
+evidence. It follows the reader's light or dark setting. It makes no outside requests and depends
+on nothing: its scripts are the dial's own, written into the file with the companies beside it.
+A browser that runs no scripts still shows everything but the dial, in words. **Download a copy
 to share** saves the same page without buyers' names or what is in your pipeline, for hosting or
 sending to a client. Asking Hermes does the same (`gtm_market(action="export")`), and writes the
 file to the plugin's `exports/` folder instead of your browser's downloads.
 
-![The copy to share, as a client sees it: the working map, with no buyers' names and nothing about your pipeline](page-market.png)
+![The copy to share, as a client sees it: what the map says, then the working dial, with no buyers' names and nothing about your pipeline](page-market.jpg)
 
 ### Motions and assets
 

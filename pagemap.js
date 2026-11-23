@@ -1,32 +1,34 @@
-// The map inside a downloaded page. One self-contained script: it reads the companies from the page itself, asks
-// nothing of any server, and draws the same picture the Stoa page does (three views, pick to open, weights, size).
-// Kept in step by hand with mapCompanies and mapLayout in desktop/plugin.js.
+// The dial inside a downloaded market map. One self-contained script: it reads the companies from the page itself,
+// asks nothing of any server, and draws the map the way the GTM tab draws it: one round face, a slice for
+// each segment, and who to call first nearest the centre.
+//
+// Where the marks sit is the GTM tab's own code: page.py writes `dialLayout` from desktop/plugin.js in where the line
+// below says so, so the page and the tab cannot drift apart. How a company is scored and ranked follows
+// mapCompanies in the plugin's page (a test holds the two together).
 (() => {
 'use strict';
 const D = JSON.parse(document.getElementById('sm-data').textContent);
 const $ = id => document.getElementById(id);
-const NS = 'http://www.w3.org/2000/svg';
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 const hashOf = text => { let n = 2166136261; for (let i = 0; i < text.length; i++) { n ^= text.charCodeAt(i); n = Math.imul(n, 16777619); } return n >>> 0; };
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const heatOf = score => 1 + Math.min(6, Math.floor(score / 100 * 7));
-const squares = score => { const n = Math.max(1, Math.ceil(score / 20)); return '<span class="fit f' + n + '">' + '■'.repeat(n) + '<s>' + '■'.repeat(5 - n) + '</s></span>'; };
-const ago = days => (days === null ? '' : days === 0 ? 'today' : days === 1 ? 'yesterday' : days < 60 ? days + ' days ago' : Math.round(days / 30) + ' months ago');
-// A candidate map (the page says so: rows "people") holds one person a row: `company` is their name, `size` their
-// title and `uses` where they work now. The words follow; nothing else about the map changes.
-const P = D.rows === 'people';
-const W = P ? { thing: 'candidate', things: 'candidates', reason: 'a reason to move', first: 'Who to approach first' }
-  : { thing: 'company', things: 'companies', reason: 'a reason to call', first: 'Who to call first' };
-const LENSES = P ? { seg: 'Each dot is a candidate, and each ring a pool that would get a different pitch. The best fit sits in the middle.',
-  pri: 'Each dot is a candidate. Further right is a better fit; higher up is a fresher reason to move. The top right is who to approach first.',
-  held: 'Each dot is a candidate, grouped by where they work now.' }
-  : { seg: 'Each ring is a segment that would get a different pitch. The best fit sits in the middle.',
-  pri: 'Further right is a better fit; higher up is a fresher reason to call. The top right is who to call first.',
-  held: 'Grouped by what each company uses today.' };
-const S = { lens: 'seg', size: D.size || 'people', sel: [], quick: 'all', find: '', weights: {} };
-let LIST = [], LAY = null;
-const els = new Map(), lbls = new Map();
-const map = $('sm-map'), svg = $('sm-svg'), gR = $('sm-rings'), gL = $('sm-links'), gN = $('sm-nodes'), gT = $('sm-labels'), over = $('sm-over'), tip = $('sm-tip'), lasso = $('sm-lasso'), side = $('sm-side');
+/*DIAL-LAYOUT*/
+// The words come with the companies: a map kept with a recruiting pipeline is a talent map, and says so (page.py, SAY).
+const SAY = D.say;
+const BANDS = SAY.bands;
+// A number set in dots, five across and seven down, the way the desk sets the figure at its head.
+const DOTS = { 0: [14, 17, 19, 21, 25, 17, 14], 1: [4, 12, 4, 4, 4, 4, 14], 2: [14, 17, 1, 2, 4, 8, 31], 3: [31, 2, 4, 2, 1, 17, 14], 4: [2, 6, 10, 18, 31, 2, 2],
+  5: [31, 16, 30, 1, 1, 17, 14], 6: [6, 8, 16, 30, 17, 17, 14], 7: [31, 1, 2, 4, 8, 8, 8], 8: [14, 17, 17, 14, 17, 17, 14], 9: [14, 17, 17, 15, 1, 2, 12] };
+function dotfig(text) {
+  let x = 0, marks = '';
+  [...String(text)].forEach(ch => { (DOTS[ch] || []).forEach((row, y) => { for (let col = 0; col < 5; col++) if ((row >> (4 - col)) & 1) marks += '<rect x="' + (x + col + 0.1) + '" y="' + (y + 0.1) + '" width=".8" height=".8"/>'; }); x += 6; });
+  return '<svg class="stoa-dotfig" viewBox="0 0 ' + (x - 1) + ' 7" style="aspect-ratio:' + (x - 1) + ' / 7" role="img" aria-label="' + esc(text) + '">' + marks + '</svg>';
+}
+const HOW = { seg: SAY.how_seg, held: SAY.how_held };
+const S = { lens: 'seg', sel: '', quick: 'all', find: '', facet: null, weights: {} };
+let LIST = [], L = null, hover = '', drawn = false;
+const box = $('sm-map'), svg = $('sm-svg'), over = $('sm-over'), tip = $('sm-tip'), side = $('sm-side');
+const f = v => Number(v.toFixed(1));
+const squares = score => { const n = Math.max(1, Math.ceil(score / 20)); return '<span class="stoa-fit" data-fit="' + n + '" title="Fit ' + n + ' of 5">' + '■'.repeat(n) + '<s>' + '■'.repeat(5 - n) + '</s></span>'; };
 
 function companies() {
   const own = Object.values(S.weights).some(w => w !== 2), now = new Date(D.today + 'T12:00:00').getTime(), out = [];
@@ -38,10 +40,11 @@ function companies() {
       reqs.forEach(req => { const w = S.weights[req.label] === undefined ? 2 : S.weights[req.label]; if (!w) return; total += w; if (req.shown) got += w; else if (w === 3) missed = true; });
       if (total) { score = Math.round(100 * got / total); if (missed) score = Math.min(score, 35); weighed = true; }
     }
-    const buyer = (c.people || [])[0] || null;
+    const buyer = (c.people || [])[0] || null;                 // what the rank counts, as the Stoa page does
+    const lead = (c.people || []).find(p => !p.gone) || null;      // who to ask for: someone still there
     const days = c.signal && c.signal_date ? Math.max(0, Math.round((now - new Date(c.signal_date + 'T12:00:00').getTime()) / 86400000)) : null;
     const timing = !c.signal ? 6 + hashOf(c.id) % 14 : days === null || isNaN(days) ? 58 : clamp(Math.round(100 - days * 0.9), 30, 100);
-    out.push(Object.assign({}, c, { segment: c.segment || segment.name, score, weighed, buyer, days: isNaN(days) ? null : days, timing, uses: c.uses || '',
+    out.push(Object.assign({}, c, { segment: c.segment || segment.name, score, weighed, buyer, lead, reason: Boolean(c.signal), days: isNaN(days) ? null : days, timing, uses: c.uses || '',
       rank: Math.round(score * 0.65 + timing * 0.35) + (buyer ? 2 : 0) }));
   }));
   return out;
@@ -51,208 +54,176 @@ function shown(c) {
   if (S.quick === 'reason' && !c.signal) return false;
   if (S.quick === 'open' && c.status === 'tracked') return false;
   if (S.quick === 'best' && c.score < 80) return false;
+  if (S.facet && S.facet.kind === 'uses' && c.uses !== S.facet.value) return false;
+  if (S.facet && S.facet.kind === 'req' && !(c.requirements || []).some(r => r.label === S.facet.value && r.shown)) return false;
   return true;
 }
-function layout() {
-  const W = map.clientWidth, narrow = W < 620, cols = narrow ? 2 : 3, sc = narrow ? 0.74 : 1;
-  const radius = c => (S.size === 'same' ? 12 : S.size === 'named' ? Math.min(26, 9 + (c.people || []).length * 3.4) : c.headcount ? clamp(6.5 + Math.sqrt(c.headcount) * 0.62, 8.5, 27) : 11);
-  const ns = LIST.map(c => ({ c, id: c.id, r: sc * radius(c), show: false, bridge: null }));
-  const out = { W, H: 0, narrow, groups: [], links: [], pri: null, ns };
-  const relax = hold => {
-    ns.forEach((n, i) => { n.x = n.ax + ((i * 37) % 7 - 3) * 0.4; n.y = n.ay + ((i * 53) % 7 - 3) * 0.4; });
-    for (let k = 0; k < 240; k++) {
-      const pull = k < 170 ? 0.07 : 0.02;
-      ns.forEach(n => { n.x += (n.ax - n.x) * pull; n.y += (n.ay - n.y) * pull; });
-      for (let i = 0; i < ns.length; i++) for (let j = i + 1; j < ns.length; j++) {
-        const p = ns[i], q = ns[j]; let dx = q.x - p.x, dy = q.y - p.y; const d = Math.hypot(dx, dy) || 0.01, min = p.cr + q.cr;
-        if (d < min) { const o = (min - d) / 2; dx /= d; dy /= d; p.x -= dx * o; p.y -= dy * o; q.x += dx * o; q.y += dy * o; }
-      }
-      ns.forEach(hold);
-    }
-  };
-  if (S.lens === 'pri') {
-    const m = { l: narrow ? 30 : 46, r: 16, t: 26, b: 40 }, H = narrow ? 500 : 560;
-    const x0 = m.l + 40, xw = W - m.l - m.r - 112, y0 = H - m.b - 24, yh = H - m.t - m.b - 48;      // a margin inside the axes keeps the ends of each scale in the picture
-    out.H = H; out.pri = Object.assign({ mid: y0 - yh * 0.5, fx: x0 + xw * 0.6 }, m);
-    ns.forEach(n => {
-      n.ax = x0 + xw * n.c.score / 100 + ((hashOf(n.id + 'x') % 100) / 100 - 0.5) * W * 0.05;
-      n.ay = y0 - yh * n.c.timing / 100 + (n.c.days === null ? ((hashOf(n.id) % 100) / 100 - 0.5) * yh * 0.08 : 0);
-    });
-    ns.slice().sort((a, b) => b.c.rank - a.c.rank).slice(0, narrow ? 5 : 9).forEach(n => { n.show = true; });
-    ns.forEach(n => { n.cr = n.r + (n.show ? 11 : 3.5); });
-    relax(n => { n.x = clamp(n.x, m.l + n.r + 2, W - m.r - n.r - 2); n.y = clamp(n.y, m.t + n.r + 2, H - m.b - n.r - 18); });
-    return out;
-  }
-  let groups;
-  if (S.lens === 'seg') {
-    let real = D.segments.map(s => ({ key: s.name, name: s.name, m: ns.filter(n => n.c.segment === s.name) })).filter(g => g.m.length);
-    const pairs = [];
-    real.forEach((g, i) => g.m.forEach(n => { const j = n.c.also ? real.findIndex(q => q !== g && q.key.toLowerCase() === String(n.c.also).toLowerCase()) : -1; if (j >= 0) pairs.push([i, j]); }));
-    if (pairs.length && real.length <= 7) {
-      const cell = k => [k % cols, Math.floor(k / cols)];
-      const cost = order => pairs.reduce((sum, pair) => { const p = cell(order.indexOf(pair[0])), q = cell(order.indexOf(pair[1])); return sum + Math.abs(p[0] - q[0]) + Math.abs(p[1] - q[1]); }, 0);
-      let best = real.map((_, i) => i), least = cost(best);
-      const walk = (order, rest) => { if (!rest.length) { const c = cost(order); if (c < least) { best = order; least = c; } return; } rest.forEach((x, k) => walk(order.concat(x), rest.filter((_, m) => m !== k))); };
-      if (least > pairs.length) walk([], real.map((_, i) => i));
-      real = best.map(i => real[i]);
-    }
-    groups = real;
-  } else {
-    const by = new Map();
-    ns.forEach(n => { const key = n.c.uses || 'Not known yet'; if (!by.has(key)) by.set(key, []); by.get(key).push(n); });
-    groups = [...by.entries()].map(e => ({ key: e[0], name: e[0], m: e[1] })).sort((a, b) => (a.key === 'Not known yet') - (b.key === 'Not known yet') || b.m.length - a.m.length);
-  }
-  const rows = Math.ceil(groups.length / cols), rowH = narrow ? 256 : 304;
-  out.H = rows * rowH;
-  groups.forEach((g, i) => { g.colW = W / cols; g.cx = g.colW * (i % cols + 0.5); g.cy = rowH * Math.floor(i / cols) + rowH / 2 - 20; g.R = Math.min(g.colW / 2 - 10, rowH / 2 - 42); });
-  groups.forEach((g, gi) => {
-    g.m.sort((a, b) => b.c.rank - a.c.rank);
-    g.m.forEach((n, i) => {
-      const d = i ? (g.R - 24 * sc) * Math.sqrt(i / g.m.length) : 0, a = i * 2.39996 + gi * 1.1;
-      n.g = g; n.ax = g.cx + Math.cos(a) * d; n.ay = g.cy + Math.sin(a) * d;
-      if (i < (narrow ? 2 : 3)) n.show = true;
-      const other = S.lens === 'seg' && n.c.also ? groups.find(q => q !== g && q.key.toLowerCase() === String(n.c.also).toLowerCase()) : null;
-      if (other) { const ux = other.cx - g.cx, uy = other.cy - g.cy, l = Math.hypot(ux, uy) || 1; n.ax = g.cx + ux / l * (g.R - n.r - 2); n.ay = g.cy + uy / l * (g.R - n.r - 2); n.bridge = other; n.show = true; }
-    });
-  });
-  ns.forEach(n => { n.cr = n.r + (n.show ? 11 : 3.5); });
-  relax(n => { const g = n.g, dx = n.x - g.cx, dy = n.y - g.cy, d = Math.hypot(dx, dy), max = g.R - n.r - 2; if (d > max) { n.x = g.cx + dx / d * max; n.y = g.cy + dy / d * max; } });
-  ns.forEach(n => { if (n.bridge) { const o = n.bridge, ux = n.x - o.cx, uy = n.y - o.cy, l = Math.hypot(ux, uy) || 1; out.links.push({ x1: n.x, y1: n.y, x2: o.cx + ux / l * o.R, y2: o.cy + uy / l * o.R }); } });
-  out.groups = groups;
-  return out;
-}
+
 function drawMap() {
-  const L = LAY = layout(), W = L.W, H = L.H;
-  map.style.height = H + 'px'; map.classList.toggle('nar', L.narrow);
-  svg.setAttribute('width', W); svg.setAttribute('height', H); svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
-  tip.hidden = true;
-  let r = '', o = '<div class="sm-hint">Click to open · shift-click or drag to pick several</div>';
-  if (L.pri) {
-    const m = L.pri, fx = m.fx;
-    r += '<rect x="' + fx + '" y="' + m.t + '" width="' + (W - m.r - fx) + '" height="' + (m.mid - m.t) + '" fill="url(#sm-wash)"/>' +
-      '<line class="sm-split" x1="' + fx + '" y1="' + m.t + '" x2="' + fx + '" y2="' + (H - m.b) + '"/><line class="sm-split" x1="' + m.l + '" y1="' + m.mid + '" x2="' + (W - m.r) + '" y2="' + m.mid + '"/>' +
-      '<line class="sm-axis" x1="' + m.l + '" y1="' + (H - m.b) + '" x2="' + (W - m.r) + '" y2="' + (H - m.b) + '"/><line class="sm-axis" x1="' + m.l + '" y1="' + m.t + '" x2="' + m.l + '" y2="' + (H - m.b) + '"/>';
-    o += '<div class="sm-q" style="left:' + (fx + 10) + 'px;top:' + (m.t + 8) + 'px"><strong>Call now</strong><em>Fits, and the reason is fresh</em></div>' +
-      '<div class="sm-q" style="left:' + (fx + 10) + 'px;top:' + (m.mid + 8) + 'px">Warm up<em>Fits, no fresh reason</em></div>' +
-      '<div class="sm-q" style="left:' + (m.l + 10) + 'px;top:' + (m.t + 8) + 'px">Watch<em>A reason, but a weak fit</em></div>' +
-      '<div class="sm-q" style="left:' + (m.l + 10) + 'px;top:' + (m.mid + 8) + 'px">Later</div><div class="sm-q" style="left:' + m.l + 'px;bottom:12px">Fit →</div>' +
-      '<div class="sm-q" style="left:10px;top:' + (m.t + 96) + 'px;transform:rotate(-90deg);transform-origin:left top">Fresher →</div>';
-  }
-  L.groups.forEach(g => {
-    r += '<circle class="sm-ring" cx="' + g.cx + '" cy="' + g.cy + '" r="' + g.R + '"/>';
-    const n = g.m.length, avg = n ? Math.round(g.m.reduce((t, x) => t + x.c.score, 0) / n) : 0;
-    o += '<div class="sm-cap" style="left:' + g.cx + 'px;top:' + (g.cy + g.R + 6) + 'px;width:' + (g.colW - 8) + 'px"><b>' + esc(g.name) + '</b><span>' + n + ' ' + (n === 1 ? W.thing : W.things) +
-      (S.lens === 'held' ? ' · ' + Math.round(100 * n / L.ns.length) + '%' : ' · fit ' + avg) + '</span></div>';
-  });
-  gR.innerHTML = r; over.innerHTML = o;
-  gL.innerHTML = L.links.map(l => '<line class="sm-link" x1="' + l.x1.toFixed(1) + '" y1="' + l.y1.toFixed(1) + '" x2="' + l.x2.toFixed(1) + '" y2="' + l.y2.toFixed(1) + '"/>').join('');
-  const seen = new Set();
-  L.ns.forEach(n => {
-    const c = n.c, k = heatOf(c.score), picked = S.sel.includes(c.id), s = n.r + 5, q = 5; seen.add(c.id);
-    let g = els.get(c.id);
-    if (!g) { g = document.createElementNS(NS, 'g'); g.dataset.id = c.id; g.setAttribute('tabindex', '0'); g.setAttribute('role', 'button'); g.innerHTML = '<g class="sm-pop"></g>'; gN.appendChild(g); els.set(c.id, g); }
-    g.style.transform = 'translate(' + n.x.toFixed(1) + 'px,' + n.y.toFixed(1) + 'px)';
-    g.setAttribute('class', 'sm-co' + (c.status === 'tracked' ? ' in' : '') + (picked ? ' sel' : '') + (shown(c) ? '' : ' dim'));
-    g.setAttribute('aria-label', c.company + ', fit ' + c.score + ' of 100' + (c.signal ? ', has ' + W.reason : ''));
-    g.setAttribute('aria-pressed', picked);
-    g.firstChild.innerHTML = (c.signal ? '<circle class="sm-sig" r="' + (n.r + 4).toFixed(1) + '"/>' : '') +
-      '<circle r="' + n.r.toFixed(1) + '" ' + (c.status === 'tracked' ? 'style="fill:var(--h' + k + ')"' : 'fill="url(#sm-st' + k + ')"') + '/>' +
-      '<circle class="sm-edge" r="' + n.r.toFixed(1) + '" style="stroke:var(--h' + k + ')"/>' +
-      '<path class="sm-brk" d="M' + -s + ',' + (-s + q) + 'V' + -s + 'H' + (-s + q) + 'M' + (s - q) + ',' + -s + 'H' + s + 'V' + (-s + q) + 'M' + s + ',' + (s - q) + 'V' + s + 'H' + (s - q) + 'M' + (-s + q) + ',' + s + 'H' + -s + 'V' + (s - q) + '"/>';
-    let t = lbls.get(c.id);
-    if (!t) { t = document.createElementNS(NS, 'text'); t.textContent = c.company.length > 22 ? c.company.slice(0, 21).trimEnd() + '…' : c.company; gT.appendChild(t); lbls.set(c.id, t); }
-    t.style.transform = 'translate(' + n.x.toFixed(1) + 'px,' + (n.bridge && n.y > n.g.cy + n.g.R * 0.45 ? n.y - n.r - 7 : n.y + n.r + 15).toFixed(1) + 'px)';
-    t.setAttribute('class', 'sm-lbl' + ((n.show || picked) && shown(c) ? ' on' : '') + (picked ? ' sel' : ''));
-  });
-  els.forEach((g, id) => { if (!seen.has(id)) { g.remove(); els.delete(id); } });
-  lbls.forEach((t, id) => { if (!seen.has(id)) { t.remove(); lbls.delete(id); } });
+  const W = box.clientWidth;
+  if (!W) return;
+  L = dialLayout(LIST, S.lens, W, D.segments, 'people', 'all');
+  hover = ''; tip.hidden = true;
+  box.style.height = L.H + 'px'; box.dataset.narrow = L.narrow ? '1' : '0'; box.dataset.spot = '0';
+  svg.setAttribute('width', L.W); svg.setAttribute('height', L.H); svg.setAttribute('viewBox', '0 0 ' + L.W + ' ' + L.H);
+  const at = (r, an) => [L.cx + Math.cos(an) * r, L.cy + Math.sin(an) * r];
+  const spoke = an => { const p = at(L.R * 0.1, an), q = at(L.R, an); return '<line class="sd-dial-line" x1="' + f(p[0]) + '" y1="' + f(p[1]) + '" x2="' + f(q[0]) + '" y2="' + f(q[1]) + '"/>'; };
+  const centre = 'cx="' + f(L.cx) + '" cy="' + f(L.cy) + '"';
+  let s = '<defs><radialGradient id="sd-dial-shade"><stop offset="0" style="stop-color:var(--dial-face-hi)"/><stop offset="0.55" style="stop-color:var(--dial-face)"/><stop offset="1" style="stop-color:var(--dial-face-lo)"/></radialGradient></defs>' +
+    '<circle class="sd-dial-rim" ' + centre + ' r="' + f(L.R) + '" fill="url(#sd-dial-shade)"/><circle class="sd-dial-zone" ' + centre + ' r="' + f(L.r1) + '"/><circle class="sd-dial-line" ' + centre + ' r="' + f(L.r2) + '" fill="none"/>';
+  if (L.groups.length) s += spoke(L.groups[0].a0) + L.groups.map(g => spoke(g.a1)).join('');
+  s += L.ns.map((n, i) => {
+    const c = n.c, picked = S.sel === n.id;
+    return '<g class="stoa-mapco sd-dial-co" data-id="' + esc(n.id) + '" data-state="' + (c.status === 'tracked' ? 'in' : 'on') + '" data-sel="' + (picked ? 1 : 0) + '" data-dim="' + (shown(c) ? 0 : 1) + '" data-band="' + n.band +
+      '" data-tone="' + toneOf(c.score) + '" data-hot="' + (c.reason && c.days !== null && c.days <= 16 ? 1 : 0) + '" style="transform:translate(' + n.x.toFixed(1) + 'px,' + n.y.toFixed(1) + 'px)" tabindex="0" role="button" aria-pressed="' + picked +
+      '" aria-label="' + esc(c.company + ', fit ' + c.score + ' of 100, ' + BANDS[n.band - 1].toLowerCase() + (c.status === 'tracked' ? ', ' + String(SAY.in_pipe_one || '').toLowerCase() : '') + (c.reason ? ', ' + SAY.has_reason : '')) + '">' +
+      '<g' + (drawn ? '' : ' class="stoa-mappop" style="animation-delay:' + Math.min(i * 12, 500) + 'ms"') + '><circle class="sd-dial-base" r="' + f(n.r + (c.reason ? 6.6 : 2.6)) + '"/>' +
+      (c.reason ? '<circle class="sd-dial-sig" r="' + f(n.r + 4) + '"/>' : '') + '<circle class="sd-dial-disc" r="' + f(n.r) + '"/><circle class="sd-dial-edge" r="' + f(n.r) + '"/>' +
+      '<path class="stoa-mapbrk" d="' + brackets(Math.round(n.r + (c.reason ? 9 : 5))) + '"/></g></g>';
+  }).join('');
+  s += L.ns.map(n => '<text class="sd-dial-lbl" data-id="' + esc(n.id) + '" text-anchor="' + n.lbl.anchor + '" data-band="' + n.band + '" data-on="' + ((n.show || S.sel === n.id) && shown(n.c) ? 1 : 0) + '" data-sel="' + (S.sel === n.id ? 1 : 0) +
+    '" style="transform:translate(' + n.lbl.tx.toFixed(1) + 'px,' + n.lbl.ty.toFixed(1) + 'px)">' + esc(shortName(n.c.company)) + '</text>').join('');
+  svg.innerHTML = s;
+
+  const count = g => plural(g.m.length, SAY.things[0], SAY.things[1]) + (S.lens === 'held' ? ' · ' + Math.round(100 * g.m.length / L.ns.length) + '%' : ' · fit ' + g.avg);
+  const cap = g => (g.where === 'right' ? 'left:' + f(g.px) + 'px;top:' + f(g.py) + 'px;width:' + f(Math.max(60, Math.min(L.W - g.px - 8, 200))) + 'px;transform:translateY(-50%);text-align:left'
+    : g.where === 'left' ? 'right:' + f(L.W - g.px) + 'px;top:' + f(g.py) + 'px;width:' + f(Math.max(60, Math.min(g.px - 8, 200))) + 'px;transform:translateY(-50%);text-align:right'
+      : 'left:' + f(g.px) + 'px;top:' + f(g.py) + 'px;width:190px;transform:translate(-50%,' + (g.where === 'top' ? '-100%' : '0') + ');text-align:center');
+  let o = '<div class="stoa-maphint">Press a ' + esc(SAY.things[0]) + ' for the evidence</div>';
+  if (L.ns.length) o += '<div class="stoa-mapq sd-dial-band" style="left:' + f(L.cx) + 'px;top:' + f(L.cy - L.r1 + 8) + 'px"><strong>' + esc(BANDS[0]) + '</strong></div>' +
+    '<div class="stoa-mapq sd-dial-band" style="left:' + f(L.cx) + 'px;top:' + f(L.cy - L.r2 + 8) + 'px">' + esc(BANDS[1]) + '</div><div class="stoa-mapq sd-dial-band" style="left:' + f(L.cx) + 'px;top:' + f(L.cy - L.R + 9) + 'px">' + esc(BANDS[2]) + '</div>';
+  else o += '<div class="stoa-mapq sd-dial-band" style="left:' + f(L.cx) + 'px;top:' + f(L.cy - 8) + 'px">No ' + esc(SAY.things[1]) + ' on this map yet</div>';
+  // The centre is for a company that fits and has a reason to call. With no reasons recorded it is empty, and says why.
+  if (L.ns.length && !L.ns.some(n => n.band === 1)) o += '<div class="sd-dial-none" style="left:' + f(L.cx) + 'px;top:' + f(L.cy + 6) + 'px;width:' + f(Math.max(96, 2 * L.r1 - 36)) + 'px"><b>' + esc(SAY.nobody) + '</b>' +
+    (L.r1 >= 96 ? '<span>' + esc(SAY.nobody_why) + '</span>' : '') + '</div>';
+  o += L.groups.map((g, index) => {
+    if (L.narrow) {
+      const q = at(L.R + 11, g.mid), letter = String.fromCharCode(65 + index);
+      return '<div class="sd-dial-cap" style="left:' + f(q[0]) + 'px;top:' + f(q[1]) + 'px;transform:translate(-50%,-50%)"><b>' + letter + '</b></div>' +
+        '<div class="sd-dial-cap sd-dial-keyline" style="left:10px;top:' + f(L.cy + L.R + 24 + index * 21) + 'px;width:' + f(L.W - 20) + 'px"><b>' + letter + ' · ' + esc(g.name) + '</b> <span>' + count(g) + '</span></div>';
+    }
+    return '<div class="sd-dial-cap" data-where="' + g.where + '" data-group="' + index + '" style="' + cap(g) + '"><b>' + esc(g.name) + '</b><span>' + count(g) + '</span></div>';
+  }).join('');
+  over.innerHTML = o;
+  drawn = true;
 }
+
+/** Pointing at a mark names it, lights its slice and quiets the rest. Nothing is redrawn: only what is lit changes. */
+function point(id) {
+  if (!L || id === hover) return;
+  hover = id;
+  const n = id ? L.ns.find(x => x.id === id) : null;
+  box.dataset.spot = n ? '1' : '0';
+  svg.querySelectorAll('.sd-dial-co').forEach(el => { const m = n && L.ns.find(x => x.id === el.dataset.id); el.dataset.lit = !n ? '' : m === n ? 'hot' : m && m.g === n.g ? 'kin' : 'off'; });
+  svg.querySelectorAll('.sd-dial-lbl').forEach(el => { const m = L.ns.find(x => x.id === el.dataset.id); el.dataset.lit = !n ? '' : m === n ? 'hot' : 'off';
+    el.dataset.on = m && (m.show || S.sel === m.id || m === n) && shown(m.c) ? '1' : '0'; });
+  over.querySelectorAll('.sd-dial-cap[data-group]').forEach(el => { el.dataset.lit = n && L.groups[Number(el.dataset.group)] === n.g ? '1' : '0'; });
+  if (!n) { tip.hidden = true; return; }
+  const c = n.c;
+  tip.innerHTML = '<b>' + esc(c.company) + '</b>' + squares(c.score) + '<span class="stoa-sub">  fit ' + c.score + (c.size ? ' · ' + esc(c.size) : '') + (SAY.kind === 'people' && c.uses ? ' at ' + esc(c.uses) : '') + '</span>' +
+    '<div class="sd-dial-tipband" data-band="' + n.band + '">' + BANDS[n.band - 1] + (c.status === 'tracked' ? ' · ' + esc(String(SAY.in_pipe_one || '').toLowerCase()) : '') + '</div>' +
+    (c.signal ? '<div><span class="stoa-chip">' + esc(c.signal) + '</span>' + (agoWords(c.days) ? '<span class="stoa-sub">  ' + agoWords(c.days) + '</span>' : '') + '</div>' : '') +
+    (c.why ? '<div class="stoa-sub">' + esc(c.why) + '</div>' : '');
+  const right = Math.max(n.x + n.r + 16, n.lbl.x + n.lbl.w + 8), left = Math.min(n.x - n.r - 16, n.lbl.x - 8) - 232;
+  tip.style.left = Math.max(4, right + 236 > L.W ? left : right) + 'px'; tip.style.top = Math.max(4, Math.min(L.H - 130, n.y - 24)) + 'px';
+  tip.hidden = false;
+}
+
+/** The panel beside the dial. With nothing picked it says how to read the dial and who is nearest its centre, a line
+    each, so it is never taller than the dial. With a company picked it is that company, and scrolls if it must. */
 function drawSide() {
-  const chosen = S.sel.map(id => LIST.find(c => c.id === id)).filter(Boolean);
+  const c = S.sel ? LIST.find(x => x.id === S.sel) : null;
   let h;
-  if (chosen.length === 1) {
-    const c = chosen[0];
-    h = '<div class="mono">' + esc(c.segment) + (c.also ? ' · also fits ' + esc(c.also) : '') + '</div><h3>' + esc(c.company) + '</h3><div class="sm-sub">' + (P ? [[c.size, c.uses ? 'at ' + c.uses : ''].filter(Boolean).join(' '), c.location] : [c.domain, c.location]).filter(Boolean).map(esc).join(' · ') + '</div>' +
-      (c.signal ? '<div class="sm-sub" style="margin-top:6px"><span class="tag on">' + esc(c.signal) + '</span>' + esc(ago(c.days) || 'no date on it') + '</div>' : '') +
-      '<div class="sm-score"><span class="mono">' + (c.weighed ? 'Fit, by these weights' : 'Fit') + '</span><b>' + c.score + '</b>' + squares(c.score) + '</div>' +
+  if (c) {
+    const band = bandOf(c.rank), site = c.domain ? (/^https?:\/\//.test(c.domain) ? c.domain : 'https://' + c.domain) : '';
+    h = '<div class="stoa-eyebrow">' + esc(c.segment) + (c.also ? ' · also fits ' + esc(c.also) : '') + '</div><h3>' + esc(c.company) + '</h3>' +
+      (site ? '<a href="' + esc(site) + '" rel="noreferrer noopener">' + esc(c.domain) + '</a>' : '') +
+      '<div class="pg-score"><span class="stoa-eyebrow">' + (c.weighed ? 'Fit, by these weights' : 'Fit') + ' · <span class="pg-bandtag" data-band="' + band + '">' + BANDS[band - 1] + '</span></span><b>' + c.score + '</b>' + squares(c.score) + '</div>' +
       (c.why ? '<p>' + esc(c.why) + '</p>' : '') +
-      (c.requirements || []).map(req => '<div class="sm-req' + (req.shown ? ' on' : '') + '"><span>' + (req.shown ? '[x]' : '[ ]') + '</span><span><b>' + esc(req.label) + '</b><br><span class="sm-sub">' + (req.shown ? esc(req.evidence || 'Shown') : 'No evidence found') + '</span></span></div>').join('') +
-      '<dl class="sm-facts"><dt>' + (P ? 'Title' : 'Size') + '</dt><dd>' + esc(c.size || 'Not known') + '</dd><dt>' + (P ? 'Works at' : 'Uses today') + '</dt><dd>' + esc(c.uses || 'Not known') + '</dd>' +
-      (c.buyer && !P ? '<dt>Buyer</dt><dd>' + esc([c.buyer.name, c.buyer.title].filter(Boolean).join(', ')) + '</dd>' : '') +
-      (/^https?:\/\//.test(c.source || '') ? '<dt>' + (P ? 'Found on' : 'Source') + '</dt><dd><a href="' + esc(c.source) + '" rel="noreferrer noopener">' + esc(c.source.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')) + '</a></dd>' : '') + '</dl>' +
-      '<button class="sm-btn" data-act="clear">Close</button>';
-  } else if (chosen.length > 1) {
-    h = '<div class="mono">Picked</div><h3>' + chosen.length + ' ' + W.things + '</h3><div class="sm-sub">Average fit ' + Math.round(chosen.reduce((t, c) => t + c.score, 0) / chosen.length) + ' · ' + chosen.filter(c => c.signal).length + ' with ' + W.reason + '</div>' +
-      chosen.slice().sort((a, b) => b.rank - a.rank).map(c => '<button class="sm-row" data-act="open" data-id="' + esc(c.id) + '"><b>' + esc(c.company) + '</b> ' + squares(c.score) + '<span class="sm-sub">' + esc([c.segment, c.signal, ago(c.days)].filter(Boolean).join(' · ')) + '</span></button>').join('') +
-      '<button class="sm-btn" data-act="clear">Clear</button>';
+      (c.signal ? '<div class="pg-now" style="grid-template-columns:minmax(0,1fr);gap:2px"><span>Why now</span><div>' + esc(c.signal) + '<small>' + esc(agoWords(c.days) || 'no date on it') + '</small></div></div>' : '') +
+      ((c.requirements || []).length ? '<div style="margin-top:16px">' + c.requirements.map(req => '<div class="pg-req" data-on="' + (req.shown ? 1 : 0) + '"><span>' + (req.shown ? '✓' : '–') + '</span><span><b>' + esc(req.label) + '</b><br><span class="stoa-sub">' + (req.shown ? esc(req.evidence || 'Shown') : 'No evidence found') + '</span></span></div>').join('') + '</div>' : '') +
+      '<dl class="pg-facts"><dt>' + (SAY.kind === 'people' ? 'Title' : 'Size') + '</dt><dd>' + esc(c.size || 'Not known') + '</dd>' + (c.location ? '<dt>Where</dt><dd>' + esc(c.location) + '</dd>' : '') + '<dt>' + esc(SAY.uses_fact) + '</dt><dd>' + esc(c.uses || 'Not known') + '</dd>' +
+      (c.status === 'tracked' ? '<dt>Pipeline</dt><dd>Already a record</dd>' : '') +
+      (c.lead ? '<dt>' + esc(SAY.ask_for || '') + '</dt><dd>' + esc([c.lead.name, c.lead.title].filter(Boolean).join(', ')) + '</dd>' : '') +
+      (/^https?:\/\//.test(c.source || '') ? '<dt>Source</dt><dd><a href="' + esc(c.source) + '" rel="noreferrer noopener">' + esc(c.source.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '').slice(0, 60)) + '</a></dd>' : '') + '</dl>' +
+      '<button class="pg-btn" data-act="clear">← Back to the whole map</button>';
   } else {
-    const calls = LIST.filter(c => c.status !== 'tracked').sort((a, b) => b.rank - a.rank).slice(0, 5);
-    h = '<div class="mono">' + W.first + '</div>' + calls.map((c, i) => '<button class="sm-row" data-act="open" data-id="' + esc(c.id) + '"><b>0' + (i + 1) + '  ' + esc(c.company) + '</b> ' + squares(c.score) +
-      '<span class="sm-sub">' + esc([c.segment, c.signal, ago(c.days)].filter(Boolean).join(' · ')) + '</span>' + (c.why ? '<span>' + esc(c.why) + '</span>' : '') + '</button>').join('') +
-      '<p class="sm-sub" style="margin-top:10px">Click a ' + W.thing + ' on the map to open it.</p>';
+    const seen = LIST.filter(shown), count = band => seen.filter(x => bandOf(x.rank) === band).length;
+    const near = seen.slice().sort((a, b) => b.rank - a.rank).slice(0, 7);
+    h = '<div class="stoa-eyebrow">How to read it</div><div class="pg-bands">' +
+      BANDS.map((name, i) => [name, SAY.band_why[i]]).map((band, i) =>
+        '<div class="pg-band" data-band="' + (i + 1) + '"><i></i><span><b>' + band[0] + '</b><small>' + band[1] + '</small></span><em>' + count(i + 1) + '</em></div>').join('') + '</div>' +
+      '<div class="pg-near"><div class="stoa-eyebrow">Nearest the centre</div>' + (near.length ? near.map((x, i) => '<button class="pg-row" data-act="open" data-id="' + esc(x.id) + '" title="' + esc(x.company) + '"><i>' + String(i + 1).padStart(2, '0') + '</i><b>' + esc(x.company) + '</b>' + squares(x.score) + '</button>').join('')
+        : '<p class="stoa-sub">No ' + esc(SAY.things[0]) + ' matches what is picked above.</p>') + '</div>' +
+      '<p class="stoa-sub" style="margin:14px 0 0">Press a ' + esc(SAY.things[0]) + ', here or on the map, for the evidence.</p>';
   }
-  side.innerHTML = h;
+  side.innerHTML = h; side.scrollTop = 0;
 }
+
+/** Beside the dial the panel is as tall as the dial's card, so nothing is left empty under either. Under it, on a
+    narrow page, it is as tall as what is in it. */
+function fitSide() {
+  side.style.height = '';
+  if (window.matchMedia('(min-width: 980px)').matches && window.matchMedia('screen').matches) side.style.height = $('sm-card').offsetHeight + 'px';
+}
+
+/** Who to call first, on a map with nothing written down about it: the five nearest the centre, with the reason. */
+function drawCalls() {
+  const el = $('sm-calls');
+  if (!el || el.dataset.auto !== '1') return;
+  el.innerHTML = LIST.filter(c => c.status !== 'tracked').sort((a, b) => b.rank - a.rank).slice(0, 6).map((c, i) =>
+    '<article class="pg-call"><span class="pg-call-n">' + dotfig(String(i + 1).padStart(2, '0')) + '</span><div><div class="stoa-eyebrow">' + esc(c.segment) + '</div>' +
+    '<h3><button type="button" class="pg-open" data-act="open" data-id="' + esc(c.id) + '" title="Show it on the map">' + esc(c.company) + '</button></h3><p>' + esc(c.why || '') + '</p>' +
+    (c.signal ? '<span class="pg-mono">Why now · ' + esc(c.signal) + (agoWords(c.days) ? ' · ' + agoWords(c.days) : '') + '</span>' : '') + '</div></article>').join('');
+}
+
 function drawBar() {
   document.querySelectorAll('[data-lens]').forEach(b => b.setAttribute('aria-pressed', b.dataset.lens === S.lens));
-  document.querySelectorAll('[data-size]').forEach(b => b.setAttribute('aria-pressed', b.dataset.size === S.size));
+  const facet = S.facet; S.facet = null;                       // each quick filter's count is of the whole map
   document.querySelectorAll('[data-quick]').forEach(b => { b.setAttribute('aria-pressed', b.dataset.quick === S.quick); const q = S.quick; S.quick = b.dataset.quick; b.querySelector('i').textContent = LIST.filter(shown).length; S.quick = q; });
-  $('sm-how').textContent = LENSES[S.lens];
+  S.facet = facet;
+  document.querySelectorAll('[data-facet]').forEach(b => b.setAttribute('aria-pressed', Boolean(S.facet) && S.facet.kind === b.dataset.facet && S.facet.value === b.dataset.value));
+  $('sm-how').textContent = HOW[S.lens] + (S.facet ? '  Lit up: ' + S.facet.label + '. Press it again to light them all.' : '');
+  document.querySelectorAll('[data-band-of]').forEach(el => { const c = LIST.find(x => x.id === el.dataset.bandOf); const band = c ? bandOf(c.rank) : 0; el.dataset.band = band; el.textContent = band ? BANDS[band - 1] : ''; });
+  document.querySelectorAll('[data-now]').forEach(el => { const n = LIST.filter(c => c.segment === el.dataset.now && c.rank >= CALL && c.status !== 'tracked').length; el.textContent = n ? n + ' ' + SAY.now : ''; });
+  if (!D.requirements.length) return;
   const weighed = Object.values(S.weights).some(w => w !== 2);
   $('sm-weights').innerHTML = D.requirements.map(label => { const w = S.weights[label] === undefined ? 2 : S.weights[label]; const checked = LIST.filter(c => (c.requirements || []).some(r => r.label === label)), have = checked.filter(c => c.requirements.find(r => r.label === label).shown).length;
-    return '<div class="sm-weight"><span>' + esc(label) + '<small>' + (checked.length ? have + ' of ' + checked.length + ' show it' : 'not checked') + '</small></span><span class="sm-seg">' +
+    return '<div class="pg-weight"><span>' + esc(label) + '<small>' + (checked.length ? have + ' of ' + checked.length + ' show it' : 'not checked') + '</small></span><span class="pg-seg">' +
       ['Off', 'Nice', 'Matters', 'Must'].map((word, i) => '<button data-act="weight" data-label="' + esc(label) + '" data-w="' + i + '" aria-pressed="' + (w === i) + '">' + word + '</button>').join('') + '</span></div>'; }).join('') +
-    (weighed ? '<button class="sm-btn" data-act="reset" style="margin-top:8px">Back to the fit as recorded</button>' : '');
-  $('sm-weighnote').textContent = weighed ? 'Fit is worked out from these weights, for every ' + W.thing + ' that was checked against the requirements.' : 'Change how much a requirement counts and the map re-scores itself. Nothing is saved; reload to start again.';
+    (weighed ? '<button class="pg-btn" data-act="reset">Back to the fit as recorded</button>' : '');
+  $('sm-weighnote').textContent = weighed ? 'Fit is worked out from these weights, for every company that was checked against the requirements.' : 'Change how much a requirement counts and the map re-scores itself. Nothing is saved; reload to start again.';
 }
-function render() { LIST = companies(); S.sel = S.sel.filter(id => LIST.some(c => c.id === id)); drawBar(); drawMap(); drawSide(); }
-function choose(id, many) {
-  if (many) S.sel = S.sel.includes(id) ? S.sel.filter(x => x !== id) : S.sel.concat(id);
-  else S.sel = S.sel.length === 1 && S.sel[0] === id ? [] : [id];
-  render();
-}
+
+function render() { LIST = companies(); if (S.sel && !LIST.some(c => c.id === S.sel)) S.sel = ''; drawBar(); drawMap(); drawSide(); fitSide(); drawCalls(); }
+
 document.addEventListener('click', e => {
-  const b = e.target.closest('[data-lens],[data-size],[data-quick],[data-act]'); if (!b) return;
+  const b = e.target.closest('[data-lens],[data-quick],[data-facet],[data-act]');
+  if (!b) return;
   if (b.dataset.lens) S.lens = b.dataset.lens;
-  else if (b.dataset.size) S.size = b.dataset.size;
   else if (b.dataset.quick) S.quick = b.dataset.quick;
-  else if (b.dataset.act === 'clear') S.sel = [];
-  else if (b.dataset.act === 'open') S.sel = [b.dataset.id];
+  else if (b.dataset.facet) { const on = S.facet && S.facet.kind === b.dataset.facet && S.facet.value === b.dataset.value; S.facet = on ? null : { kind: b.dataset.facet, value: b.dataset.value, label: (b.dataset.facet === 'uses' ? SAY.use_facet : 'companies that show: ') + b.dataset.value }; }
+  else if (b.dataset.act === 'clear') S.sel = '';
+  else if (b.dataset.act === 'open') S.sel = b.dataset.id;
+  else if (b.dataset.act === 'tune') { const tune = $('sm-what'); if (tune) { tune.open = true; tune.scrollIntoView({ behavior: 'smooth', block: 'center' }); } return; }
   else if (b.dataset.act === 'weight') S.weights[b.dataset.label] = Number(b.dataset.w);
   else if (b.dataset.act === 'reset') S.weights = {};
   render();
+  // Picked from somewhere else on the page (a first call, a company's entry, a requirement): go to the map, where it now shows.
+  if ((b.dataset.facet && S.facet) || (b.dataset.act === 'open' && !b.closest('#sm-live'))) $('map').scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 $('sm-find').addEventListener('input', e => { S.find = e.target.value.toLowerCase().trim(); render(); });
-gN.addEventListener('click', e => { const g = e.target.closest('.sm-co'); if (g) choose(g.dataset.id, e.shiftKey || e.metaKey || e.ctrlKey); });
-gN.addEventListener('keydown', e => { const g = e.target.closest('.sm-co'); if (g && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); choose(g.dataset.id, e.shiftKey); } });
-gN.addEventListener('pointerover', e => {
-  const g = e.target.closest('.sm-co'); if (!g || e.pointerType === 'touch' || !LAY) return;
-  const n = LAY.ns.find(x => x.id === g.dataset.id); if (!n) return; const c = n.c;
-  tip.innerHTML = '<b>' + esc(c.company) + '</b>' + squares(c.score) + ' <span class="sm-sub">fit ' + c.score + (c.size ? ' · ' + esc(c.size) : '') + (P && c.uses ? ' at ' + esc(c.uses) : '') + '</span>' + (c.signal ? '<br><span class="tag on">' + esc(c.signal) + '</span><span class="sm-sub">' + esc(ago(c.days)) + '</span>' : '') + (c.why ? '<br><span class="sm-sub">' + esc(c.why) + '</span>' : '');
-  tip.hidden = false;
-  let x = n.x + n.r + 14; if (x + 236 > LAY.W) x = n.x - n.r - 14 - 232;
-  tip.style.left = Math.max(4, x) + 'px'; tip.style.top = clamp(n.y - 24, 4, LAY.H - 120) + 'px';
-});
-gN.addEventListener('pointerout', e => { const t = e.relatedTarget; if (!t || !t.closest || !t.closest('.sm-co')) tip.hidden = true; });
-let drag = null, lassoed = false;
-map.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse' || e.button !== 0 || e.target.closest('.sm-co')) return; const b = map.getBoundingClientRect(); drag = { x: e.clientX - b.left, y: e.clientY - b.top, b, add: e.shiftKey, moved: false, r: null }; });
-window.addEventListener('pointermove', e => {
-  if (!drag) return; const x = e.clientX - drag.b.left, y = e.clientY - drag.b.top;
-  if (Math.abs(x - drag.x) + Math.abs(y - drag.y) > 6) drag.moved = true; if (!drag.moved) return;
-  const r = drag.r = { l: Math.min(x, drag.x), t: Math.min(y, drag.y), w: Math.abs(x - drag.x), h: Math.abs(y - drag.y) };
-  lasso.style.left = r.l + 'px'; lasso.style.top = r.t + 'px'; lasso.style.width = r.w + 'px'; lasso.style.height = r.h + 'px'; lasso.hidden = false;
-});
-window.addEventListener('pointerup', () => {
-  if (!drag) return; const d = drag; drag = null; lasso.hidden = true;
-  if (!d.moved || !d.r || !LAY) return;
-  const ids = LAY.ns.filter(n => shown(n.c) && n.x >= d.r.l && n.x <= d.r.l + d.r.w && n.y >= d.r.t && n.y <= d.r.t + d.r.h).map(n => n.id);
-  S.sel = d.add ? [...new Set(S.sel.concat(ids))] : ids;
-  lassoed = true; setTimeout(() => { lassoed = false; }, 0); render();
-});
-map.addEventListener('click', e => { if (lassoed || e.target.closest('.sm-co')) return; if (S.sel.length) { S.sel = []; render(); } });
+const mark = e => (e.target.closest ? e.target.closest('.sd-dial-co') : null);
+const pick = id => { S.sel = S.sel === id ? '' : id; render(); };
+svg.addEventListener('click', e => { const g = mark(e); if (g) { e.stopPropagation(); pick(g.dataset.id); } });
+svg.addEventListener('keydown', e => { const g = mark(e); if (g && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); pick(g.dataset.id); } });
+svg.addEventListener('pointerover', e => { const g = mark(e); if (g && e.pointerType !== 'touch') point(g.dataset.id); });
+svg.addEventListener('pointerout', e => { const to = e.relatedTarget; if (!to || !to.closest || !to.closest('.sd-dial-co')) point(''); });
+svg.addEventListener('focusin', e => { const g = mark(e); if (g) point(g.dataset.id); });
+svg.addEventListener('focusout', () => point(''));
+box.addEventListener('click', () => { if (S.sel) { S.sel = ''; render(); } });
 let lastW = 0, wait = 0;
-new ResizeObserver(() => { const w = map.clientWidth; if (Math.abs(w - lastW) < 2) return; lastW = w; clearTimeout(wait); wait = setTimeout(drawMap, 60); }).observe(map);
+new ResizeObserver(() => { const w = box.clientWidth; if (Math.abs(w - lastW) < 2) return; lastW = w; clearTimeout(wait); wait = setTimeout(() => { drawMap(); fitSide(); }, 60); }).observe(box);
 $('sm-live').hidden = false;
-if ($('sm-static')) $('sm-static').hidden = true;      // the still picture is there for a browser that runs no scripts
-lastW = map.clientWidth; render();
+lastW = box.clientWidth; render();
 })();

@@ -988,13 +988,17 @@ class MarketTests(unittest.TestCase):
         full = self.market({"action": "export"})
         html = Path(full["path"]).read_text(encoding="utf-8")
         self.assertTrue(full["path"].endswith(".html") and full["bytes"] > 5000)
-        for must in ("Regional freight brokers (demo)", "How rare each requirement is", "Who holds this market today",
-                     "Where the segments meet", "First calls", "Renata Okafor", "In the pipeline", "&lt;script&gt;alert(1)&lt;/script&gt; &amp; Sons"):
+        for must in ("Regional freight brokers (demo)", ">Where we play<", ">How we win<", ">What has to be true<", "Who you would be replacing",
+                     "Where the segments meet", "First calls", "Renata Okafor", "In the pipeline", "&lt;script&gt;alert(1)&lt;/script&gt; &amp; Sons",
+                     'class="stoa-map sd-dial"', "function dialLayout(", ".sd-dial-rim {", "--dial-good:", "--ui-text-primary:", 'class="pg-nav"', "@media print"):
             self.assertIn(must, html)
-        # The page carries two scripts of its own and no other: the companies as data, and the map that draws them.
-        # Nothing a company's words say can become markup, in the page or in that data, and nothing is fetched.
-        self.assertEqual(html.count("<script"), 2)
-        self.assertIn('<script type="application/json" id="sm-data">', html)
+        for never in ('id="sm-rings"', "/*DIAL-LAYOUT*/", "Hermes"):         # the old picture; the page's own seam; whose page it was made in
+            self.assertNotIn(never, html)
+        # The page carries its own scripts and no other: the companies as data and the dial that draws them, and the
+        # stoa at its head as cells and the code that paints them. Nothing a company's words say can become markup, in
+        # the page or in that data, and nothing is fetched.
+        self.assertEqual(re.findall(r"<script[^>]*>", html), ['<script type="application/json" id="sm-data">', "<script>", '<script type="application/json" id="sm-art">', "<script>"])
+        self.assertLess(html.index('id="sm-calls"'), html.index('id="sm-data"'))       # the script comes after what it fills in
         for never in ("<script>alert", "alert(1)</script>", "href=\"javascript", " src=", "@import", "<b>bold</b>", "fetch(", "XMLHttpRequest", "WebSocket", "//cdn"):
             self.assertNotIn(never, html)
         data = json.loads(html.split('<script type="application/json" id="sm-data">')[1].split("</script>")[0])
@@ -1079,22 +1083,46 @@ class CandidateMapTests(unittest.TestCase):
             {"company": "Luis Ortega", "size": "Events Manager", "uses": "Brindlemoor Care Association", "segment": "Association event leads", "fit": 4, "why": "Runs a 3,200-person convention."},
             {"company": "Priya Nand", "size": "Meetings Lead", "uses": "probably somewhere in Dayton (not confirmed)", "segment": "Association event leads", "fit": 3, "why": "Listed on a conference page."}]})
 
+    def test_the_downloaded_page_is_made_from_the_gtm_tab_and_keeps_in_step_with_it(self):
+        from stoa import page
+        # Whoever is put forward at a company is someone still there, with what they do.
+        self.assertEqual(page._lead([{"name": "Allan", "title": "Former Director of Events"}, {"name": "Connie", "title": "Trade Show Manager"}]), "Connie, Trade Show Manager")
+        self.assertEqual(page._lead([{"name": "Allan", "title": "Former Director of Events"}]), "")
+        self.assertEqual([p["name"] for p in page._people([{"name": "A", "title": "Ex-CEO"}, {"name": "B", "title": "Executive Director"}])], ["B", "A"])
+        for kind in ("roles", "people"):                                                       # every word has each kind
+            self.assertEqual(set(page.SAY[""]), set(page.SAY[kind]))
+        # How a company is scored and ranked is the Stoa page's own sum, kept in step by hand: both must still say it this way.
+        rank = "rank: Math.round(score * 0.65 + timing * 0.35) + (buyer ? 2 : 0)"
+        self.assertIn(rank, (ROOT / "desktop" / "plugin.js").read_text(encoding="utf-8"))
+        self.assertIn(rank, page.SCRIPT.read_text(encoding="utf-8"))
+        # The parts it reads from the page script are each found, and the layout is written in once.
+        self.assertIn("function dialLayout(", page.script())
+        self.assertNotIn("/*DIAL-LAYOUT*/", page.script())
+        self.assertNotIn("//", "".join(line.lstrip()[:2] for line in page.script().split("\n")))     # no notes for a client to read
+        css = page.page_css()
+        for piece in (".pg {", "--dial-good:", ".sd-dial-rim {", ".sd-strat {", "--ui-text-primary:", "prefers-color-scheme: dark"):
+            self.assertIn(piece, css)
+        self.assertNotIn("/*", css)
+        self.assertEqual(page.kind_of({}), "")
+        self.assertEqual((page.kind_of({"rows": "people"}), page.kind_of({"rows": "companies"})), ("people", "roles"))
+
     def test_the_downloaded_page_of_a_candidate_map_speaks_of_candidates(self):
         self.markets.define({"name": "Head of Events", "brief": "A Head of Events.", "segments": ["Association event leads", "Trade show operators"]})
         self.people()
         for share in (False, True):
             html = Path(self.markets.export({"action": "export", "share": share})["path"]).read_text(encoding="utf-8")
             still = html[:html.index('<script type="application/json"')]            # the page itself, before the map's rows and its script
-            for said in ("Candidate map", "<small>Candidates</small>", "<small>Pools</small>", "<small>Employers</small>", "<th>Candidate</th>", "Title and place",
-                         "Why they fit", "At HVBC", "Find a candidate", "Reason to move", ">Employer</button>", '"rows": "people"', "who could fill a role"):
+            for said in ("Candidate map", "candidates mapped", "<small>Pools</small>", ">Where to look<", ">How to pitch the role<", ">What the role needs<",
+                         "Who to approach first", "Every candidate on the map", "At <b>HVBC (", "Find a candidate", "Reason to move", ">Employer</button>", '"kind": "people"'):
                 self.assertIn(said, html, (share, said))
-            for wrong in ("<small>Companies</small>", "Buyers named", "<th>Company</th>", "Size by", "Reason to call</", "Uses HVBC", "COMPANIES"):
+            self.assertEqual("<small>Employers</small>" in still, not share)          # the copy to send on counts no employers
+            for wrong in ("companies mapped", "Buyers named", ">Where we play<", "Who to call first", "Reason to call", "Uses <b>HVBC", "Every company on the map"):
                 self.assertNotIn(wrong, still, (share, wrong))
         # A map of companies on the same pipeline (the older kind) reads as it always did.
         self.markets.define({"name": "Event employers", "rows": "companies", "segments": ["Associations"]})
         self.markets.add({"market": "Event employers", "companies": [{"company": "Brindlemoor Care Association", "segment": "Associations", "fit": 4}]})
         html = Path(self.markets.export({"action": "export", "market": "Event employers"})["path"]).read_text(encoding="utf-8")
-        for said in ("Market map", "<small>Companies</small>", "<th>Company</th>", "Find a company", "Size by", '"rows": "companies"'):
+        for said in ("Talent map", "Every company on the map", "Find a company", ">Where to look<", ">Works with</button>", '"kind": "roles"'):
             self.assertIn(said, html, said)
 
     def test_a_new_map_holds_candidates_and_says_so(self):

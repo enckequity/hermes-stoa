@@ -68,10 +68,10 @@ on it has cost, with limits you can set.
 
 ![Map facts: what is on the map, where it came from, what it has cost, and the limits set on it](docs/map-facts.jpg)
 
-**Hand it to a client.** **Download a copy to share** saves the map as one web page, without
-buyers' names or your pipeline.
+**Hand it to a client.** **Download a copy to share** saves the map as one web page, laid out as
+a short report around a working dial, without buyers' names or your pipeline.
 
-![The copy to share, as a client sees it: the working map, with no buyers' names and nothing about your pipeline](docs/page-market.png)
+![The copy to share, as a client sees it: what the map says, then the working dial, with no buyers' names and nothing about your pipeline](docs/page-market.jpg)
 
 ### Motions
 
