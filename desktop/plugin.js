@@ -8777,7 +8777,7 @@ function Page() {
     ['From the map', totals.tracked, cap(pb.terms.deals) + ' that started on a market map.', ''],
     ['Won', totals.won + (totals.won_value ? ' · ' + money(totals.won_value, pb.currency) : ''), 'Closed as ' + pb.won.label.toLowerCase() + ', all time.', '']]
   const side = adding ? h(NewRecord, { state, close: () => setAdding(false), opened: id => { setAdding(false); openRecord(id) } }) : null
-  const tabLabel = { today: 'Today', pipeline: view === 'groups' ? cap(pb.terms.groups) : view === 'companies' ? 'Companies' : view === 'clients' ? 'Clients' : 'Pipeline', database: 'Data', cash: 'Production', reports: 'Dashboard', activity: 'Log' }[tab] || 'Back'
+  const tabLabel = { today: 'Today', pipeline: view === 'groups' ? cap(pb.terms.groups) : view === 'companies' ? 'Companies' : view === 'clients' ? 'Clients' : 'Pipeline', database: 'Data', cash: 'Production', reports: 'Dashboard', activity: 'Log', market: 'GTM' }[tab] || 'Back'
   const before = stack.length > 1 ? stack[stack.length - 2] : null
   const backLabel = !before ? tabLabel : before.kind === 'record' ? ((state.deals.find(item => item.id === before.id) || {}).name || 'Back') : before.id
   const sheet = !top ? null
@@ -8785,7 +8785,7 @@ function Page() {
       : top.kind === 'group' ? h(GroupPage, { key: 'g:' + top.id, name: top.id, state, back, backLabel, openRecord, openClient, onRenamed: renamed })
         : top.kind === 'client' ? h(ClientPage, { key: 'cl:' + top.id, name: top.id, state, back, backLabel, openRecord, openGroup })
           : h(CompanyPage, { key: 'c:' + top.id, name: top.id, state, back, backLabel, openRecord, openGroup })
-  const paged = Boolean(sheet) && ['today', 'pipeline', 'database', 'cash', 'reports', 'activity'].includes(tab)
+  const paged = Boolean(sheet) && ['today', 'market', 'pipeline', 'database', 'cash', 'reports', 'activity'].includes(tab)      // a record opened from the map or a motion, too
   seen = { tab, paged, open: top ? { kind: top.kind, id: top.id } : null, pipeline: state.pipeline, pipelines: state.pipelines,
     market: market ? market.name : '', record: top && top.kind === 'record' ? ((state.deals.find(deal => deal.id === top.id) || {}).name || '') : '' }
   const nothing = h('div', { className: 'stoa-sub' },
@@ -8849,7 +8849,7 @@ function Page() {
     !paged && tab === 'database' ? h(Database, { state, openRecord, openGroup, openCompany, openMap: id => { setMarketId(id); setTab('market') } }) : null,
     !paged && tab === 'cash' ? h('div', { className: 'stoa-split', ref: split, 'data-side': '0' },
       h(Cash, { state, openId: '', setOpenId: openRecord, openClient })) : null,
-    tab === 'market' ? h(GtmTab, { state, openRecord, showPipe }, market
+    tab === 'market' && !paged ? h(GtmTab, { state, openRecord, showPipe }, market
       ? h(MarketMap, { market, markets: state.markets, onMarket: setMarketId, shape: state.playbook.shape,
         // a company added as a lead may be in the lead pipeline, not this one: show that one, then open it
         openRecord: (id, pipe) => { if (pipe && pipe !== state.pipeline && (state.pipelines || []).some(one => one.id === pipe)) showPipe(pipe); openRecord(id) } })
