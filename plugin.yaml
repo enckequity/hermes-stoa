@@ -1,10 +1,10 @@
 name: stoa
-version: 0.28.3
+version: 0.29.0
 manifest_version: 2
 api_version: 1
 description: >-
-  The CRM for Hermes Agent, a lightweight one you talk to: map a market, find the leads, run the
-  pipeline and see it through to cash. Hermes runs it and you approve: what it finds waits for
+  The CRM for Hermes Agent, a lightweight one you talk to: map a market, plan the motions that
+  break into it, find the leads, run the pipeline and see it through to cash. Hermes runs it and you approve: what it finds waits for
   your yes or no, every change is on a ledger and can be taken back. A page and a live pane in the
   Desktop app and Webapp, Slack cards with buttons, and playbooks that fit it to any business.
 author: jarrett-del

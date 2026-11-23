@@ -22,7 +22,7 @@ Every part of Stoa, and its settings. For how a day on the desk goes, see [the g
 | **Slack cards** | Advance, Draft follow-up, Enrich, close with a reason, snooze, reopen |
 | **Desktop app and Webapp** | A live pane beside the chat, a Stoa page (Today, GTM, Pipeline, Dashboard, Data, Log, Production, Setup), and records, maps, the day and reports drawn inside the conversation |
 | **Web dashboard tab** | Setup and status: the six set-up steps with how to do each from the dashboard, what the desk holds in totals, each pipeline and map, the month's paid work, the rules in force and your data |
-| **`/gtm`** | The board, today, cash, the brief, a map or one record, on every surface Hermes runs on (CLI, Telegram, Desktop…). In Slack, `!gtm`, where a record or a map arrives with its buttons |
+| **`/gtm`** | The board, today, cash, the brief, who has gone quiet, what moved this week, the pipeline by stage, a map or one record, on every surface Hermes runs on (CLI, Telegram, Desktop…), with no model. In Slack, `!gtm`, where a record or a map arrives with its buttons |
 | **`hermes stoa`** | Status, board, brief, map, the ledger (`history`), autonomy, sample data, CSV import and export from a terminal |
 | **7 automations** | Morning brief, email-call-and-Slack activity sweep, meeting-notes sweep, weekly market watch, Friday review, mirror to a Google Sheet, bring Sheet edits back, under `/blueprint` |
 | **3 skills** | `stoa:desk` (how the agent runs the desk), `stoa:market-map`, `stoa:playbook-authoring` |
@@ -704,6 +704,21 @@ Only a file on Stoa's list is removed, and only while it is still the file Herme
 file in one of those two folders, the same size and age. Your original is never touched.
 
 ### The talk box and its model
+
+**What is on screen goes with each message.** A message from the talk box starts with a line in
+brackets saying where you are: the tab, the GTM view and the map or motion open, the pipeline,
+and the record, group or company open. Hermes reads it so *"this"* and *"here"* mean something.
+It is not shown in the talk box.
+
+**Answers with no model.** Five standing questions are answered by the desk itself, from the same
+figures the page draws, the moment they are asked: *what needs me today*, *who has gone quiet*,
+*what moved this week*, *the morning brief* and *the pipeline as a report*, each in those words
+or the suggestion buttons above the box, with nothing attached. On a desk with more than one
+pipeline each is answered under its name. The answer says it came from the desk, and **Ask
+Hermes instead** sends the same question to Hermes. Anything else goes to Hermes as before.
+Hermes gives a plugin no way to answer a message typed in its own chat, so there the question
+goes to the model; `/gtm today`, `/gtm brief`, `/gtm quiet`, `/gtm week` and `/gtm report` give
+the desk's own answer in any chat.
 
 The box at the foot of the Stoa page keeps a conversation of its own, **Stoa desk**. Under it is
 the model that conversation runs on. Press it and Hermes's own model menu opens, the one the chat

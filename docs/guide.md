@@ -361,7 +361,9 @@ Stoa sits beside any conversation in the Desktop app and the Webapp.
   record. The change is saved at once, one line goes into the open chat as if you had typed it,
   and the draft comes back in the conversation.
 - **Everywhere else,** `/gtm` gives the board, today, cash, the brief, a map or one record as
-  text: the terminal, Telegram, the phone app.
+  text: the terminal, Telegram, the phone app. `/gtm quiet`, `/gtm week` and `/gtm report` answer
+  who has gone quiet, what moved this week and each pipeline by stage, for every pipeline at
+  once, with no model.
 
 ## In Slack
 

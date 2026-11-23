@@ -170,7 +170,11 @@ no, with the evidence beside it in their words.
   a delivery lane after the win, clients billed by the month, every pipeline side by side, and a
   forecast weighted by stage.
 - **Talk to it on the page.** A talk box at the foot of the desk takes plain sentences and any
-  file, runs on the model you pick for it, and folds away when you are done.
+  file, runs on the model you pick for it, and folds away when you are done. Each message
+  carries what is on screen, so *"move this one on"* means the record you have open. The
+  standing questions (*what needs me today*, *who has gone quiet*, *what moved this week*, the
+  morning brief, the pipeline as a report) are answered from the desk at once, with no model
+  and no tokens spent.
 - **Drawn in the conversation.** Ask *"show me Dana"*, *"what needs me today?"* or *"how's our
   win rate?"* in a Hermes chat and the reply is the live card, the day or the report, with its
   buttons, not a description of it.
