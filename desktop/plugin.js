@@ -441,10 +441,22 @@ async function handOver(sessionId, files) {
 
 /** Send a line to one of the page's conversations: the desk's, or (lane 'maps') the map's research. `file` is one
     file or several: a small text file rides in the message itself, anything else is handed to Hermes first. */
-async function say(text, file, lane = 'desk', fromBox = false) {
+async function say(text, file, lane = 'desk', fromBox = false, toModel = false) {
   const line = String(text || '').trim()
   const files = [].concat(file || []).filter(Boolean)
   if ((!line && !files.length) || $talk.get().busy) return
+  // A standing question ("What needs me today?") is answered from the desk, with no model (instant.py). Anything else,
+  // anything with a file, and "Ask Hermes instead" go to Hermes as before.
+  if (lane === 'desk' && !files.length && !toModel && line.length < 80) {
+    setTalk({ busy: true })
+    const quick = await rest('/instant', { method: 'POST', body: { text: line } }).catch(() => null)
+    setTalk({ busy: false })
+    if (quick && quick.kind) {
+      ++talking.turn
+      $talk.set({ busy: false, open: true, turns: $talk.get().turns.slice(-7).concat([{ you: line, file: '', lane, reply: quick.text, note: '', error: '', instant: quick.said || 'No model used' }]) })
+      return
+    }
+  }
   const turn = ++talking.turn
   talking.lane = lane
   const session = sessions[lane]
@@ -2494,6 +2506,8 @@ const CSS = `
 .stoa-icon[data-kind="send"]:hover { background: var(--stoa-accent); opacity: .88; }
 .stoa-icon[data-kind="send"]:disabled { opacity: .32; }
 .stoa-icon[data-on="1"] { color: var(--ui-red); background: color-mix(in srgb, var(--ui-red) 14%, transparent); animation: stoa-pulse 1.4s ease-in-out infinite; }
+.stoa-turninstant { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin-top: 10px; font: 10.5px var(--stoa-mono); letter-spacing: .06em; color: var(--ui-text-tertiary); }
+.stoa-turninstant .stoa-linkbtn { font: inherit; letter-spacing: inherit; }
 .stoa-turnhint { margin-top: 10px; padding: 8px 10px; border: 1px dotted var(--ui-stroke-primary); border-radius: var(--stoa-r); color: var(--ui-text-primary); font-size: 13px; }
 .stoa-filechips { display: flex; flex-wrap: wrap; gap: 0 2px; }
 .stoa-filechip { display: inline-flex; align-items: center; gap: 6px; margin: 1px 0 6px 4px; padding: 2px 3px 2px 9px; border: 1px solid var(--ui-stroke-secondary); border-radius: var(--stoa-r); font-family: var(--stoa-mono); font-size: 11.5px; color: var(--ui-text-secondary); }
@@ -4796,7 +4810,10 @@ function Dock({ state }) {
         turn.reply ? h(Words, { text: turn.reply }) : null,
         turn.note ? h('div', { className: 'stoa-sub stoa-working', style: { marginTop: 8 } }, turn.note) : null,
         turn.error ? h('div', { style: { marginTop: 8, color: 'var(--ui-red)' } }, turn.error) : null,
-        turn.hint ? h('div', { className: 'stoa-turnhint', role: 'note' }, turn.hint) : null)))
+        turn.hint ? h('div', { className: 'stoa-turnhint', role: 'note' }, turn.hint) : null,
+        turn.instant ? h('div', { className: 'stoa-turninstant' }, h('span', null, turn.instant),
+          h('button', { type: 'button', className: 'stoa-linkbtn', disabled: talk.busy, title: 'Send the same question to Hermes, which reads the desk with its tools and answers in its own words',
+            onClick: () => say(turn.you, null, 'desk', false, true) }, 'Ask Hermes instead')) : null)))
       : talk.turns.length ? h('div', { className: 'stoa-hints' },
         h('button', { type: 'button', className: 'stoa-hint', onClick: () => setTalk({ open: true }) }, 'Show the conversation'))
         : !text && !files.length ? h('div', { className: 'stoa-hints' }, hints.map(hint =>
@@ -5261,7 +5278,8 @@ const BY_HAND = ['Drag a card to another column to move it; drop it on the last 
   'Press a card or a row to open the record: advance it, mark the step done, snooze it, or edit any fact.', 'Drop a CSV anywhere on the page. It comes back as a review; nothing is written until you apply.',
   'Use the microphone in the box at the foot of the page to dictate.']
 const TYPED = [['/gtm', 'the board, in any Hermes chat'], ['/gtm today', 'what needs you, most pressing first'],
-  ['/gtm cash', 'won, invoiced, collected, overdue, and the forecast'], ['/gtm brief', 'the morning brief'], ['/gtm <name>', 'one record as a card'],
+  ['/gtm cash', 'won, invoiced, collected, overdue, and the forecast'], ['/gtm brief', 'the morning brief'], ['/gtm quiet, week, report', 'who has gone quiet, what moved this week, each pipeline by stage: every pipeline, no model'],
+  ['/gtm <name>', 'one record as a card'],
   ['/gtm map', 'your market map'], ['!gtm …', 'the same in Slack, which keeps the slash for itself'], ['/blueprint', 'switch on an automation'], ['hermes stoa status', 'in a terminal: what is connected']]
 const ALWAYS = ['Keeps one ledger: every change to a record or a person, what it replaced and what it left. Lines are never altered.',
   'Keeps each person once, however many records they are on.', 'Gives each record one next step and a date, and tells you when the date comes.',

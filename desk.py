@@ -241,6 +241,11 @@ class Desk:
         from .handoff import Handoffs
         return self._part("handoffs", Handoffs)
 
+    @property
+    def instant(self):
+        from .instant import Instant
+        return Instant(self)            # nothing kept: it reads the desk each time
+
     def _store_at(self, name: str) -> st.Store:
         path = str(self.data_dir / name)
         if path not in self._stores:
@@ -4254,6 +4259,7 @@ class Desk:
             return cards.board_text(playbook, everyone, total=self.sum, staged=self.stage_sums(everyone))
         if word == "help":
             return ("/gtm — the pipeline board\n/gtm today — what needs you, most pressing first\n/gtm cash — won, invoiced, collected, overdue, and the forecast\n/gtm brief — the morning brief\n/gtm stale — records gone quiet\n"
+                    "/gtm quiet — who has gone quiet, in every pipeline\n/gtm week — what moved this week, in every pipeline\n/gtm report — each pipeline by stage\n"
                     "/gtm due — next steps due\n/gtm map [market] — a market map\n/gtm <name> — one record's card\n"
                     "/gtm playbooks — available playbooks\nIn Slack, type !gtm: Slack keeps the slash for its own commands.")
         if word == "map" or word.startswith("map "):
@@ -4264,6 +4270,10 @@ class Desk:
                 return shown["map"]
             names = shown.get("markets")
             return shown["error"] + ("\n" + "\n".join("  " + n for n in names) if names else "")
+        if word in ("quiet", "week", "report"):          # every pipeline, as the talk box on the page answers them
+            from .instant import SAID
+            with self.on(""):
+                return self.instant.answer(word) + "\n\n_%s_" % SAID
         if word == "brief":
             return self.brief_text()
         if word == "today":

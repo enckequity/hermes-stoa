@@ -1083,6 +1083,33 @@ class CandidateMapTests(unittest.TestCase):
             {"company": "Luis Ortega", "size": "Events Manager", "uses": "Brindlemoor Care Association", "segment": "Association event leads", "fit": 4, "why": "Runs a 3,200-person convention."},
             {"company": "Priya Nand", "size": "Meetings Lead", "uses": "probably somewhere in Dayton (not confirmed)", "segment": "Association event leads", "fit": 3, "why": "Listed on a conference page."}]})
 
+    def test_standing_questions_are_answered_from_the_desk_with_no_model(self):
+        from stoa import instant
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        desk = make_desk(tmp.name, playbook="b2b-sales")
+        demo.load(desk)
+        for asked, kind in (("What needs me today?", "today"), ("who's gone quiet", "quiet"), ("What moved this week?", "week"),
+                            ("Give me the morning brief.", "brief"), ("Pipeline report", "report"), ("What needs me today, and why?", ""), ("today", "")):
+            self.assertEqual(instant.match(asked), kind, asked)
+        today = desk.pipeline({"view": "today"})
+        said = desk.instant.answer("today")
+        self.assertIn("%d overdue" % today["counts"]["overdue"], said)
+        self.assertIn(today["overdue"][0]["name"], said)
+        quiet = desk.pipeline({"view": "brief"})["stale"]
+        self.assertTrue(all(row["name"] in desk.instant.answer("quiet") for row in quiet))
+        self.assertIn("**In the last seven days:**", desk.instant.answer("week"))
+        self.assertIn(desk.reports.tool({"action": "read", "report": "stages"})["says"], desk.instant.answer("report"))
+        self.assertEqual(desk.instant.answer("nothing"), "")
+        # Every pipeline, each under its name.
+        self.assertTrue(desk.playbook_tool({"action": "add_pipeline", "pipeline_name": "Partners", "playbook": "b2b-sales"})["ok"])
+        both = desk.instant.answer("quiet")
+        self.assertIn("### Partners", both)
+        self.assertIn("Nobody has gone quiet.", both)
+        # The same answers from /gtm in any chat, and from the page's route.
+        self.assertIn("**In the last seven days:**", desk.slash("week"))
+        self.assertIn("no model used", desk.slash("quiet"))
+
     def test_the_downloaded_page_is_made_from_the_gtm_tab_and_keeps_in_step_with_it(self):
         from stoa import page
         # Whoever is put forward at a company is someone still there, with what they do.
@@ -4449,6 +4476,14 @@ class DashboardApiTests(unittest.TestCase):
         self.desk = make_desk(self.tmp.name)
         self.api._profile_desk = lambda: self.desk          # the real desk() then picks the pipeline, as it does for a request
         fixture.load(self.desk)
+
+    def test_the_talk_box_has_standing_questions_answered_with_no_model(self):
+        told = self.api.instant({"text": "Who has gone quiet?"})
+        self.assertEqual((told["kind"], told["said"]), ("quiet", "Read from the desk · no model used"))
+        self.assertEqual(told["text"], self.desk.instant.answer("quiet"))
+        self.assertEqual(self.api.instant({"text": "Who has gone quiet, and what should I send each of them?"}), {"kind": ""})
+        self.assertEqual(self.api.instant({"kind": "week"})["kind"], "week")
+        self.assertEqual(self.api.instant({"kind": "anything"}), {"kind": ""})
 
     def test_the_page_is_told_how_to_lay_a_desk_out(self):
         library = Library()

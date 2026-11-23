@@ -1148,6 +1148,18 @@ def _changed(work):
     return out
 
 
+@router.post("/instant")
+def instant(body: dict = Body(...)) -> dict:
+    """A standing question asked in the page's talk box ("What needs me today?"), answered from the desk with no model.
+    ``{"kind": ""}`` when it is not one of them, and the page sends it to Hermes as before."""
+    body = body or {}
+    module = _mod("instant")
+    kind = str(body.get("kind") or "") if body.get("kind") in module.KINDS else module.match(body.get("text"))
+    if not kind:
+        return {"kind": ""}
+    return {"kind": kind, "text": _whole(lambda d: d.instant.answer(kind))[1], "said": module.SAID}
+
+
 @router.get("/motions")
 def motions_list() -> dict:
     return _whole(lambda d: d.motions.listing())[1]
