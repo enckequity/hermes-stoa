@@ -246,7 +246,18 @@ const LANES = {
   maps: { key: 'research', title: 'Stoa map research', name: 'Map research', where: 'beside Map facts' }
 }
 const sessions = { desk: { runtime: '', stored: '', primed: false, left: '' }, maps: { runtime: '', stored: '', primed: false, left: '' } }
-const talking = { turn: 0, lane: 'desk' }      // the turn in flight, and which conversation it went to
+const talking = { turn: 0, lane: 'desk', unseen: [] }      // the turn in flight, which conversation it went to, and answers made with no model
+// What the desk answered by itself (instant.py) never went to Hermes. It goes with the next message that does, so a
+// follow-up ("draft a nudge to the first one") has the list it points at. Only the last few, and not too long.
+const UNSEEN_MOST = 3, UNSEEN_CHARS = 2400
+function unseenLines() {
+  const kept = talking.unseen.slice(-UNSEEN_MOST)
+  talking.unseen = []
+  if (!kept.length) return ''
+  let text = kept.map(one => 'Asked: ' + one.you + '\nAnswered from the desk: ' + one.text).join('\n\n')
+  if (text.length > UNSEEN_CHARS) text = text.slice(text.length - UNSEEN_CHARS)
+  return '(Before this, in the talk box, the desk answered by itself, without you. The person has seen it:\n' + text + ')\n\n'
+}
 const setTalk = patch => $talk.set({ ...$talk.get(), ...patch })
 const kept = lane => (storage && storage.get(LANES[lane].key, {})) || {}
 const keep = (lane, patch) => { if (storage) storage.set(LANES[lane].key, { ...kept(lane), ...patch }) }
@@ -322,7 +333,7 @@ function freshTalk(lane = 'desk') {
   const left = session.stored || kept(lane).stored || session.left || ''
   Object.assign(session, { runtime: '', stored: '', primed: false, left })
   keep(lane, { stored: '', left })
-  if (lane === 'desk') $talk.set({ busy: false, open: false, turns: [] })
+  if (lane === 'desk') { $talk.set({ busy: false, open: false, turns: [] }); talking.unseen = [] }
   host.notify({ kind: 'success', message: lane === 'desk' ? 'The next thing you say starts a new conversation. The old one is still in the sidebar.'
     : 'The next thing you ask of a map starts a new research conversation. The old one is still in the sidebar.' })
 }
@@ -460,6 +471,7 @@ async function say(text, file, lane = 'desk', fromBox = false, toModel = false) 
     setTalk({ busy: false })
     if (quick && quick.kind) {
       ++talking.turn
+      talking.unseen.push({ you: line, text: quick.text })
       $talk.set({ busy: false, open: true, turns: $talk.get().turns.slice(-7).concat([{ you: line, file: '', lane, reply: quick.text, note: '', error: '', instant: quick.said || 'No model used' }]) })
       return
     }
@@ -471,7 +483,9 @@ async function say(text, file, lane = 'desk', fromBox = false, toModel = false) 
   const typed = files.filter(item => typeof item.text === 'string').reduce((all, item) => all + '\n\nAttached file "' + item.name + '":\n```\n' + item.text + '\n```', shown)
   const whole = files.filter(item => item.file)
   const here = onScreen()
-  const sent = here ? '(On screen on the Stoa page: ' + here + '.)\n\n' + typed : typed
+  const held = lane === 'desk' ? talking.unseen.slice() : []
+  const before = lane === 'desk' ? unseenLines() : ''
+  const sent = before + (here ? '(On screen on the Stoa page: ' + here + '.)\n\n' + typed : typed)
   $talk.set({ busy: true, open: true,
     turns: $talk.get().turns.slice(-7).concat([{ you: shown, file: files.map(item => item.name).join(', '), lane, reply: '', note: 'Sending…', error: '' }]) })
   let reached = false      // whether Hermes took the message: until it has, a failure gives the words and the files back
@@ -502,6 +516,7 @@ async function say(text, file, lane = 'desk', fromBox = false, toModel = false) 
     const back = !reached && lane === 'desk' && (files.length > 0 || fromBox)
     const said = String((error && error.message) || error).trim()
     setTurn({ note: '', error: 'Hermes could not take that: ' + said + (/[.!?]$/.test(said) ? '' : '.') + (back ? (files.length ? ' Your words and files are back in the box.' : ' Your words are back in the box.') : '') })
+    if (!reached && held.length) talking.unseen = held.concat(talking.unseen)      // still unseen: they go with the next one
     if (back) {      // typed words and picked files are a person's work: a failed hand-over does not throw them away
       if (files.length && !$attached.get().length) $attached.set(files)
       if (line) $draft.set(line)
