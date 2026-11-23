@@ -4608,6 +4608,12 @@ class DashboardApiTests(unittest.TestCase):
         with self.assertRaises(self.api.HTTPException):
             self.api.act(nadia, {"verb": "move", "stage": "no-such-stage"})
 
+    def test_a_message_from_the_talk_box_says_what_is_on_screen(self):
+        source = (ROOT / "desktop" / "plugin.js").read_text(encoding="utf-8")
+        for piece in ("'(On screen on the Stoa page: ' + here + '.)\\n\\n' + typed", "seen = { tab, paged, open: top ? { kind: top.kind, id: top.id } : null",
+                      "bits.push(...gtmLooking(page.market))", "'the motion open is “' + motion.name + '”'", "when it says \"this\" or '"):
+            self.assertIn(piece, source)
+
     def test_the_page_script_parses(self):
         # `node --check plugin.js` passes whatever is in the file: node has to be told it is a module to read it as one.
         import shutil, subprocess

@@ -328,18 +328,25 @@ function freshTalk(lane = 'desk') {
 }
 const PRIME = 'This conversation is the talk box on the Stoa desk page. Act on the Stoa desk with the gtm tools, and answer in a few '
   + 'short lines: the page already shows the pipeline. What is said here is for the desk: do not also write it to another system '
-  + '(a spreadsheet, another CRM, email) unless asked to.\n\n'
+  + '(a spreadsheet, another CRM, email) unless asked to. A message may start with what is on screen, in brackets: when it says "this" or '
+  + '"here", that is what it means; it is for you to read, not to repeat.\n\n'
 const PRIME_MAPS = 'This conversation is the Stoa page\'s research on market maps. Each request names the map it is about. Do the research with '
   + 'your web tools and gtm_market, record what you find on that map with its source, and answer in a few short lines: the page '
   + 'already shows the map. Never guess a fact; leave out what no source says.\n\n'
 
-/** The name of the pipeline the page is showing, when the desk has more than one ('' otherwise). */
+// What the person has in front of them: the page notes it each time it draws (the tab, and the record, group or
+// company that is open), so a message typed on the desk carries it and "this" means something to the agent.
+let seen = null
+const TAB_WORDS = { today: 'Today', market: 'GTM', pipeline: 'Pipeline', reports: 'Dashboard', database: 'Data', activity: 'Log', cash: 'Production', setup: 'Setup' }
 function onScreen() {
-  const state = queryClient.getQueryData(STATE)
-  const pipes = (state && state.pipelines) || []
-  if (pipes.length < 2) return ''
-  const found = pipes.find(item => item.id === state.pipeline)
-  return found ? found.name : ''
+  if (!seen) return ''
+  const page = seen, bits = ['the ' + (TAB_WORDS[page.tab] || page.tab) + ' tab']
+  const pipes = page.pipelines || []
+  const pipe = pipes.length > 1 ? ((pipes.find(one => one.id === page.pipeline) || {}).name || '') : ''
+  if (page.tab === 'market') bits.push(...gtmLooking(page.market))
+  else if (pipe) bits.push('the pipeline showing is “' + pipe + '”')
+  if (page.open && page.paged) bits.push('the ' + page.open.kind + ' open is “' + (page.record || page.open.id) + '”' + (page.open.kind === 'record' ? ' (id ' + page.open.id + ')' : ''))
+  return bits.join('; ')
 }
 
 /** Change the turn being answered, which is always the last one. */
@@ -464,7 +471,7 @@ async function say(text, file, lane = 'desk', fromBox = false, toModel = false) 
   const typed = files.filter(item => typeof item.text === 'string').reduce((all, item) => all + '\n\nAttached file "' + item.name + '":\n```\n' + item.text + '\n```', shown)
   const whole = files.filter(item => item.file)
   const here = onScreen()
-  const sent = here ? '(On the Stoa page I am looking at the pipeline “' + here + '”.)\n\n' + typed : typed
+  const sent = here ? '(On screen on the Stoa page: ' + here + '.)\n\n' + typed : typed
   $talk.set({ busy: true, open: true,
     turns: $talk.get().turns.slice(-7).concat([{ you: shown, file: files.map(item => item.name).join(', '), lane, reply: '', note: 'Sending…', error: '' }]) })
   let reached = false      // whether Hermes took the message: until it has, a failure gives the words and the files back
@@ -2251,9 +2258,20 @@ function PipelinesHead({ state, showPipe, filter, openGroup }) {
       done: id => { setAdding(false); if (id) showPipe(id) } }) : null,
     narrowed ? h(GroupFigures, { group: narrowed, card, one }) : h(Figures, { card, data }))
 }
-  return { $gtmView, GtmTab, MapStrategy, MapNumbers, MapArchive, PipelinesHead }
+  /** What the GTM tab is showing, in words for the agent: the view, and the map or motion that is open. */
+  function gtmLooking(market) {
+    const view = $gtmView.get(), bits = [view === 'motions' ? 'the Motions view' : view === 'assets' ? 'the Assets view' : 'the Maps view']
+    if (view === 'maps' && market) bits.push('the market map showing is “' + market + '”')
+    if (view === 'motions' && $motionOpen.get()) {
+      const listed = queryClient.getQueryData(KEY.concat(['list']))
+      const motion = listed && (listed.motions || []).find(one => one.id === $motionOpen.get())
+      if (motion) bits.push('the motion open is “' + motion.name + '”')
+    }
+    return bits
+  }
+  return { $gtmView, GtmTab, MapStrategy, MapNumbers, MapArchive, PipelinesHead, gtmLooking }
 })()
-const { $gtmView, GtmTab, MapStrategy, MapNumbers, MapArchive, PipelinesHead } = GTM
+const { $gtmView, GtmTab, MapStrategy, MapNumbers, MapArchive, PipelinesHead, gtmLooking } = GTM
 
 const CSS = `
 /* The look. Surfaces, words and lines are the app's theme (--ui-*), so every theme carries it.
@@ -8660,6 +8678,8 @@ function Page() {
         : top.kind === 'client' ? h(ClientPage, { key: 'cl:' + top.id, name: top.id, state, back, backLabel, openRecord, openGroup })
           : h(CompanyPage, { key: 'c:' + top.id, name: top.id, state, back, backLabel, openRecord, openGroup })
   const paged = Boolean(sheet) && ['today', 'pipeline', 'database', 'cash', 'reports', 'activity'].includes(tab)
+  seen = { tab, paged, open: top ? { kind: top.kind, id: top.id } : null, pipeline: state.pipeline, pipelines: state.pipelines,
+    market: market ? market.name : '', record: top && top.kind === 'record' ? ((state.deals.find(deal => deal.id === top.id) || {}).name || '') : '' }
   const nothing = h('div', { className: 'stoa-sub' },
     h('p', { style: { marginTop: 0 } }, 'Nothing on the desk yet. Add a ' + pb.terms.deal + ' with the button above, tell Stoa about one below, drop a list on the page, or ask it to map a market.'),
     h(Btn, { onClick: () => setTab('setup') }, 'See how it works, or look around with sample data'))
