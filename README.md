@@ -302,8 +302,11 @@ It runs no shell commands and no background processes. The detail follows.
   desk**, and the market map keeps another for its research, named **Stoa map research**: each is created and resumed through the gateway (`host.request`: `session.create`,
   `session.resume`, `prompt.submit`; **New conversation** makes another, with the day and time
   in its name), it is sent only what you type or dictate there or what a button you press on the page asks for (with a short
-  note of context on its first message and, on a desk with more than one pipeline, a line saying
-  which pipeline the page is showing; both can be read in that conversation), and the page listens
+  note of context on its first message, a line saying what is on screen (the tab, the GTM view, the
+  pipeline, and the map, motion or record open), and the last few answers the desk gave in the dock
+  by itself since the previous message; all of it can be read in that conversation). Five standing
+  questions asked in the dock are answered by the plugin's own backend and not sent at all until
+  the next message is. The page listens
   to the gateway's events for those two conversations alone to show you the reply. The model pickers (under the dock, and **Research:** on the market map) ask Hermes for the models this profile can
   use (`model.options`) and set the one you pick on that conversation alone (`config.set` with
   `--session`, the call the app's own picker makes); the pick is kept in the plugin's page storage
