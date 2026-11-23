@@ -26,14 +26,16 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import sqlite3
-from contextlib import closing
+from contextlib import closing, contextmanager
 from typing import Any, Optional
 
 from .motions import company_key
+from .store import _statements
 
 log = logging.getLogger("hermes.plugins.stoa")
 KEEP = "handover"       # in pipelines.json: {lead pipeline id: {"to": deal pipeline id, or "" for none}}
 KIND_WORDS = {"lead": "Lead pipeline", "deal": "Deal pipeline"}
+SCHEMA_VERSION = 1
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS handoffs (
@@ -58,14 +60,48 @@ class Handoffs:
         self.desk = desk
         self.path = desk.data_dir / "handoffs.db"
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with closing(self._open()) as db, db:
-            db.executescript(SCHEMA)
+        with closing(self._open()) as db:
+            if db.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
+                db.execute("PRAGMA journal_mode=WAL")
+                db.execute("BEGIN IMMEDIATE")
+                try:
+                    if db.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
+                        for stmt in _statements(SCHEMA):
+                            db.execute(stmt)
+                        db.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
+                    db.execute("COMMIT")
+                except BaseException:
+                    if db.in_transaction:
+                        db.execute("ROLLBACK")
+                    raise
 
     def _open(self) -> sqlite3.Connection:
-        db = sqlite3.connect(str(self.path), timeout=15)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA busy_timeout=15000")
+        db = sqlite3.connect(str(self.path), timeout=15, isolation_level=None)
+        try:
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA busy_timeout=15000")
+            db.execute("PRAGMA synchronous=NORMAL")
+        except BaseException:
+            db.close()
+            raise
         return db
+
+    @contextmanager
+    def _tx(self):
+        db = self._open()
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                yield db
+            except BaseException:
+                if db.in_transaction:
+                    db.execute("ROLLBACK")
+                raise
+            else:
+                if db.in_transaction:
+                    db.execute("COMMIT")
+        finally:
+            db.close()
 
     # -- which there are -------------------------------------------------------------------------------------
     def listed(self) -> list:
@@ -188,12 +224,12 @@ class Handoffs:
 
     def _claim(self, lead_pipeline: str, lead_id: str, target: str) -> bool:
         """Say that this lead is being handed over, before anything is written. Only one caller gets it."""
-        with closing(self._open()) as db, db:
+        with self._tx() as db:
             return db.execute("INSERT OR IGNORE INTO handoffs (lead_pipeline, lead, deal_pipeline, deal, at, how) VALUES (?,?,?,?,?,?)",
                               (lead_pipeline, lead_id, target, "", now(), "claim")).rowcount == 1
 
     def _settle(self, lead_pipeline: str, lead_id: str, deal_id: str = "", how: str = "") -> None:
-        with closing(self._open()) as db, db:
+        with self._tx() as db:
             if deal_id:
                 db.execute("UPDATE handoffs SET deal = ?, how = ?, at = ? WHERE lead_pipeline = ? AND lead = ?", (deal_id, how, now(), lead_pipeline, lead_id))
             else:                   # it failed: the claim goes, so it can be tried again

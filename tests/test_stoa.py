@@ -6935,6 +6935,38 @@ class StorageHardeningTests(unittest.TestCase):
         self.assertEqual(len({id(d) for d in got}), 1)
         self.assertFalse(got[0].can_configure)
 
+    def test_handoffs_and_motions_wal_user_version_and_concurrent_add(self):
+        from stoa.motions import Refused
+        desk = make_desk(self.tmp.name)
+        for obj in (desk.handoffs, desk.motions):
+            db = obj._open()
+            try:
+                self.assertEqual(db.execute("PRAGMA journal_mode").fetchone()[0].lower(), "wal")
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 1)
+                self.assertGreaterEqual(db.execute("PRAGMA busy_timeout").fetchone()[0], 15000)
+            finally:
+                db.close()
+
+        barrier = threading.Barrier(4)
+        ok, refused, errors = [], [], []
+
+        def make_motion():
+            try:
+                barrier.wait(timeout=5)
+                ok.append(desk.motions.add({"name": "Concurrent Push", "kind": "outbound"}))
+            except Refused:
+                refused.append(1)
+            except BaseException as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=make_motion) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+        self.assertEqual(errors, [])
+        self.assertEqual((len(ok), len(refused)), (1, 3))
+
 
 if __name__ == "__main__":
     unittest.main()

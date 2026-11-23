@@ -42,8 +42,10 @@ import json
 import re
 import sqlite3
 import uuid
-from contextlib import closing
+from contextlib import closing, contextmanager
 from typing import Any, Optional
+
+from .store import _statements
 
 
 KINDS = {"outbound": "Outbound", "event": "Event", "ads": "Digital ads", "content": "Content", "partner": "Partnership",
@@ -57,6 +59,8 @@ WATCH_MIN = 4           # a watched word shorter than this would match far too m
 SUFFIXES = {"inc", "incorporated", "llc", "ltd", "limited", "corp", "corporation", "co", "company", "gmbh", "plc", "sa", "ag", "bv", "the"}
 TOUCH_KINDS = ("note", "call", "email", "meeting", "task")      # what a person or an agent logs; stage moves are kept apart
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+SCHEMA_VERSION = 1
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS motions (
@@ -141,16 +145,28 @@ class Motions:
         self.desk = desk
         self.path = desk.data_dir / "motions.db"
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with closing(self._open()) as db, db:
-            db.executescript(SCHEMA)
-            have = {row["name"] for row in db.execute("PRAGMA table_info(motions)")}
-            for column in ("tags TEXT NOT NULL DEFAULT '[]'", "market_pipeline TEXT NOT NULL DEFAULT ''"):      # a file from an earlier version
-                if column.split()[0] not in have:
-                    try:
-                        db.execute("ALTER TABLE motions ADD COLUMN " + column)
-                    except sqlite3.OperationalError as exc:      # another process added it a moment ago
-                        if "duplicate column" not in str(exc).lower():
-                            raise
+        with closing(self._open()) as db:
+            if db.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
+                db.execute("PRAGMA journal_mode=WAL")
+                db.execute("BEGIN IMMEDIATE")
+                try:
+                    if db.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
+                        for stmt in _statements(SCHEMA):
+                            db.execute(stmt)
+                        have = {row["name"] for row in db.execute("PRAGMA table_info(motions)")}
+                        for column in ("tags TEXT NOT NULL DEFAULT '[]'", "market_pipeline TEXT NOT NULL DEFAULT ''"):      # a file from an earlier version
+                            if column.split()[0] not in have:
+                                try:
+                                    db.execute("ALTER TABLE motions ADD COLUMN " + column)
+                                except sqlite3.OperationalError as exc:      # another process added it a moment ago
+                                    if "duplicate column" not in str(exc).lower():
+                                        raise
+                        db.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
+                    db.execute("COMMIT")
+                except BaseException:
+                    if db.in_transaction:
+                        db.execute("ROLLBACK")
+                    raise
         self._gather()
 
     def pairs(self) -> dict:
@@ -158,33 +174,59 @@ class Motions:
         return self.desk.handoffs.pairs()
 
     def _open(self) -> sqlite3.Connection:
-        db = sqlite3.connect(str(self.path), timeout=15)
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA busy_timeout=15000")
+        db = sqlite3.connect(str(self.path), timeout=15, isolation_level=None)
+        try:
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA busy_timeout=15000")
+            db.execute("PRAGMA synchronous=NORMAL")
+        except BaseException:
+            db.close()
+            raise
         return db
+
+    @contextmanager
+    def _tx(self):
+        db = self._open()
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                yield db
+            except BaseException:
+                if db.in_transaction:
+                    db.execute("ROLLBACK")
+                raise
+            else:
+                if db.in_transaction:
+                    db.execute("COMMIT")
+        finally:
+            db.close()
 
     def _all(self, sql: str, args: tuple = ()) -> list:
         with closing(self._open()) as db:
             return [dict(row) for row in db.execute(sql, args).fetchall()]
 
     def _run(self, sql: str, args: tuple = ()) -> None:
-        with closing(self._open()) as db, db:
+        with self._tx() as db:
             db.execute(sql, args)
 
     def _gather(self) -> None:
         """Motions were first kept one set to a pipeline. Bring any such sets together as the desk's own: each keeps
         its map by remembering which pipeline the map is in, and its hand-made links by naming that pipeline too."""
-        files = {entry.get("file"): entry["id"] for entry in self.desk.pipelines()}
-        taken = {fold(row["name"]) for row in self._all("SELECT name FROM motions WHERE scope = ? AND removed = 0", (DESK,))}
-        for row in self._all("SELECT id, scope, name FROM motions WHERE scope != ? AND scope NOT LIKE 'tour-%'", (DESK,)):
-            pipeline = files.get(row["scope"], "main")
-            name = row["name"]
-            if fold(name) in taken:
-                name = "%s (%s)" % (name, next((entry["name"] for entry in self.desk.pipelines() if entry["id"] == pipeline), pipeline))
-            taken.add(fold(name))
-            self._run("UPDATE motions SET scope = ?, market_pipeline = ?, name = ? WHERE id = ?", (DESK, pipeline, name, row["id"]))
-            for link in self._all("SELECT deal FROM links WHERE motion = ? AND deal NOT LIKE '%:%'", (row["id"],)):
-                self._run("UPDATE OR REPLACE links SET deal = ? WHERE motion = ? AND deal = ?", (pipeline + ":" + link["deal"], row["id"], link["deal"]))
+        if not self._all("SELECT 1 FROM motions WHERE scope != ? AND scope NOT LIKE 'tour-%' LIMIT 1", (DESK,)):
+            return
+        pipes = self.desk.pipelines()
+        files = {entry.get("file"): entry["id"] for entry in pipes}
+        with self._tx() as db:
+            taken = {fold(row["name"]) for row in db.execute("SELECT name FROM motions WHERE scope = ? AND removed = 0", (DESK,)).fetchall()}
+            for row in db.execute("SELECT id, scope, name FROM motions WHERE scope != ? AND scope NOT LIKE 'tour-%'", (DESK,)).fetchall():
+                pipeline = files.get(row["scope"], "main")
+                name = row["name"]
+                if fold(name) in taken:
+                    name = "%s (%s)" % (name, next((entry["name"] for entry in pipes if entry["id"] == pipeline), pipeline))
+                taken.add(fold(name))
+                db.execute("UPDATE motions SET scope = ?, market_pipeline = ?, name = ? WHERE id = ?", (DESK, pipeline, name, row["id"]))
+                for link in db.execute("SELECT deal FROM links WHERE motion = ? AND deal NOT LIKE '%:%'", (row["id"],)).fetchall():
+                    db.execute("UPDATE OR REPLACE links SET deal = ? WHERE motion = ? AND deal = ?", (pipeline + ":" + link["deal"], row["id"], link["deal"]))
 
     # -- which set of motions is in hand, and the pipelines they read ---------------------------------------------
     def scope(self) -> str:
@@ -326,23 +368,31 @@ class Motions:
 
     def add(self, fields: dict) -> dict:
         clean = self._clean(dict(fields, name=fields.get("name") or ""))
-        if any(fold(row["name"]) == fold(clean["name"]) for row in self.rows()):
-            raise Refused("There is already a motion called %s." % clean["name"])
         motion_id, stamp = "m" + uuid.uuid4().hex[:8], now()
         clean.setdefault("kind", "other")
         clean.setdefault("status", "idea")
         columns = ["id", "scope", "created_at", "updated_at"] + list(clean)
-        self._run("INSERT INTO motions (%s) VALUES (%s)" % (", ".join(columns), ", ".join("?" * len(columns))),
-                  tuple([motion_id, self.scope(), stamp, stamp] + self._stored(clean)))
+        scope = self.scope()
+        with self._tx() as db:
+            existing = db.execute("SELECT name FROM motions WHERE scope = ? AND removed = 0", (scope,)).fetchall()
+            if any(fold(row["name"]) == fold(clean["name"]) for row in existing):
+                raise Refused("There is already a motion called %s." % clean["name"])
+            db.execute("INSERT INTO motions (%s) VALUES (%s)" % (", ".join(columns), ", ".join("?" * len(columns))),
+                       tuple([motion_id, scope, stamp, stamp] + self._stored(clean)))
         return self.find(motion_id)
 
     def update(self, ref: Any, fields: dict) -> dict:
         motion = self.find(ref)
         clean = self._clean(fields, motion)
-        if "name" in clean and any(fold(row["name"]) == fold(clean["name"]) and row["id"] != motion["id"] for row in self.rows()):
-            raise Refused("There is already a motion called %s." % clean["name"])
         if clean:
-            self._run("UPDATE motions SET %s, updated_at = ? WHERE id = ?" % ", ".join("%s = ?" % key for key in clean), tuple(self._stored(clean)) + (now(), motion["id"]))
+            scope = self.scope()
+            with self._tx() as db:
+                if "name" in clean:
+                    existing = db.execute("SELECT id, name FROM motions WHERE scope = ? AND removed = 0", (scope,)).fetchall()
+                    if any(fold(row["name"]) == fold(clean["name"]) and row["id"] != motion["id"] for row in existing):
+                        raise Refused("There is already a motion called %s." % clean["name"])
+                db.execute("UPDATE motions SET %s, updated_at = ? WHERE id = ?" % ", ".join("%s = ?" % key for key in clean),
+                           tuple(self._stored(clean)) + (now(), motion["id"]))
         return self.find(motion["id"])
 
     def remove(self, ref: Any) -> dict:
