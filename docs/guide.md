@@ -143,17 +143,24 @@ names and your pipeline.
 
 **Motions.** The plays that carry the go-to-market, grouped by where they stand: running,
 planned, ideas and finished. **+ New motion** takes a name, a kind (outbound, event, ads,
-content, partnership, referral, community), the map and segments it is aimed at, dates, a budget
+content, partnership, referral, community), the map and segments it is for, dates, a budget
 and words to watch for. **Suggest motions** has Hermes read the map and propose three as ideas.
+
+**Who a motion is run on** is its list. Pick companies on the map and press **Add to motion**:
+each is added to the pipeline as a lead (in your lead pipeline, if you have one) and put on the
+list. On the motion's page, add a record from any pipeline by name, or **New lead** for someone
+found elsewhere ("Name, Company"). A record's own page shows the motions it is on and puts it on
+another. Each on the list is added, reached, replied or meeting: a call or email logged on it
+counts as reached, and a meeting as a meeting, without anyone saying so.
 
 ![Motions: one running with its figures, one planned, and ideas](motions.jpg)
 
-Stoa credits a motion by itself, across every pipeline, and gives the reason each time: a record
-whose Source or notes mention it was sourced by it; a record at a company in its audience that
-came in while it ran was sourced by it, unless its Source says otherwise; one that was already in
-a pipeline and moved while it ran was influenced. A deal handed over from a credited lead is
-credited too, and the two count once. Open a motion to confirm a record, set one aside, add one
-Stoa missed, and log what it spent, reached, and the responses and meetings it got.
+Stoa credits a motion by itself, across every pipeline, and gives the reason each time: one the
+list brought into the pipeline (from the map, or as a new lead) was sourced by it, and one that
+was already in a pipeline was influenced; a record off the list whose Source or notes mention the
+motion counts too. Being at a company on the map is not enough. A deal handed over from a
+credited lead is credited too, and the two count once. Open a motion to confirm a record, set one
+aside, and log what it spent, reached, and the responses and meetings it got.
 
 ![One motion opened: what it brought in, the records it is credited with and why, results, and who it is for](motion.jpg)
 

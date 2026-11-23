@@ -325,6 +325,22 @@ class Desk:
                             "title": playbook.title, "file": "pipe-%s.db" % entry["id"], "first": False})
         return out
 
+    def lead_pipeline_for(self, deal_pipeline: str = "") -> str:
+        """Where a company found for a pipeline of deals starts: the desk's lead pipeline, as a lead, until it is handed
+        over and becomes a deal. The one that hands over to that pipeline, else the first lead pipeline; '' when the desk
+        has none (then it starts at the first stage of the pipeline itself), and on a tour."""
+        if self.tour():
+            return ""
+        leads = []
+        for entry in self.pipelines():
+            with self.on(entry["id"]):
+                if getattr(self.playbook(), "shape", "") == "leads":
+                    leads.append(entry["id"])
+        if not leads:
+            return ""
+        wanted = deal_pipeline or MAIN
+        return next((lead for lead in leads if self.handoffs.target_of(lead) == wanted), leads[0])
+
     def _pipe(self) -> dict:
         """The entry in pipelines.json for the pipeline the call in hand is about; ``{}`` for the first (and for an
         id that is not, or is no longer, a pipeline). This is on the path of every read and write: it stays cheap."""

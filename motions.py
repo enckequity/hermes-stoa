@@ -14,19 +14,26 @@ brings leads into a lead pipeline is still credited when those leads are handed 
 else: a lead and the deal it became count as one piece of business, and it is the deal's value and outcome that
 are counted.
 
-Nobody has to mark records by hand. Stoa works out what each motion is owed from what the desk already knows, and
-says why each time:
+Each motion keeps a **list**: who it is being run on. Anyone can be put on it, wherever they came from: companies
+picked on a market map (each is added as a lead as it is put on the list: in the desk's lead pipeline where the map
+is kept with a pipeline of deals, and it becomes a deal when it is handed over), records already in any pipeline, or
+one person on a record. A map company goes into a pipeline as it is put on the list, because there is no other place
+to keep it; anyone else on the list is a record already. Each one on the list has a status: added, reached, replied,
+meeting. A call or email logged on the record after it was added counts as reached, and a meeting as a meeting,
+without anyone saying so; replied is said by a person or the agent.
 
-1. A record whose Source names the motion, or one of the words the motion watches for, was sourced by it.
-2. So was a record with a note, call or email that mentions it, if the record came in while the motion ran; one
-   that was already in a pipeline is influenced.
-3. A record at a company in the motion's audience that came in while the motion ran was sourced by it, unless the
-   record's own Source says it came from somewhere else (a referral, the website, another play): then the motion
-   only influenced it. When two motions are aimed at the same company, the more closely aimed one takes it and the
-   other is influenced.
-4. A record at an audience company that was already in a pipeline, and moved or was touched while the motion ran,
-   is influenced.
-5. A deal that was handed over from a lead the motion is credited with is credited the same way.
+What a motion is credited with follows the list, and Stoa says why each time:
+
+1. A record on the list that being put on it brought into the pipeline (a company picked on the map, or a new lead
+   added there) was sourced by the motion. One that was already in a pipeline when it was added was influenced.
+2. A record off the list whose Source names the motion, or one of the words the motion watches for, was sourced by it.
+3. So was one with a note, call or email that mentions it, if the record came in while the motion ran; one that was
+   already in a pipeline is influenced.
+4. A deal that was handed over from a lead the motion is credited with is credited the same way.
+
+Being at a company on the map the motion is aimed at is not enough: the map says who a motion is for, and its
+companies are put on the list by picking them. Where two motions would both be credited with bringing in one record,
+the list wins over a mention, and between two mentions the motion that started last before the record came in.
 
 A person can overrule any of it: confirm a record, change sourced to influenced, or set a record aside so the
 motion never claims it again. What a person says always wins over what Stoa worked out.
@@ -52,6 +59,12 @@ KINDS = {"outbound": "Outbound", "event": "Event", "ads": "Digital ads", "conten
          "referral": "Referral", "community": "Community", "other": "Other"}
 STATUSES = {"idea": "Idea", "planned": "Planned", "running": "Running", "done": "Done", "stopped": "Stopped"}
 METRICS = {"spend": "Spent", "reach": "Reached", "responses": "Responses", "meetings": "Meetings"}
+STAGES = {"added": "Added", "reached": "Reached", "replied": "Replied", "meeting": "Meeting"}      # one on a motion's list, in order
+STAGE_ORDER = {stage: index for index, stage in enumerate(STAGES)}
+# How one came onto a list. Only "map" and "new" brought a record into the pipeline: the motion sourced it.
+VIA = {"map": "from the map", "new": "as a new lead", "record": "from the pipeline", "agent": "by the agent"}
+BROUGHT = ("map", "new")
+MOST_AT_ONCE = 50           # put on a list in one go
 FIELDS = ("name", "kind", "status", "goal", "market", "segments", "owner", "start_on", "end_on", "budget", "tags")
 DESK = "desk"           # the scope of a desk's own motions; a tour's are kept under its sample file's name
 GRACE = 30              # days after a motion ends in which a record coming in is still put down to it
@@ -60,7 +73,7 @@ SUFFIXES = {"inc", "incorporated", "llc", "ltd", "limited", "corp", "corporation
 TOUCH_KINDS = ("note", "call", "email", "meeting", "task")      # what a person or an agent logs; stage moves are kept apart
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2          # 2: the list (members)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS motions (
@@ -74,40 +87,45 @@ CREATE TABLE IF NOT EXISTS results (
 CREATE INDEX IF NOT EXISTS results_motion ON results (motion, on_date);
 CREATE TABLE IF NOT EXISTS links (motion TEXT NOT NULL, deal TEXT NOT NULL, how TEXT NOT NULL DEFAULT 'sourced', created_at TEXT NOT NULL,
   PRIMARY KEY (motion, deal));
+CREATE TABLE IF NOT EXISTS members (motion TEXT NOT NULL, deal TEXT NOT NULL, person TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'added',
+  via TEXT NOT NULL DEFAULT '', added_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (motion, deal));
 """
 
 TOOL = {
     "name": "gtm_motion",
     "description": (
-        "Go-to-market motions (an outbound push, an event, ads, content, a partnership) on the GTM tab: each is aimed at a market map or "
-        "some of its segments, and Stoa credits it, across every pipeline, with the records it sourced or influenced, saying why. Every "
-        "figure is counted by Stoa: don't redo the sums. Actions: list, get (one motion with its records and impact), add (a suggestion "
-        "takes status idea), update, log (a number as it runs: spend, reach, responses, meetings, or your own `metric`), link (a record "
-        "the motion `how`: sourced, influenced or none), unlink, remove."
+        "Go-to-market motions (an outbound push, an event, ads, content, a partnership) on the GTM tab. Each keeps a list of who it is run "
+        "on, and Stoa credits it, across every pipeline, with what that list and any mention of it brought in, saying why. Don't redo its sums. "
+        "Actions: list, get (one motion: its list, records and impact), add (a suggestion takes status idea), update, enroll (put on its list: "
+        "`deals`, records in any pipeline; or `companies` from its map, each added as a lead), mark (one on the list: `status`), drop (off the "
+        "list), log (spend, reach, responses, meetings, or your own `metric`), link (credit a record by hand, `how`), unlink, remove."
     ),
     "parameters": {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["list", "get", "add", "update", "log", "link", "unlink", "remove"]},
+            "action": {"type": "string", "enum": ["list", "get", "add", "update", "enroll", "mark", "drop", "log", "link", "unlink", "remove"]},
             "motion": {"type": "string", "description": "Its name or id."},
             "name": {"type": "string"},
             "kind": {"type": "string", "enum": list(KINDS)},
-            "status": {"type": "string", "enum": list(STATUSES)},
-            "goal": {"type": "string", "description": "What it is for, and what on the map led to it."},
-            "market": {"type": "string", "description": "The market map it is aimed at."},
-            "segments": {"type": "array", "items": {"type": "string"}, "description": "Leave out for the whole map."},
+            "status": {"type": "string", "description": "add/update: " + ", ".join(STATUSES) + ". mark: " + ", ".join(STAGES) + "."},
+            "goal": {"type": "string"},
+            "market": {"type": "string", "description": "The market map it is aimed at (who it is for)."},
+            "segments": {"type": "array", "items": {"type": "string"}},
             "owner": {"type": "string"},
             "start_on": {"type": "string", "description": "YYYY-MM-DD"},
             "end_on": {"type": "string", "description": "YYYY-MM-DD"},
             "budget": {"type": "number"},
-            "tags": {"type": "array", "items": {"type": "string"}, "description": "Words besides its name that credit a record whose Source or notes mention one."},
+            "tags": {"type": "array", "items": {"type": "string"}, "description": "Words that credit a record whose Source or notes mention one."},
+            "deals": {"type": "array", "items": {"type": "string"}, "description": "enroll: records, by name or id."},
+            "companies": {"type": "array", "items": {"type": "string"}, "description": "enroll: companies on the motion's map."},
+            "person": {"type": "string", "description": "enroll: who on the record it is aimed at."},
             "metric": {"type": "string"},
             "value": {"type": "number"},
-            "on": {"type": "string", "description": "log: YYYY-MM-DD, default today."},
+            "on": {"type": "string", "description": "log: YYYY-MM-DD."},
             "note": {"type": "string"},
-            "deal": {"type": "string", "description": "link/unlink: the record."},
+            "deal": {"type": "string", "description": "mark/drop/link/unlink: the record."},
             "how": {"type": "string", "enum": ["sourced", "influenced", "none"]},
-            "pipeline": {"type": "string", "description": "link/unlink: the record's pipeline, when two share a name."},
+            "pipeline": {"type": "string", "description": "The record's pipeline, when two share a name."},
         },
         "required": ["action"],
     },
@@ -126,6 +144,11 @@ def company_key(name: Any) -> str:
     """A company's name as two spellings of it would both come out: "Calder Bank, Inc." and "calder bank" are one."""
     words = [word for word in re.sub(r"[^0-9a-z]+", " ", str(name or "").casefold()).split() if word not in SUFFIXES]
     return " ".join(words)
+
+
+def brought_via(key: str, brought: Any, via: str) -> str:
+    """How one came onto a list: "map" or "new" where the adding made the record (``brought`` maps those keys), else ``via``."""
+    return brought.get(key, via) if isinstance(brought, dict) else via
 
 
 def domain_of(address: Any) -> str:
@@ -288,6 +311,9 @@ class Motions:
             return "", ""
         maps = self.maps()
         found = [one for one in maps if str(ref).strip() in (one["id"], one["key"]) or fold(one["name"]) == wanted] or [one for one in maps if wanted in fold(one["name"])]
+        if not found and ":" in str(ref):          # "pipeline:id" as a page writes it, where the first pipeline may be '' or 'main'
+            pipe, _, market_id = str(ref).strip().partition(":")
+            found = [one for one in maps if one["id"] == market_id and (one["pipeline"] == pipe or {one["pipeline"], pipe} <= {"", "main"})]
         if len(found) != 1:
             raise Refused("%s market map matches '%s'. The maps are: %s." % ("More than one" if found else "No", ref, ", ".join(one["name"] for one in maps) or "none yet"))
         return found[0]["pipeline"], found[0]["id"]
@@ -467,6 +493,124 @@ class Motions:
         self._run("DELETE FROM links WHERE motion = ? AND deal = ?", (motion["id"], key))
         return motion
 
+    # -- the list: who a motion is being run on ---------------------------------------------------------------
+    def enroll(self, ref: Any, deals: Any, pipeline: Any = "", person: Any = "", via: str = "record", brought: Any = ()) -> dict:
+        """Put records on a motion's list. ``deals`` is one record or several, by key, id or name, in any pipeline.
+        Each is added once: one already on the list keeps the day it was added. ``{motion, added, already, unknown}``."""
+        motion = self.find(ref)
+        refs = [one for one in (deals if isinstance(deals, (list, tuple)) else [deals]) if str(one or "").strip()]
+        if not refs:
+            raise Refused("Say who to put on the list: a record by name, or companies from the map.")
+        if len(refs) > MOST_AT_ONCE:
+            raise Refused("Put up to %d on a list at a time." % MOST_AT_ONCE)
+        found, unknown = [], []
+        for one in refs:
+            try:
+                key, deal = self._record(one, pipeline)
+            except Refused as exc:
+                unknown.append("%s (%s)" % (one, exc) if "more than one pipeline" in str(exc) else str(one))
+                continue
+            found.append((key, deal))
+        who = " ".join(str(person or "").split())[:120]
+        added, already, stamp = [], [], now()
+        via = via if via in VIA and via not in BROUGHT else "record"
+        brought = dict(brought) if isinstance(brought, dict) else {}      # the keys this adding made, and how: the motion brought them in
+        with self._tx() as db:
+            for key, deal in found:
+                done = db.execute("INSERT OR IGNORE INTO members (motion, deal, person, status, via, added_at, updated_at) VALUES (?,?,?,?,?,?,?)",
+                                  (motion["id"], key, who if len(found) == 1 else "", "added", brought_via(key, brought, via), stamp, stamp)).rowcount
+                (added if done else already).append(deal["name"])
+                if not done and who and len(found) == 1:
+                    db.execute("UPDATE members SET person = ?, updated_at = ? WHERE motion = ? AND deal = ?", (who, stamp, motion["id"], key))
+        return {"motion": motion, "added": added, "already": already, "unknown": unknown}
+
+    def enroll_from_map(self, ref: Any, companies: Any, map_ref: Any = "", actor: str = "") -> dict:
+        """Put companies from a market map on a motion's list. Each is added to the pipeline first, the way Add to pipeline
+        adds it: as a lead in the desk's lead pipeline where the map is kept with a pipeline of deals (it becomes a deal when
+        it is handed over), else at the first stage of the map's own pipeline. One already in a pipeline keeps its record."""
+        motion = self.find(ref)
+        refs = [str(one).strip() for one in (companies if isinstance(companies, (list, tuple)) else [companies]) if str(one or "").strip()]
+        if not refs:
+            raise Refused("Say which companies on the map to put on the list.")
+        if len(refs) > 25:
+            raise Refused("Put up to 25 companies from a map on a list at a time.")
+        pipe, market_id = self._market(map_ref) if fold(map_ref) else (motion.get("market_pipeline") or "", motion["market"])
+        if not market_id:
+            raise Refused("This motion is not aimed at a map. Say which map the companies are on with `market`.")
+        made, unknown, fresh = [], [], set()
+        book = pipe or ("" if self.desk.tour() else "main")         # the pipeline's id as the list names records (books())
+        with self.desk.on(pipe):
+            ids = []
+            for one in refs:
+                target = self.desk.markets.target(one, market_id)
+                if target is None:
+                    unknown.append(one)
+                elif target["status"] == "tracked" and target.get("deal_id") and self.desk.markets.record_of(target):
+                    made.append("%s:%s" % ((target.get("detail") or {}).get("deal_pipeline") or book, target["deal_id"]))     # already in a pipeline: that record
+                else:
+                    ids.append(target["id"])
+            if ids:
+                tracked = self.desk.markets.track_many(ids, actor or self.desk.actor() or "Stoa")
+                for row in tracked.get("added") or []:            # in a lead pipeline, where it went there
+                    key = "%s:%s" % (row.get("pipeline") or book, row["deal"])
+                    made.append(key)
+                    if not row.get("existing"):
+                        fresh.add(key)
+        if not made:
+            raise Refused("None of those is on the map%s." % (" (%s)" % ", ".join(unknown) if unknown else ""))
+        out = self.enroll(motion["id"], made, via="record", brought={key: "map" for key in fresh})
+        out["unknown"] = unknown + out["unknown"]
+        return out
+
+    def new_lead(self, ref: Any, name: Any, company: Any = "", actor: str = "") -> dict:
+        """Someone found anywhere but the map, put on a motion's list as a new lead: in the desk's lead pipeline, where
+        it has one (it becomes a deal when it is handed over), else the first pipeline at its first stage."""
+        motion = self.find(ref)
+        name, company = " ".join(str(name or "").split())[:120], " ".join(str(company or "").split())[:120]
+        if not name:
+            raise Refused("A new lead needs a name.")
+        pipe = self.desk.lead_pipeline_for("") if not self.desk.tour() else ""
+        with self.desk.on(pipe):
+            made = self.desk.deal({"action": "add", "name": name, "company": company}, actor=actor or self.desk.actor() or "Stoa")
+            if not made.get("ok"):
+                raise Refused(made.get("error") or "The lead could not be added.")
+            deal = made["deal"] if isinstance(made["deal"], dict) else self.desk.store.get(made["deal"])
+        book = pipe or ("" if self.desk.tour() else "main")
+        key = "%s:%s" % (book, deal["id"])
+        return self.enroll(motion["id"], [key], via="record", brought={key: "new"})
+
+    def _member(self, motion: dict, deal_ref: Any, pipeline: Any = "") -> str:
+        try:
+            key, _ = self._record(deal_ref, pipeline)
+        except Refused:
+            key = str(deal_ref or "")           # the record itself is gone: it can still come off the list
+        if not self._all("SELECT 1 FROM members WHERE motion = ? AND deal = ?", (motion["id"], key)):
+            raise Refused("'%s' is not on the list of %s." % (deal_ref, motion["name"]))
+        return key
+
+    def mark(self, ref: Any, deal_ref: Any, status: Any, pipeline: Any = "") -> dict:
+        """Say how far one on the list has got: added, reached, replied, meeting."""
+        motion = self.find(ref)
+        status = {"contacted": "reached", "sent": "reached", "answered": "replied", "responded": "replied", "booked": "meeting", "meetings": "meeting"}.get(
+            fold(status), fold(status))
+        if status not in STAGES:
+            raise Refused("One on a list is %s." % ", ".join(STAGES))
+        self._run("UPDATE members SET status = ?, updated_at = ? WHERE motion = ? AND deal = ?", (status, now(), motion["id"], self._member(motion, deal_ref, pipeline)))
+        return motion
+
+    def drop(self, ref: Any, deal_ref: Any, pipeline: Any = "") -> dict:
+        """Take one off the list. The record stays where it is."""
+        motion = self.find(ref)
+        self._run("DELETE FROM members WHERE motion = ? AND deal = ?", (motion["id"], self._member(motion, deal_ref, pipeline)))
+        return motion
+
+    def lists_of(self, key: str) -> list:
+        """The motions a record is on the list of: ``[{id, name, status, person}]``."""
+        rows = self._all("SELECT m.id, m.name, m.status AS motion_status, l.status, l.person, l.added_at FROM members l JOIN motions m ON m.id = l.motion "
+                         "WHERE l.deal = ? AND m.removed = 0 AND m.scope = ? ORDER BY l.added_at", (key, self.scope()))
+        return [{"id": row["id"], "name": row["name"], "status": row["status"], "status_label": STAGES.get(row["status"], row["status"]),
+                 "person": row["person"], "added": str(row["added_at"])[:10]} for row in rows]
+
     # -- what a motion did: worked out from the desk ---------------------------------------------------------
     def results(self, motion_id: str) -> list:
         return self._all("SELECT id, on_date, metric, value, note FROM results WHERE motion = ? ORDER BY on_date DESC, id DESC", (motion_id,))
@@ -493,9 +637,12 @@ class Motions:
             key = row["deal"] if ":" in row["deal"] else "%s:%s" % (first, row["deal"])        # a link from before records were named by pipeline
             said.setdefault(row["motion"], {})[key] = row["how"]
         by_key = {deal["_key"]: deal for deal in deals}
+        members: dict = {}
+        for row in self._all("SELECT motion, deal, person, status, via, added_at FROM members"):
+            members.setdefault(row["motion"], {})[row["deal"]] = row
         pairs = {} if self.desk.tour() else {lead: deal for lead, deal in dict(self.pairs()).items() if lead in by_key and deal in by_key}
         reading = {"deals": deals, "by_key": by_key, "logged": logged, "motions": motions, "books": books, "pairs": pairs,
-                   "audience": {motion["id"]: self.audience(motion) for motion in motions}, "said": said,
+                   "audience": {motion["id"]: self.audience(motion) for motion in motions}, "said": said, "members": members,
                    "currency": next((book["playbook"].currency for book in books.values() if book["kind"] == "deal"), next(iter(books.values()))["playbook"].currency),
                    "terms": next((book["playbook"].terms for book in books.values() if book["kind"] == "deal"), next(iter(books.values()))["playbook"].terms)}
         reading["claims"] = self._claims(reading)
@@ -524,68 +671,52 @@ class Motions:
         """The words that mean this motion when they turn up in a record's Source or in a note: its name, and any it was given."""
         return [word for word in dict.fromkeys([fold(motion["name"])] + [fold(tag) for tag in motion["tags"]]) if len(word) >= WATCH_MIN]
 
-    def _judge(self, motion: dict, deal: dict, reading: dict, companies: set, domains: set) -> Optional[dict]:
+    def _judge(self, motion: dict, deal: dict, reading: dict) -> Optional[dict]:
         """What this record owes this motion, on the evidence, or None. ``rule`` says which kind of evidence it was."""
+        member = reading["members"].get(motion["id"], {}).get(deal["_key"])
+        if member is not None:
+            # On the list: sourced if being put on it is what brought it into the pipeline (from the map, or as a new
+            # lead); influenced if it was in a pipeline already.
+            added = str(member["added_at"])
+            came = member["via"] in BROUGHT
+            how = {"map": "from the map, which is how it came into the pipeline", "new": "as a new lead"}.get(member["via"]) or VIA.get(member["via"], "")
+            return {"how": "sourced" if came else "influenced", "rule": 1,
+                    "why": "On this motion's list since %s%s%s." % (added[:10], " (%s)" % how if how else "",
+                                                                    "" if came else "; it was already in the pipeline then")}
         start, end = self.window(motion)
         created = str(deal["created_at"])[:10]
         inside = lambda day: bool(start) and day >= start and (not end or day <= end)        # noqa: E731
         words = self.watched(motion)
         source = fold(deal["source"])
         if source and (source == fold("motion: " + motion["name"]) or any(word in source for word in words)):
-            return {"how": "sourced", "rule": 1, "why": "Its Source reads “%s”." % str(deal["source"]).strip()[:80]}
+            return {"how": "sourced", "rule": 2, "why": "Its Source reads “%s”." % str(deal["source"]).strip()[:80]}
         entries = reading["logged"].get(deal["_key"], [])
         spoken = [("note", str(deal.get("notes") or ""), "")] + [(entry["kind"], entry["text"], entry["at"][:10]) for entry in entries if entry["kind"] in TOUCH_KINDS]
         for kind, text, day in spoken:
             hit = next((word for word in words if word in fold(text)), "")
             if hit:
                 came_in = inside(created) if start else created >= str(motion["created_at"])[:10]
-                return {"how": "sourced" if came_in else "influenced", "rule": 2,
+                return {"how": "sourced" if came_in else "influenced", "rule": 3,
                         "why": "A %s on it%s mentions “%s”." % (kind, " on " + day if day else "", hit)}
-        if not start or not (companies or domains):
-            return None
-        company = company_key(deal["company"] or deal["grp"])
-        at = (company and company in companies) or (domain_of(deal["email"]) in domains if deal["email"] else False)
-        if not at:
-            return None
-        name = deal["company"] or deal["grp"] or "a company"
-        if inside(created):
-            if self.says_where(deal["source"]):
-                # Its Source names another origin (rule 1 has already ruled out this motion's own name and words).
-                # Timing is not enough to take the credit from what the record itself says.
-                return {"how": "influenced", "rule": 5, "why": "%s is one of the companies this motion is aimed at, and this came in on %s, while it ran. "
-                                                               "But its Source reads “%s”, so the motion is counted as having influenced it, not sourced it."
-                                                               % (name, created, str(deal["source"]).strip()[:80])}
-            from_map = " It was added from the map." if fold(deal["source"]).startswith("market map") else " Nothing on it says it came from anywhere else."
-            return {"how": "sourced", "rule": 3, "why": "%s is one of the companies this motion is aimed at, and this came into the pipeline on %s, while it ran.%s" % (name, created, from_map)}
-        if created < start:
-            moved = next((entry for entry in entries if inside(entry["at"][:10]) and (entry["kind"] in TOUCH_KINDS or entry["kind"] == "stage")), None)
-            if moved:
-                what = "moved (%s)" % moved["text"] if moved["kind"] == "stage" else "had a %s logged" % moved["kind"]
-                return {"how": "influenced", "rule": 4, "why": "%s is one of the companies this motion is aimed at. This was already in the pipeline and %s on %s, while it ran." % (name, what, moved["at"][:10])}
         return None
 
     def _claims(self, reading: dict) -> dict:
         """For every motion, the records it is credited with: ``{motion id: {record key: {how, why, auto}}}``.
 
         What a person said by hand comes first and is never overruled. The rest is worked out. A deal handed over
-        from a credited lead is credited as the lead was. Where two motions would both take a record only because it
-        is at a company they are aimed at, the more closely aimed one (the smaller audience, then the later start) is
-        credited and the other is marked as having influenced it."""
+        from a credited lead is credited as the lead was. Where two motions would both be credited with bringing a
+        record in, the one whose list it is on wins over a mention; between two mentions, the motion that started last
+        before the record came in. The other is marked as having influenced it."""
         found: dict = {}
-        sizes: dict = {}
         by_key = reading["by_key"]
         for motion in reading["motions"]:
-            audience = reading["audience"][motion["id"]]["companies"]
-            companies = {company_key(company["company"]) for company in audience} - {""}
-            domains = {str(company.get("domain") or "").lower().removeprefix("www.") for company in audience} - {""}
-            sizes[motion["id"]] = len(audience)
             said = reading["said"].get(motion["id"], {})
             mine: dict = {}
             for deal in reading["deals"]:
                 key = deal["_key"]
                 if said.get(key) == "none":
                     continue
-                verdict = self._judge(motion, deal, reading, companies, domains)
+                verdict = self._judge(motion, deal, reading)
                 if key in said:
                     mine[key] = {"how": said[key], "rule": 0, "auto": False, "why": "Confirmed by hand." + (" Stoa had found: " + verdict["why"] if verdict else "")}
                 elif verdict:
@@ -598,14 +729,17 @@ class Motions:
             found[motion["id"]] = mine
         motions = {motion["id"]: motion for motion in reading["motions"]}
         for deal in reading["deals"]:
-            rivals = [motion_id for motion_id, mine in found.items() if mine.get(deal["_key"], {}).get("rule") == 3]
+            key = deal["_key"]
+            rivals = [motion_id for motion_id, mine in found.items() if mine.get(key, {}).get("how") == "sourced" and mine[key]["auto"]]
             if len(rivals) < 2:
                 continue
-            winner = min(rivals, key=lambda motion_id: (sizes[motion_id], -int(self.window(motions[motion_id])[0].replace("-", "") or 0)))
+            created = str(deal["created_at"])[:10]
+            started = lambda motion_id: self.window(motions[motion_id])[0] or str(motions[motion_id]["created_at"])[:10]      # noqa: E731
+            winner = max(rivals, key=lambda motion_id: (found[motion_id][key]["rule"] == 1, started(motion_id) <= created, started(motion_id)))
             for motion_id in rivals:
                 if motion_id != winner:
-                    found[motion_id][deal["_key"]] = {"how": "influenced", "rule": 3, "auto": True,
-                                                      "why": "It is at a company this motion is aimed at and came in while it ran, but “%s” is aimed more closely at it and is credited with bringing it in." % motions[winner]["name"]}
+                    found[motion_id][key] = {"how": "influenced", "rule": found[motion_id][key]["rule"], "auto": True,
+                                             "why": found[motion_id][key]["why"] + " But “%s” is credited with bringing it in, so this one influenced it." % motions[winner]["name"]}
         return found
 
     def impact(self, motion: dict, reading: Optional[dict] = None, detail: bool = False) -> dict:
@@ -650,6 +784,8 @@ class Motions:
                     reached.add(company)
         counted["companies_reached"] = len(reached)
         in_pipeline = {company_key(deal["company"] or deal["grp"]) for deal in reading["deals"]} & names
+        listed = self.listed(motion, reading)
+        on_list = {stage: sum(1 for row in listed if STAGE_ORDER[row["status"]] >= STAGE_ORDER[stage]) for stage in STAGES}
 
         def stages(pid: str) -> list:
             mine = [deal for deal in sourced if deal["_pid"] == pid and deal["status"] == "open"]
@@ -670,6 +806,8 @@ class Motions:
             "return": round(won_value / spend, 2) if spend and won_value else None,
             "pipeline_return": round((pipeline_value + won_value) / spend, 2) if spend and (pipeline_value or won_value) else None,
             "audience": len(audience["companies"]), "audience_in_pipeline": len(in_pipeline),
+            # The list: how many are on it, and how many have got at least that far (reached counts those who replied too).
+            "list": dict(on_list, total=len(listed), won=sum(1 for row in listed if row["record_status"] == "won")),
             "funnel": [{"pipeline": pid, "name": books[pid]["name"], "kind": books[pid]["kind"], "stages": stages(pid)}
                        for pid in books if any(deal["_pid"] == pid and deal["status"] == "open" for deal in sourced)],
             "currency": reading["currency"], "tracking": bool(start) or bool(self.watched(motion)),
@@ -694,8 +832,35 @@ class Motions:
             out["companies"] = [dict(company, record=record_at.get(company_key(company["company"]), {}).get("id", ""),
                                      record_pipeline=record_at.get(company_key(company["company"]), {}).get("pipeline", "")) for company in audience["companies"]]
             out["results"] = logged
+            out["members"] = listed
             out["aside"] = [{"key": key, "id": by_key[key]["id"], "name": by_key[key]["name"]}
                             for key, how in reading["said"].get(motion["id"], {}).items() if how == "none" and key in by_key]
+        return out
+
+    def listed(self, motion: dict, reading: dict) -> list:
+        """Who is on a motion's list, each with how far they have got. A call or email logged on the record since it was
+        added counts as reached, and a meeting as a meeting, whatever was said; what a person or the agent said counts
+        when it is further on."""
+        by_key, books = reading["by_key"], reading["books"]
+        several = len(books) > 1
+        out = []
+        for key, member in reading["members"].get(motion["id"], {}).items():
+            deal = by_key.get(key)
+            if deal is None:            # the record has gone from the desk; it stays on the list until taken off, unseen
+                continue
+            status, added = member["status"] if member["status"] in STAGES else "added", str(member["added_at"])
+            for entry in reading["logged"].get(key, []):
+                if entry["at"] >= added and entry["kind"] in ("call", "email", "meeting"):
+                    seen = "meeting" if entry["kind"] == "meeting" else "reached"
+                    if STAGE_ORDER[seen] > STAGE_ORDER[status]:
+                        status = seen
+            book = books[deal["_pid"]]
+            out.append({"key": key, "id": deal["id"], "pipeline": deal["_pid"], "pipeline_name": book["name"] if several else "",
+                        "name": deal["name"], "company": deal["company"], "person": member["person"], "status": status,
+                        "status_label": STAGES[status], "said": member["status"], "via": member["via"], "added": added[:10],
+                        "record_status": deal["status"], "stage": book["playbook"].label(deal["stage"]) if deal["status"] == "open" else
+                        (book["playbook"].won["label"] if deal["status"] == "won" else deal["status"])})
+        out.sort(key=lambda row: (-STAGE_ORDER[row["status"]], row["added"], row["name"].casefold()))
         return out
 
     def view(self, motion: dict, reading: Optional[dict] = None, detail: bool = False) -> dict:
@@ -714,7 +879,7 @@ class Motions:
         reading = self.reading()
         motions = [self.view(motion, reading) for motion in reading["motions"]]
         live = [motion for motion in motions if motion["status"] in ("running", "done")]
-        return {"motions": motions, "maps": self.maps(), "kinds": KINDS, "statuses": STATUSES, "metrics": METRICS,
+        return {"motions": motions, "maps": self.maps(), "kinds": KINDS, "statuses": STATUSES, "metrics": METRICS, "stages": STAGES,
                 "currency": reading["currency"], "terms": reading["terms"],
                 "totals": {"running": sum(1 for motion in motions if motion["status"] == "running"),
                            "spend": sum(motion["impact"]["spend"] for motion in motions),
@@ -753,6 +918,24 @@ class Motions:
         if action == "log":
             motion = self.log(args.get("motion"), args.get("metric"), args.get("value"), args.get("on"), args.get("note"))
             return {"ok": True, "motion": self.view(motion)}
+        if action == "enroll":
+            motion = args.get("motion") or args.get("name")
+            done = {"added": [], "already": [], "unknown": []}
+            if args.get("companies"):
+                done = self.enroll_from_map(motion, args.get("companies"), args.get("market"))
+            if args.get("deals") or args.get("deal"):
+                more = self.enroll(motion, args.get("deals") or [args.get("deal")], args.get("pipeline"), args.get("person"), via="agent")
+                done = {key: done[key] + more[key] for key in ("added", "already", "unknown")}
+            if not any(done[key] for key in ("added", "already", "unknown")):
+                raise Refused("enroll needs `deals` (records) or `companies` (from the motion's map).")
+            found = self.find(motion)
+            return {"ok": bool(done["added"] or done["already"]), "added": done["added"], "already_on_it": done["already"], "not_found": done["unknown"],
+                    "list": self.view(found)["impact"]["list"],
+                    "note": "Companies from the map were added to the pipeline as leads first." if args.get("companies") else ""}
+        if action == "mark":
+            return {"ok": True, "motion": self.view(self.mark(args.get("motion"), args.get("deal"), args.get("status"), args.get("pipeline")))}
+        if action == "drop":
+            return {"ok": True, "motion": self.view(self.drop(args.get("motion"), args.get("deal"), args.get("pipeline")))}
         if action == "link":
             motion, deal = self.link(args.get("motion"), args.get("deal"), args.get("how"), args.get("pipeline"))
             return {"ok": True, "linked": {"id": deal["id"], "name": deal["name"]}, "motion": self.view(motion)}

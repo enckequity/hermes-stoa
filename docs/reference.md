@@ -96,6 +96,10 @@ The *Market watch* automation re-checks a map every week and adds at most five n
 - **On a pipeline of deals the record is named for the company**, and the buyer goes on it as a
   person (title, email, LinkedIn). The map never renames a record. On pipelines of roles and of
   leads the record is the person.
+- **A lead until it is a deal.** A map kept with a pipeline of deals adds a company as a lead in
+  your lead pipeline (the one that hands over to it, else the first), and it becomes a deal there
+  when it is handed over. The map remembers which pipeline its record is in and opens it there.
+  With no lead pipeline, it is added at the first stage of the map's own pipeline.
 
 **The map on the page.** On the GTM tab the map is one dial you work on, under its numbers and
 the three columns it reads back (where we play, how we win, what has to be true):
@@ -181,21 +185,29 @@ file to the plugin's `exports/` folder instead of your browser's downloads.
 ### Motions and assets
 
 The other two views of the GTM tab. A **motion** is one play to break into a market (outbound, an
-event, ads, content, a partnership, a referral, community), aimed at a map or some of its segments,
+event, ads, content, a partnership, a referral, community), for a map or some of its segments,
 with dates, a budget, an owner and words to watch for. It belongs to the desk as a whole, not to
 one pipeline, and is kept in `motions.db`.
 
+**Its list** is who it is run on, from anywhere: companies picked on a map (**Add to motion**; each
+is added to the pipeline as a lead first, see below), records in any pipeline, someone new added
+as a lead, or one person on a record. Each on the list is added, reached, replied or meeting; a
+call or email logged on the record since it was added counts as reached, and a meeting as a
+meeting, and a person or Hermes says when someone replied. The motion's page lists them, a
+record's page shows the motions it is on, and `gtm_motion` has `enroll`, `mark` and `drop`.
+
 Stoa works out what each motion is owed, across every pipeline, and gives the reason each time:
 
-1. A record whose Source names the motion, or one of its words, was sourced by it.
-2. So was a record with a note, call or email that mentions it, if the record came in while the
+1. A record on its list that the list brought into the pipeline (picked on the map, or added as a
+   new lead) was sourced by it; one already in a pipeline when it was added was influenced.
+2. A record off the list whose Source names the motion, or one of its words, was sourced by it.
+3. So was a record with a note, call or email that mentions it, if the record came in while the
    motion ran (from its start to thirty days past its end); one already in a pipeline is influenced.
-3. A record at a company in the motion's audience that came in while it ran was sourced by it,
-   unless its own Source names somewhere else; then it was influenced. Where two motions are aimed
-   at the same company, the more closely aimed one is credited.
-4. A record at an audience company already in a pipeline, moved or touched while it ran, was
-   influenced.
-5. A deal handed over from a credited lead is credited the same way, and the two count once.
+4. A deal handed over from a credited lead is credited the same way, and the two count once.
+
+Being at a company on the motion's map is not enough by itself. Where two motions would both be
+credited with bringing a record in, the list wins over a mention, and between two mentions the
+motion that started last before the record came in.
 
 A person can confirm a record, change sourced to influenced, or set one aside so the motion never
 claims it again; what a person says always wins. Spend, reach, responses and meetings are logged

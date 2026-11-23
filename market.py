@@ -944,20 +944,23 @@ class Markets:
         return result
 
     def track(self, args: dict, actor: str = "") -> dict:
-        """Turn targets into pipeline records at the playbook's first stage."""
+        """Turn targets into pipeline records at the playbook's first stage. A company from a map kept with a pipeline of
+        deals starts as a lead in the desk's lead pipeline, where it has one (``Desk.lead_pipeline_for``), and becomes a
+        deal when it is handed over from there; the map remembers which pipeline its record is in."""
         market = self._market(args.get("market"))
         refs = _refs(args)
         if not refs:
             return {"ok": False, "error": "track needs `targets`: ids or company names from the map"}
         playbook = self.desk.playbook()
         actor = actor or self.desk.actor()
+        into = self.desk.lead_pipeline_for(self.desk._pipe().get("id") or "main") if playbook.shape == "deals" else ""
         made, already, unknown = [], [], []
         for ref in refs[:25]:
             target = self.target(ref, market["id"] if market else "")
             if target is None:
                 unknown.append(str(ref))
                 continue
-            if target["status"] == "tracked" and target["deal_id"] and self.store.get(target["deal_id"]):
+            if target["status"] == "tracked" and target["deal_id"] and self.record_of(target):
                 already.append(target["company"])
                 continue
             owner_market = self._market(target["market_id"]) or {"name": ""}
@@ -1032,6 +1035,9 @@ class Markets:
                     conn.execute("UPDATE targets SET status = 'tracked', deal_id = ?, updated_at = ? WHERE id = ?", (deal["id"], st.now(), target["id"]))
                 made.append({"company": target["company"], "deal": deal["id"], "market_id": target["market_id"], "contact": "", "group": group, "candidate": True})
                 continue
+            if into and not person_row:          # a lead, in the lead pipeline, until it is handed over as a deal
+                made.append(self._lead_in(into, target, owner_market, contact, person, note, actor))
+                continue
             own = contact and not as_deal      # the record is that person
             deal = self.store.add(
                 contact if own else target["company"], playbook.first_stage(), actor=actor, company=target["company"], grp=group,
@@ -1052,8 +1058,11 @@ class Markets:
             self._refresh(market_id)
         out = {"ok": bool(made or already),
                "added_to_pipeline": [{k: v for k, v in (("company", m["company"]), ("deal", m["deal"]), ("contact", m["contact"]),
-                                                         ("group", m["group"]), ("existing_record", m.get("existing")), ("candidate", m.get("candidate"))) if v}
+                                                         ("group", m["group"]), ("existing_record", m.get("existing")), ("candidate", m.get("candidate")),
+                                                         ("pipeline", m.get("pipeline"))) if v}
                                      for m in made]}
+        if any(m.get("pipeline") for m in made):
+            out["lead_pipeline"] = "Added as leads in the lead pipeline (`pipeline`); each becomes a deal here when it is handed over from there."
         if any(m.get("existing") for m in made):
             out["note"] = ("Where a candidate was already in that search (existing_record), no second record was made: theirs is the record."
                            if all(m.get("candidate") for m in made if m.get("existing")) else
@@ -1066,6 +1075,48 @@ class Markets:
         if not out["ok"]:
             out["error"] = "none of those are on a market map"
         return out
+
+    def record_of(self, target: dict) -> Optional[dict]:
+        """The record a company on the map was added as, in whichever pipeline it went to; None if it is gone."""
+        if not target.get("deal_id"):
+            return None
+        pipe = str((target.get("detail") or {}).get("deal_pipeline") or "")
+        if pipe:
+            if not any(entry["id"] == pipe for entry in self.desk.pipelines()):
+                return None
+            with self.desk.on(pipe):
+                return self.store.get(target["deal_id"])
+        return self.store.get(target["deal_id"])
+
+    def _lead_in(self, into: str, target: dict, owner_market: dict, contact: str, person: dict, note: str, actor: str) -> dict:
+        """A company from a map kept with a pipeline of deals, as a lead in the lead pipeline ``into``: the record is the
+        buyer where the map names one (that pipeline's records are people), else the company. One already open there for
+        the company is filled in instead. The map's row is marked as added, with the pipeline its record is in."""
+        with self.desk.on(into):
+            playbook = self.desk.playbook()
+            keys = {f["key"] for f in playbook.fields}
+            found = {k: v for k, v in (("title", person.get("title", "") if contact else ""), ("location", target["location"]), ("company_size", target["size"]),
+                                       ("competitor", target["detail"].get("uses", "")), ("trigger", target["signal"])) if v and k in keys}
+            rule = playbook.map_group or ("company" if playbook.terms["group"].lower() in ACCOUNT_WORDS else "map")
+            group = self.desk._group_spelling(target["company"] if rule == "company" else owner_market["name"])
+            open_one = self._open_record(target["company"])
+            if open_one is not None:
+                self._enrich(open_one, contact, person, found, note, owner_market["name"], actor, False)
+                deal_id, existing, group = open_one["id"], True, open_one["grp"]
+            else:
+                deal = self.store.add(contact or target["company"], playbook.first_stage(), actor=actor, company=target["company"], grp=group,
+                                      email=person.get("email", "") if contact else "", linkedin=person.get("linkedin", "") if contact else "",
+                                      source="market map: %s" % owner_market["name"], next_step="First outreach" if contact else "Find the right contact",
+                                      fields=found)
+                if note:
+                    self.store.log(deal["id"], "note", "From the %s map. %s" % (owner_market["name"], note), actor=actor)
+                deal_id, existing = deal["id"], False
+        detail = dict(target["detail"], deal_pipeline=into)
+        with self.store._conn() as conn:
+            conn.execute("UPDATE targets SET status = 'tracked', deal_id = ?, detail = ?, updated_at = ? WHERE id = ?",
+                         (deal_id, json.dumps(detail), st.now(), target["id"]))
+        return {"company": target["company"], "deal": deal_id, "market_id": target["market_id"], "contact": contact, "group": group,
+                "existing": existing, "pipeline": into}
 
     def _open_record(self, company: str) -> Optional[dict]:
         """The open record already in the pipeline for this company as an account, however it got there ("Snov.io"
@@ -1203,7 +1254,7 @@ class Markets:
         for ref in list(refs)[:25]:
             result = self.click_track(str(ref), actor)
             if result.get("deal"):
-                added.append({"deal": result["deal"]["id"], "name": result["deal"]["name"], "existing": bool(result.get("existing"))})
+                added.append({"deal": result["deal"]["id"], "name": result["deal"]["name"], "existing": bool(result.get("existing")), "pipeline": result.get("pipeline") or ""})
             elif result.get("notice"):
                 already.append(result["notice"])
         return {"ok": bool(added), "added": added, "skipped": already}
@@ -1310,7 +1361,13 @@ class Markets:
         if not result.get("added_to_pipeline"):
             return {"deal": None, "market_id": target["market_id"], "notice": "%s is already in the pipeline." % target["company"]}
         made = result["added_to_pipeline"][0]
-        deal = self.store.get(made["deal"])
+        lead_pipe = made.get("pipeline") or ""
+        if lead_pipe:
+            with self.desk.on(lead_pipe):
+                deal = self.store.get(made["deal"])
+                lead_name = self.desk.current()["name"]
+        else:
+            deal = self.store.get(made["deal"])
         if made.get("candidate"):
             followup = ("[Stoa desk] %s added the candidate %s to the pipeline from the candidate map, in the %s %s. The record is already "
                         "created (id %s), so do not add it again.\n\nYour task: reply here with one line on why they fit the role, from the "
@@ -1326,7 +1383,8 @@ class Markets:
             how = ("gtm_market(action=\"people\", target=\"%s\", titles=[...]) (each person returned costs a credit, so ask for at "
                    "most three)" % target["id"] if self.desk.secret(PDL_KEY) else "your web search tool")
             put = ("Add that person to the record with gtm_contact(action=\"add\", deal=\"%s\"), leaving the record's name as it is"
-                   % deal["id"] if self.desk.playbook().shape == "deals" else "Put that person on the record with gtm_deal(action=\"update\")")
+                   % deal["id"] if self.desk.playbook().shape == "deals" and not lead_pipe else
+                   "Put that person on the record with gtm_deal(action=\"update\"%s)" % (", pipeline=\"%s\"" % lead_name if lead_pipe else ""))
             task = ("Work out who at %s is the most likely buyer for us, using %s. %s, then reply here with who you picked and "
                     "why, and a first-touch note of under 90 words." % (target["company"], how, put))
         if made.get("existing_record"):
@@ -1336,8 +1394,10 @@ class Markets:
         else:
             followup = ("[Stoa desk] %s added %s to the pipeline from the market map. The record is already created (id %s), so do "
                         "not add it again.\n\nYour task: %s Do not send anything." % (actor or "Someone", target["company"], deal["id"], task))
+        if lead_pipe:
+            followup = followup.replace("to the pipeline from the market map", "to the %s pipeline as a lead from the market map" % lead_name, 1)
         return {"deal": deal, "market_id": target["market_id"], "followup": followup, "notice": "",
-                "existing": bool(made.get("existing_record"))}
+                "existing": bool(made.get("existing_record")), "pipeline": lead_pipe}
 
 
 def _archived_at(row: dict) -> str:
@@ -1388,6 +1448,8 @@ def _view(row: dict, criteria: Optional[list] = None, segment: str = "") -> dict
         out["signal_date"] = detail["signal_date"]
     if row["deal_id"]:
         out["deal"] = row["deal_id"]
+        if detail.get("deal_pipeline"):          # added as a lead in the lead pipeline, not in the map's own
+            out["deal_pipeline"] = detail["deal_pipeline"]
     out = {k: v for k, v in out.items() if v not in ("", None)}
     if segment:
         out["segment"] = segment

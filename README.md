@@ -76,12 +76,16 @@ a short report around a working dial, without buyers' names or your pipeline.
 ### Motions
 
 A motion is one play to break into a market: an outbound push, an event, a run of ads, a piece of
-content, a partnership. Aim it at a map or some of its segments, and Stoa credits it with the
-records it brought in or helped along, across every pipeline, and says why for each one: the
-record's Source names it, a note mentions it, or the company is in its audience and came in while
-it ran. A lead and the deal it became count once. Log what it costs and what it reached, and the
-tab shows what came back. Press **Suggest motions** and Hermes reads the map and proposes some as
-ideas.
+content, a partnership. Each keeps a **list** of who it is run on, from anywhere: pick companies on
+a map and press **Add to motion**, add records from any pipeline, or add someone new as a lead.
+Each on the list moves from added to reached, replied and meeting. Stoa credits the motion with
+what its list and any mention of it brought in, across every pipeline, and says why for each one.
+A lead and the deal it became count once. Log what it costs, and the tab shows what came back.
+Press **Suggest motions** and Hermes reads the map and proposes some as ideas.
+
+**Leads until they are deals.** A company added from a map kept with a deal pipeline starts as a
+lead in your lead pipeline, and becomes a deal when it is handed over. With no lead pipeline it
+starts at the first stage of the map's own.
 
 ![Motions: one running with its figures, one planned, and ideas, with totals across them](docs/motions.jpg)
 

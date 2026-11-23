@@ -1457,6 +1457,94 @@ function Records({ motion, state, data, path, set, open }) {
       h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'quiet', disabled: !who.trim(), onClick: () => post({ deal: who.trim(), how: 'influenced' }) }, 'Influenced')))
 }
 
+/** Who the motion is run on: anyone, from the map or from any pipeline, each with how far they have got. */
+function List({ motion, state, data, path, set, open, toMap }) {
+  const [who, setWho] = useState('')
+  const members = motion.impact.members || [], tally = motion.impact.list || {}, stages = data.stages || {}
+  const post = async (body, after) => {
+    try { const fresh = await api(path('/app/motions/' + motion.id + '/members'), { method: 'POST', body }); set(fresh); again(); if (after) after(fresh) } catch (error) { host.notifyError(error, 'Not saved') }
+  }
+  const add = () => post({ deals: [who.trim()] }, fresh => {
+    setWho('')
+    if ((fresh.unknown || []).length) host.notify({ kind: 'warning', message: 'Not found on the desk: ' + fresh.unknown.join(', ') })
+    else if ((fresh.already || []).length && !(fresh.added || []).length) host.notify({ kind: 'info', message: fresh.already[0] + ' is already on the list.' })
+  })
+  const names = [...new Set((state.deals || []).map(deal => deal.name).filter(Boolean))].sort()
+  const one = (data.terms && data.terms.deal) || 'record'
+  return h('div', { className: 'stoa-box' },
+    h('div', { className: 'stoa-eyebrow' }, 'Who it is run on'),
+    h('p', { className: 'stoa-sub', style: { margin: '6px 0 4px' } }, members.length
+      ? [plural(tally.total, 'on the list', 'on the list'), tally.reached + ' reached', tally.replied + ' replied', plural(tally.meeting, 'meeting', 'meetings'), tally.won ? tally.won + ' won' : ''].filter(Boolean).join(' · ')
+      : 'Nobody yet. Pick companies on the map and press Add to motion (each becomes a lead), or name a ' + one + ' from any pipeline below.'),
+    members.map(row => h('div', { key: row.key, className: 'sd-m-line sd-m-member' },
+      h('button', { type: 'button', className: 'sd-m-open stoa-grow', onClick: () => open(row.id, row.pipeline), title: 'Open this ' + one + (row.via === 'map' ? ' (added from the map)' : '') },
+        h('span', { className: 'stoa-name' }, row.name), row.company && row.company !== row.name ? h('span', { className: 'stoa-sub' }, '  ' + row.company) : null,
+        row.person ? h('span', { className: 'stoa-sub' }, '  ·  ' + row.person) : null),
+      row.pipeline_name ? h('span', { className: 'stoa-chip' }, row.pipeline_name) : null,
+      h('span', { className: 'stoa-chip', 'data-tone': row.record_status === 'won' ? 'good' : row.record_status === 'lost' ? 'bad' : '' }, row.stage),
+      h('select', { className: 'stoa-select sd-m-stat', value: row.status, 'aria-label': 'How far ' + row.name + ' has got',
+        title: row.status !== row.said ? 'A ' + (row.status === 'meeting' ? 'meeting' : 'call or email') + ' was logged on it since it was added' : 'How far it has got',
+        onChange: event => post({ mark: row.key, status: event.target.value }) },
+      Object.entries(stages).map(([key, text]) => h('option', { key, value: key }, text))),
+      h('button', { type: 'button', className: 'sd-m-x', title: 'Take it off the list. The ' + one + ' stays where it is.', 'aria-label': 'Take ' + row.name + ' off the list', onClick: () => post({ drop: row.key }) }, '×'))),
+    h('div', { className: 'sd-m-addrow', style: { gridTemplateColumns: motion.market && toMap ? 'minmax(0, 1fr) auto auto auto' : 'minmax(0, 1fr) auto auto' } },
+      h('input', { className: 'stoa-field', list: 'sd-m-members', placeholder: 'Add a ' + one + ' from any pipeline', value: who, 'aria-label': 'A ' + one + ' to put on the list',
+        onChange: event => setWho(event.target.value), onKeyDown: event => { if (event.key === 'Enter' && who.trim()) add() } }),
+      h('datalist', { id: 'sd-m-members' }, names.map(name => h('option', { key: name, value: name }))),
+      h('button', { type: 'button', className: 'stoa-btn', disabled: !who.trim(), onClick: add }, 'Add'),
+      h('button', { type: 'button', className: 'stoa-btn', disabled: !who.trim(), title: 'Someone not on the desk yet: added as a new lead (in your lead pipeline, if you have one), then put on the list. “Name, Company” names the company too.',
+        onClick: () => { const [name, ...rest] = who.split(','); post({ new: { name: name.trim(), company: rest.join(',').trim() } }, () => setWho('')) } }, 'New lead'),
+      motion.market && toMap ? h('button', { type: 'button', className: 'stoa-btn', 'data-kind': 'quiet', title: 'Pick companies on the map, then Add to motion', onClick: () => toMap(motion) }, 'Pick on the map') : null))
+}
+
+/** Put companies picked on a map on a motion's list. Each becomes a lead in the map's pipeline first. */
+function AddToMotion({ companies, market, pipe, done }) {
+  const listed = useMotions().data
+  const [busy, setBusy] = useState(false)
+  const live = ((listed && listed.motions) || []).filter(motion => ['idea', 'planned', 'running'].includes(motion.status))
+  const go = async motion => {
+    setBusy(true)
+    try {
+      const fresh = await api('/app/motions/' + motion.id + '/members', { method: 'POST', body: { targets: companies.map(c => c.id), market: (pipe || '') + ':' + market.id } })
+      const leads = companies.filter(c => c.status !== 'tracked').length
+      host.notify({ kind: 'success', title: 'On the list of ' + motion.name, message: [(fresh.added || []).length ? plural(fresh.added.length, 'added', 'added') : '',
+        leads ? plural(leads, 'new lead', 'new leads') + ' in the pipeline' : '', (fresh.already || []).length ? fresh.already.length + ' already on it' : ''].filter(Boolean).join(' · ') })
+      again(); queryClient.invalidateQueries({ queryKey: ['stoa'] })
+      if (done) done()
+    } catch (error) { host.notifyError(error, 'Not added') }
+    setBusy(false)
+  }
+  if (!live.length) return h(Btn, { disabled: true, title: 'Start a motion under Motions on the GTM tab, then pick companies here to put them on its list' }, 'Add to motion')
+  return h(Menu, { label: busy ? 'Adding…' : companies.length === 1 ? 'Add to motion' : 'Add ' + companies.length + ' to motion',
+    title: 'Put them on a motion’s list. Any not in the pipeline yet are added as leads first.' },
+  live.map(motion => h(MenuItem, { key: motion.id, title: motion.name, sub: [motion.status_label, (motion.impact.list || {}).total ? motion.impact.list.total + ' on its list' : 'nobody on its list yet'].join(' · '),
+    onClick: () => go(motion) })))
+}
+
+/** On a record's page: the motions it is on the list of, and putting it on another. */
+function RecordMotions({ deal }) {
+  const listed = useMotions().data
+  const on = deal.motions || []
+  const [person, setPerson] = useState('')
+  const live = ((listed && listed.motions) || []).filter(motion => ['idea', 'planned', 'running'].includes(motion.status) && !on.some(row => row.id === motion.id))
+  const people = (deal.people || []).map(row => row.name).filter(Boolean)
+  const add = async motion => {
+    try {
+      await api('/app/motions/' + motion.id + '/members', { method: 'POST', body: { deals: [deal.id], pipeline: (deal.pipeline && deal.pipeline.id) || '', person } })
+      again(); queryClient.invalidateQueries({ queryKey: ['stoa', 'deal', deal.id] })
+    } catch (error) { host.notifyError(error, 'Not added') }
+  }
+  if (!on.length && !live.length) return null
+  return h('section', { className: 'stoa-box stoa-rpsec' },
+    h('div', { className: 'stoa-sechead', style: { padding: '0 0 6px' } }, h('span', { className: 'stoa-eyebrow' }, 'Motions')),
+    on.map(row => h('div', { key: row.id, className: 'sd-m-line' }, h('span', { className: 'stoa-name stoa-grow' }, row.name, row.person ? h('span', { className: 'stoa-sub' }, '  ·  ' + row.person) : null),
+      h('span', { className: 'stoa-chip' }, row.status_label), h('span', { className: 'stoa-sub' }, ' since ' + row.added))),
+    live.length ? h('div', { className: 'sd-m-line', style: { marginTop: on.length ? 8 : 0 } },
+      people.length ? h('select', { className: 'stoa-select', value: person, 'aria-label': 'Who on it the motion is aimed at', onChange: event => setPerson(event.target.value) },
+        [h('option', { key: '', value: '' }, deal.name)].concat(people.map(name => h('option', { key: name, value: name }, name)))) : null,
+      h(Menu, { label: 'Add to a motion', title: 'Put it on a motion’s list' }, live.map(motion => h(MenuItem, { key: motion.id, title: motion.name, sub: motion.status_label, onClick: () => add(motion) })))) : null)
+}
+
 function Audience({ motion, open, toMap }) {
   const impact = motion.impact, companies = impact.companies || []
   if (!motion.market) return h('div', { className: 'stoa-box' }, h('div', { className: 'stoa-eyebrow' }, 'Who it is for'),
@@ -1530,7 +1618,7 @@ function MotionPage({ id, data, state, path, back, open, toMap }) {
         Object.entries(impact.totals).filter(([metric]) => metric !== 'spend').map(([metric, value]) => (data.metrics[metric] || cap(metric)) + ' ' + Number(value).toLocaleString()).join(' · '),
         impact.response_rate !== null ? ' · ' + (impact.response_rate * 100).toFixed(1) + '% answered' : '') : null),
     h('div', { className: 'sd-m-cols' },
-      h('div', null, h(Records, { motion, state, data, path, set, open }), h(Results, { motion, data, path, set })),
+      h('div', null, h(List, { motion, state, data, path, set, open, toMap }), h(Records, { motion, state, data, path, set, open }), h(Results, { motion, data, path, set })),
       h(Audience, { motion, open, toMap })))
 }
 
@@ -1600,7 +1688,9 @@ function MotionCard({ motion, data, open, toMap }) {
     : h('div', { className: 'sd-mo-cells' },
       h(Cell, { label: 'Budget', value: gtmMoney(motion.budget, cur) }),
       h(Cell, { label: 'Who it is for', value: impact.audience ? String(impact.audience) : '—', sub: impact.audience ? 'companies on the map' : '' }),
-      h(Cell, { label: 'In the pipeline', value: impact.audience ? String(impact.audience_in_pipeline) : '—', sub: impact.audience ? 'of them already' : '' })))
+      h(Cell, { label: 'On the list', value: String((impact.list || {}).total || 0), sub: (impact.list || {}).total ? 'ready to run on' : 'nobody yet' })),
+  live && (impact.list || {}).total ? h('div', { className: 'sd-mo-when' }, h('span', null, [impact.list.total + ' on the list', impact.list.reached + ' reached', impact.list.replied + ' replied',
+    plural(impact.list.meeting, 'meeting', 'meetings')].join(' · '))) : null)
 }
 
 /** An idea: lighter than a motion that is under way, with the one thing to do about it. */
@@ -2286,9 +2376,9 @@ function PipelinesHead({ state, showPipe, filter, openGroup }) {
     }
     return bits
   }
-  return { $gtmView, GtmTab, MapStrategy, MapNumbers, MapArchive, PipelinesHead, gtmLooking }
+  return { $gtmView, GtmTab, MapStrategy, MapNumbers, MapArchive, PipelinesHead, gtmLooking, AddToMotion, RecordMotions }
 })()
-const { $gtmView, GtmTab, MapStrategy, MapNumbers, MapArchive, PipelinesHead, gtmLooking } = GTM
+const { $gtmView, GtmTab, MapStrategy, MapNumbers, MapArchive, PipelinesHead, gtmLooking, AddToMotion, RecordMotions } = GTM
 
 const CSS = `
 /* The look. Surfaces, words and lines are the app's theme (--ui-*), so every theme carries it.
@@ -6504,7 +6594,7 @@ function RecordPage({ id, state: shown, sessionId, back, backLabel, openRecord, 
       lead: justWon ? pb.won.label + ', and now in ' + phase + '. What is the first ' + phase + ' step?' + (deal.next_step ? ' It replaces “' + deal.next_step + '”.' : '') : '',
       close: () => { setNextForm(''); setJustWon(false) } })) : null,
     h('div', { className: 'stoa-rpgrid' },
-      h('div', { className: 'stoa-rpcol' }, h(RecordDetails, { deal, pb, state, openGroup, openCompany })),
+      h('div', { className: 'stoa-rpcol' }, h(RecordDetails, { deal, pb, state, openGroup, openCompany }), h(RecordMotions, { deal })),
       h('div', { className: 'stoa-rpcol' },
         h(Section, { title: 'Notes' }, h(RecordNotes, { key: 'notes-' + deal.id, deal, bare: true })),
         // On a deal everyone is a person on it. Where the record is itself a person (a candidate, a lead) these are the others.
@@ -7405,6 +7495,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
           onClick: () => act.buyers(companies) }, busy === 'buyers' ? 'Looking…' : (companies.length === 1 ? who.find[0] : who.find[1]) + ' · ' + plural(nobody.length, 'lookup', 'lookups'))
         : h(Btn, { key: 'buy', title: market.lookups ? 'No buyer is named on this map yet, so there is no job title to look for. Hermes works out who the buyer is at each company.' : 'Hermes works out who the buyer is with its web search. A People Data Labs key (Setup) lets it look people up.',
           onClick: () => act.buyers(companies) }, who.ask)) : null,
+      h(AddToMotion, { key: 'motion', companies, market, pipe, done: () => setPicked([]) }),
       h(Btn, { key: 'draft', onClick: () => act.draft(companies) }, 'Draft outreach'),
       h(Btn, { key: 'more', onClick: () => act.more(companies) }, companies.length === 1 ? 'More like this' : 'More like these'),
       open.length ? h(Btn, { key: 'no', kind: 'quiet', disabled: Boolean(busy), onClick: () => act.dismiss(companies) }, 'Dismiss') : null]
@@ -7415,7 +7506,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
   let side
   if (chosen.length === 1 && mapSay.people) {
     const c = chosen[0]
-    side = h(MapPerson, { c, market, busy: Boolean(busy), actions: actions([c]), open: c.status === 'tracked' && c.deal ? () => openRecord(c.deal) : null, move: segment => act.move(c, segment), close: () => setPicked([]) })
+    side = h(MapPerson, { c, market, busy: Boolean(busy), actions: actions([c]), open: c.status === 'tracked' && c.deal ? () => openRecord(c.deal, c.deal_pipeline) : null, move: segment => act.move(c, segment), close: () => setPicked([]) })
   } else if (chosen.length === 1) {
     const c = chosen[0]
     side = h('div', null,
@@ -7426,7 +7517,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
         c.signal ? h('span', { className: 'stoa-sub' }, agoWords(c.days) || 'no date on it') : null),
       h('div', { className: 'stoa-mapscore' }, h('span', { className: 'stoa-eyebrow' }, c.weighed ? 'Fit, by your weights' : 'Fit, Hermes\'s judgement'), h('b', null, c.score), h(Fit, { value: squaresOf(c.score) })),
       c.why ? h('p', { style: { margin: '10px 0' } }, c.why) : null,
-      h('div', { className: 'stoa-btns' }, c.status === 'tracked' && c.deal ? h(Btn, { kind: 'primary', onClick: () => openRecord(c.deal) }, 'Open the record') : null, actions([c])),
+      h('div', { className: 'stoa-btns' }, c.status === 'tracked' && c.deal ? h(Btn, { kind: 'primary', onClick: () => openRecord(c.deal, c.deal_pipeline) }, 'Open the record') : null, actions([c])),
       (c.requirements || []).length ? [label('Against your brief'), c.requirements.map(req => h('div', { key: req.label, className: 'stoa-mapreq', 'data-on': req.shown ? '1' : '0' },
         h('span', null, req.shown ? '[x]' : '[ ]'), h('span', null, h('b', null, req.label), h('span', { className: 'stoa-sub', style: { display: 'block' } }, req.shown ? (req.evidence || 'Shown; the source is on the map') : 'No evidence found'))))] : null,
       label('Facts'),
@@ -8759,7 +8850,9 @@ function Page() {
     !paged && tab === 'cash' ? h('div', { className: 'stoa-split', ref: split, 'data-side': '0' },
       h(Cash, { state, openId: '', setOpenId: openRecord, openClient })) : null,
     tab === 'market' ? h(GtmTab, { state, openRecord, showPipe }, market
-      ? h(MarketMap, { market, markets: state.markets, onMarket: setMarketId, shape: state.playbook.shape, openRecord })
+      ? h(MarketMap, { market, markets: state.markets, onMarket: setMarketId, shape: state.playbook.shape,
+        // a company added as a lead may be in the lead pipeline, not this one: show that one, then open it
+        openRecord: (id, pipe) => { if (pipe && pipe !== state.pipeline && (state.pipelines || []).some(one => one.id === pipe)) showPipe(pipe); openRecord(id) } })
       : h('div', { style: { maxWidth: 720 } }, h(NewMap, { first: true, shape: state.playbook.shape }))) : null,
     !paged && tab === 'reports' ? h(Reports, { state, openRecord }) : null,
     !paged && tab === 'activity' ? h('div', { style: { maxWidth: 800 } }, state.activity.length ? state.activity.map(entry => h('div', { key: entry.id, className: 'stoa-row', style: { cursor: 'default', alignItems: 'center' } },

@@ -310,6 +310,10 @@ def deal(deal_id: str) -> dict:
     out["money"] = d.money(record, bills)
     out["delivery_stages"] = playbook.delivery if record["status"] == "won" else []
     out["undo"] = d.store.undoable(deal_id)          # the last action, if it can be taken back
+    try:                                             # the motions it is on the list of, by the key the lists name it by
+        out["motions"] = d.motions.lists_of("%s:%s" % ("" if d.tour() else d.current()["id"], deal_id))
+    except Exception:
+        out["motions"] = []
     if not d.tour() and len(d.pipelines()) > 1:      # which pipeline it is in, and that pipeline's playbook: the page may be showing another
         here = d.current()
         out["pipeline"] = {"id": here["id"], "name": here["name"]}
@@ -1200,6 +1204,31 @@ def motion_records(motion_id: str, body: dict = Body(...)) -> dict:
         if body.get("remove"):
             return d.motions.view(d.motions.unlink(motion_id, body.get("deal"), body.get("pipeline")), detail=True)
         return d.motions.view(d.motions.link(motion_id, body.get("deal"), body.get("how"), body.get("pipeline"))[0], detail=True)
+    return _changed(work)
+
+
+@router.post("/motions/{motion_id}/members")
+def motion_members(motion_id: str, body: dict = Body(...)) -> dict:
+    """A motion's list. ``targets``: companies picked on a map, each added to its pipeline as a lead first. ``deals``:
+    records in any pipeline (``person``: who on one record it is aimed at). ``mark`` with ``status``, or ``drop``."""
+    body = body or {}
+
+    def work(d):
+        if body.get("mark"):
+            return d.motions.view(d.motions.mark(motion_id, body["mark"], body.get("status"), body.get("pipeline")), detail=True)
+        if body.get("drop"):
+            return d.motions.view(d.motions.drop(motion_id, body["drop"], body.get("pipeline")), detail=True)
+        done = {"added": [], "already": [], "unknown": []}
+        if body.get("targets"):
+            done = d.motions.enroll_from_map(motion_id, [str(t) for t in body["targets"]][:25], body.get("market") or "", d.actor() or "Someone")
+        if isinstance(body.get("new"), dict):            # someone found elsewhere: a new lead, then on the list
+            done = d.motions.new_lead(motion_id, body["new"].get("name"), body["new"].get("company"), d.actor() or "Someone")
+        if body.get("deals"):
+            more = d.motions.enroll(motion_id, body["deals"], body.get("pipeline") or "", body.get("person") or "", via="record")
+            done = {key: done[key] + more[key] for key in ("added", "already", "unknown")}
+        if not any(done.values()):
+            raise HTTPException(400, "Say who to put on the list.")
+        return dict(d.motions.view(d.motions.find(motion_id), detail=True), added=done["added"], already=done["already"], unknown=done["unknown"])
     return _changed(work)
 
 

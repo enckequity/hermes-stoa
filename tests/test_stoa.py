@@ -4484,6 +4484,23 @@ class DashboardApiTests(unittest.TestCase):
         self.api._profile_desk = lambda: self.desk          # the real desk() then picks the pipeline, as it does for a request
         fixture.load(self.desk)
 
+    def test_a_motions_list_from_the_page(self):
+        made = self.api.motion_add({"name": "Email offer", "kind": "outbound", "status": "running"})
+        dana = self.desk.store.find("Dana Whitfield")
+        seen = self.api.motion_members(made["id"], {"deals": [dana["id"]]})
+        self.assertEqual((seen["added"], seen["impact"]["list"]["total"], seen["impact"]["members"][0]["via"]), (["Dana Whitfield"], 1, "record"))
+        fresh = self.api.motion_members(made["id"], {"new": {"name": "Wei-Lin Chao", "company": "Brightside AI"}})
+        row = next(r for r in fresh["impact"]["members"] if r["name"] == "Wei-Lin Chao")
+        self.assertEqual((row["via"], row["company"]), ("new", "Brightside AI"))
+        self.assertEqual({r["name"]: r["how"] for r in fresh["impact"]["records"]}, {"Wei-Lin Chao": "sourced", "Dana Whitfield": "influenced"})
+        marked = self.api.motion_members(made["id"], {"mark": row["key"], "status": "meeting"})
+        self.assertEqual(next(r["status"] for r in marked["impact"]["members"] if r["key"] == row["key"]), "meeting")
+        gone = self.api.motion_members(made["id"], {"drop": row["key"]})
+        self.assertEqual([r["name"] for r in gone["impact"]["members"]], ["Dana Whitfield"])
+        with self.assertRaises(Exception):
+            self.api.motion_members(made["id"], {})
+        self.assertEqual([m["name"] for m in self.api.deal(dana["id"])["motions"]], ["Email offer"])
+
     def test_the_talk_box_has_standing_questions_answered_with_no_model(self):
         told = self.api.instant({"text": "Who has gone quiet?"})
         self.assertEqual((told["kind"], told["said"]), ("quiet", "Read from the desk · no model used"))
@@ -5751,6 +5768,85 @@ class GtmTabTests(unittest.TestCase):
         again = self.call("gtm_playbook", action="hand_over", pipeline="Client lead desk", deal=lead)
         self.assertFalse(again["ok"])                                                    # and not opened twice
 
+    def _deals_map(self):
+        """A map kept with the deal pipeline, with two companies, one of them with a buyer named."""
+        with self.desk.on(self.deals):
+            made = self.desk.markets.define({"name": "Neobanks", "segments": ["Challengers"]})
+            self.assertTrue(made["ok"], made)
+            added = self.desk.markets.add({"market": "Neobanks", "companies": [
+                {"company": "Kestrel Labs", "segment": "Challengers", "fit": 5, "people": [{"name": "Lena Ortiz", "title": "CFO"}]},
+                {"company": "Corvid Health", "segment": "Challengers", "fit": 4}]})
+            self.assertTrue(added["ok"], added)
+            return made["market"]["id"], {row["company"]: row for row in self.desk.markets.targets(made["market"]["id"])}
+
+    def test_a_company_from_a_map_on_a_deal_pipeline_starts_as_a_lead(self):
+        map_id, rows = self._deals_map()
+        self.assertEqual(self.desk.lead_pipeline_for(self.deals), "main")
+        with self.desk.on(self.deals):
+            told = self.desk.markets.track({"targets": [rows["Kestrel Labs"]["id"]]})
+            self.assertTrue(told["ok"], told)
+            self.assertEqual(told["added_to_pipeline"][0]["pipeline"], "main")
+            self.assertIn("lead pipeline", told["lead_pipeline"])
+            self.assertEqual(self.desk.store.list(status="all"), [])                    # nothing in the deal pipeline yet
+            target = self.desk.markets.target(rows["Kestrel Labs"]["id"])
+            self.assertEqual((target["status"], target["detail"]["deal_pipeline"]), ("tracked", "main"))
+            lead = self.desk.markets.record_of(target)
+            self.assertEqual((lead["name"], lead["company"], lead["source"]), ("Lena Ortiz", "Kestrel Labs", "market map: Neobanks"))      # the buyer is the lead
+            shown = next(c for seg in self.desk.markets.summary(map_id)["segments"] for c in seg["companies"] if c["company"] == "Kestrel Labs")
+            self.assertEqual((shown["deal"], shown["deal_pipeline"]), (lead["id"], "main"))
+            self.assertIn("already in the pipeline", self.desk.markets.click_track(rows["Kestrel Labs"]["id"], "Test")["notice"])     # once
+            clicked = self.desk.markets.click_track(rows["Corvid Health"]["id"], "Test")
+            self.assertEqual((clicked["pipeline"], clicked["deal"]["name"]), ("main", "Corvid Health"))
+            self.assertIn("as a lead from the market map", clicked["followup"])
+        # Converted, it is handed over and becomes a deal in the pipeline the map is kept with.
+        self.call("gtm_deal", action="close", deal=lead["id"], outcome="won", pipeline="Client lead desk")
+        self.assertEqual([d["name"] for d in self.records(self.deals)], ["Kestrel Labs"])
+
+    def test_a_motion_keeps_a_list_and_is_credited_by_it(self):
+        map_id, rows = self._deals_map()
+        before = self.lead("Ola Brandt", "Brightside AI")                                    # already in the pipeline
+        made = self.call("gtm_motion", action="add", name="Email offer", kind="outbound", status="running", market="Neobanks")
+        self.assertTrue(made["ok"], made)
+        on = self.call("gtm_motion", action="enroll", motion="Email offer", companies=["Kestrel Labs", "Corvid Health"])
+        self.assertTrue(on["ok"], on)
+        self.assertEqual((sorted(on["added"]), on["list"]["total"]), (["Corvid Health", "Lena Ortiz"], 2))
+        self.assertEqual(len(self.records("main")), 3)                                       # leads, in the lead pipeline
+        self.assertEqual(self.records(self.deals), [])
+        self.assertTrue(self.call("gtm_motion", action="enroll", motion="Email offer", deals=["Ola Brandt"])["ok"])
+        added = self.desk.motions.new_lead("Email offer", "Priya Raman", "Lumen Health")
+        self.assertEqual(added["added"], ["Priya Raman"])
+        again = self.call("gtm_motion", action="enroll", motion="Email offer", deals=["Ola Brandt"])
+        self.assertEqual((again["added"], again["already_on_it"]), ([], ["Ola Brandt"]))
+        got = self.call("gtm_motion", action="get", motion="Email offer")["motion"]
+        claims = {row["name"]: row["how"] for row in got["impact"]["records"]}
+        self.assertEqual(claims, {"Lena Ortiz": "sourced", "Corvid Health": "sourced", "Priya Raman": "sourced", "Ola Brandt": "influenced"})
+        why = next(row["why"] for row in got["impact"]["records"] if row["name"] == "Lena Ortiz")
+        self.assertIn("from the map, which is how it came into the pipeline", why)
+        self.assertIn("already in the pipeline then", next(row["why"] for row in got["impact"]["records"] if row["name"] == "Ola Brandt"))
+        # How far each has got: said by a person or the agent, or seen on the record.
+        self.assertTrue(self.call("gtm_motion", action="mark", motion="Email offer", deal="Priya Raman", status="answered")["ok"])
+        self.call("gtm_deal", action="log", deal=before, kind="email", text="Sent the offer.", pipeline="Client lead desk")
+        listed = {row["name"]: row["status"] for row in self.call("gtm_motion", action="get", motion="Email offer")["motion"]["impact"]["members"]}
+        self.assertEqual(listed, {"Priya Raman": "replied", "Ola Brandt": "reached", "Lena Ortiz": "added", "Corvid Health": "added"})
+        tally = self.call("gtm_motion", action="get", motion="Email offer")["motion"]["impact"]["list"]
+        self.assertEqual((tally["total"], tally["reached"], tally["replied"], tally["meeting"]), (4, 2, 1, 0))
+        self.assertFalse(self.call("gtm_motion", action="mark", motion="Email offer", deal="Priya Raman", status="wonderful")["ok"])
+        # A record's page lists the motions it is on.
+        self.assertEqual([row["name"] for row in self.desk.motions.lists_of("main:" + before)], ["Email offer"])
+        # Off the list, it is no longer credited by it.
+        self.assertTrue(self.call("gtm_motion", action="drop", motion="Email offer", deal="Ola Brandt")["ok"])
+        self.assertNotIn("Ola Brandt", [row["name"] for row in self.call("gtm_motion", action="get", motion="Email offer")["motion"]["impact"]["records"]])
+        # Being at a company on the map is not enough: a record that is on no list, and names no motion, is nobody's.
+        with self.desk.on(self.deals):
+            self.assertTrue(self.desk.deal({"action": "add", "name": "Kestrel Labs, second team", "company": "Kestrel Labs"}, actor="Test")["ok"])
+        self.assertNotIn("Kestrel Labs, second team", [row["name"] for row in self.call("gtm_motion", action="get", motion="Email offer")["motion"]["impact"]["records"]])
+        # The list wins over a mention: a second motion named in the Source of a record on this one's list only influenced it.
+        self.assertTrue(self.call("gtm_motion", action="add", name="Summit dinner", kind="event", status="running")["ok"])
+        self.call("gtm_deal", action="update", deal="Priya Raman", source="Summit dinner", pipeline="Client lead desk")
+        summit = {row["name"]: row["how"] for row in self.call("gtm_motion", action="get", motion="Summit dinner")["motion"]["impact"]["records"]}
+        self.assertEqual(summit, {"Priya Raman": "influenced"})
+        self.assertIn("scheduled job", json.loads(self._cron("gtm_motion", action="enroll", motion="Email offer", deals=["Priya Raman"]))["error"])
+
     def test_a_motion_is_credited_with_a_lead_and_the_deal_it_became_once(self):
         made = self.call("gtm_motion", action="add", name="Fraud summit dinner", kind="event", status="running", tags=["FSD26"])
         self.assertTrue(made["ok"], made)
@@ -6942,7 +7038,7 @@ class StorageHardeningTests(unittest.TestCase):
             db = obj._open()
             try:
                 self.assertEqual(db.execute("PRAGMA journal_mode").fetchone()[0].lower(), "wal")
-                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 1)
+                self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], type(obj).__module__.endswith("motions") and 2 or 1)      # motions 2: the list
                 self.assertGreaterEqual(db.execute("PRAGMA busy_timeout").fetchone()[0], 15000)
             finally:
                 db.close()
