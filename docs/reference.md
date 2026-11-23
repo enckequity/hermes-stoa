@@ -534,7 +534,9 @@ lead work they do for clients (`client-leads`) without one set of stages bending
   `gtm_playbook(action="set_handover")`, or none). The deal is named for the company, with the
   lead as a person on it and where it came from; a lead at a company that already has an open deal
   there joins it. It happens however the lead was closed, once per lead (kept in `handoffs.db`),
-  and `gtm_playbook(action="hand_over")` hands one over by hand.
+  and `gtm_playbook(action="hand_over")` hands one over by hand. A recruiting pipeline is never a
+  place leads go: its records are candidates. A scheduled job cannot hand a lead over or change
+  where leads go; a lead closed as won by one is handed over as any other.
 
 ### Searches, accounts and clients
 
@@ -715,7 +717,9 @@ figures the page draws, the moment they are asked: *what needs me today*, *who h
 *what moved this week*, *the morning brief* and *the pipeline as a report*, each in those words
 or the suggestion buttons above the box, with nothing attached. On a desk with more than one
 pipeline each is answered under its name. The answer says it came from the desk, and **Ask
-Hermes instead** sends the same question to Hermes. Anything else goes to Hermes as before.
+Hermes instead** sends the same question to Hermes. Anything else goes to Hermes as before, with
+the last few answers the desk gave by itself, so *"draft a nudge to the first one"* has the list
+it points at.
 Hermes gives a plugin no way to answer a message typed in its own chat, so there the question
 goes to the model; `/gtm today`, `/gtm brief`, `/gtm quiet`, `/gtm week` and `/gtm report` give
 the desk's own answer in any chat.
