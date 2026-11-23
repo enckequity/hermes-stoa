@@ -76,6 +76,12 @@ class Handoffs:
     def kind_of(playbook: Any) -> str:
         return "lead" if getattr(playbook, "shape", "") == "leads" else "deal"
 
+    def takes(self, pipeline_id: str) -> bool:
+        """Whether a lead can be handed over to this pipeline: one whose records are deals. A recruiting pipeline is
+        listed with the deal pipelines, but its records are candidates, and a company is never made into one."""
+        with self.desk.on(pipeline_id):
+            return getattr(self.desk.playbook(), "shape", "") not in ("leads", "roles")
+
     def _find(self, ref: Any) -> dict:
         wanted = " ".join(str(ref or "").casefold().split())
         rows = self.listed()
@@ -103,9 +109,9 @@ class Handoffs:
         chosen = self._settings().get(lead_pipeline, {})
         if chosen.get("to") == "":
             return ""
-        if chosen.get("to") and kinds.get(chosen["to"]) == "deal":
+        if chosen.get("to") and kinds.get(chosen["to"]) == "deal" and self.takes(chosen["to"]):
             return chosen["to"]
-        return next((pipeline_id for pipeline_id, kind in kinds.items() if kind == "deal"), "")
+        return next((pipeline_id for pipeline_id, kind in kinds.items() if kind == "deal" and self.takes(pipeline_id)), "")
 
     def set_target(self, lead_ref: Any, to_ref: Any) -> dict:
         lead = self._find(lead_ref)
@@ -117,6 +123,8 @@ class Handoffs:
             to = self._find(to_ref)
             if kinds.get(to["id"]) != "deal":
                 raise Refused("%s is a lead pipeline. A lead pipeline hands over to a deal pipeline." % to["name"])
+            if not self.takes(to["id"]):
+                raise Refused("%s is a recruiting pipeline: its records are candidates, not deals. A lead pipeline hands over to a deal pipeline." % to["name"])
             target = to["id"]
         entry = dict(self._settings().get(lead["id"], {}))
         entry.update(to=target)
@@ -214,7 +222,7 @@ class Handoffs:
         if kinds.get(lead_pipeline) != "lead":
             raise Refused("That is not a lead pipeline.")
         target = to or self.target_of(lead_pipeline, kinds)
-        if not target or kinds.get(target) != "deal":
+        if not target or kinds.get(target) != "deal" or not self.takes(target):
             raise Refused("There is no deal pipeline for %s to hand over to. Add one on the Pipeline tab." % names.get(lead_pipeline, "it"))
         with self.desk.on(lead_pipeline):
             try:
@@ -258,6 +266,18 @@ class Handoffs:
                     raise Refused("The deal could not be opened in %s: %s" % (names[target], made.get("error") or "unknown"))
                 deal_id = made["deal"]["id"] if isinstance(made["deal"], dict) else made["deal"]
                 joined = bool(made.get("exists"))           # the ledger found the same record already there
+        try:
+            return self._finish(lead_pipeline, lead, people, target, names, how, actor, deal_id, title, company, joined)
+        except BaseException:
+            # The deal is open: the hand-over happened, though not every step of it. It is kept as done (so the lead and
+            # its deal still count once, and it is not opened twice), and the log says what was left.
+            self._settle(lead_pipeline, lead["id"], deal_id, how + ", not finished")
+            log.exception("stoa: handing over %s stopped part-way; the deal %s is open", lead["id"], deal_id)
+            raise
+
+    def _finish(self, lead_pipeline: str, lead: dict, people: list, target: str, names: dict, how: str, actor: str,
+                deal_id: str, title: str, company: str, joined: bool) -> dict:
+        with self.desk.on(target):
             if company:         # the lead, and anyone else on it, as people on the deal
                 for person in [{"name": lead["name"], "email": lead["email"], "linkedin": lead["linkedin"], "phone": lead.get("phone") or "", "title": ""}] + people:
                     if str(person.get("name") or "").strip():

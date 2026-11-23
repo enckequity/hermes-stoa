@@ -1855,8 +1855,8 @@ class Desk:
             return refused
         if tool == "gtm_invoice" and action not in ("", "list") and "invoice" not in allows:
             return self.hold("invoice_" + action, args or {}) if action in ("add", "pay") else refused
-        if tool == "gtm_playbook" and action in ("add_pipeline", "rename_pipeline"):
-            return unheld
+        if tool == "gtm_playbook" and action in ("add_pipeline", "rename_pipeline", "set_handover", "hand_over"):
+            return unheld           # a hand-over opens a deal and closes a lead: the person's call, or the desk's own when a lead is won
         if tool == "gtm_intake" and action in ("apply", "discard"):
             return {"ok": False, "error": "A scheduled job cannot approve or discard what is waiting: that is the person's call, "
                                           "on the Today tab. Leave it there."}
@@ -2105,7 +2105,7 @@ class Desk:
         if moved is not None and status == "won" and playbook.shape == "leads" and not self.tour():
             # A lead pipeline hands a qualified lead over to its deal pipeline. Once what this action wrote is saved:
             # the hand-over writes to other pipelines, and must not hold this one's lock while it does.
-            pipe, lead_id = PIPELINE.get() or MAIN, deal["id"]
+            pipe, lead_id = self._pipe().get("id") or MAIN, deal["id"]      # the pipeline the store wrote to, as own_file() finds it
             self.store.after_commit(lambda: self.handoffs.after_won(pipe, lead_id))
         return moved
 
@@ -4270,7 +4270,7 @@ class Desk:
                 return shown["map"]
             names = shown.get("markets")
             return shown["error"] + ("\n" + "\n".join("  " + n for n in names) if names else "")
-        if word in ("quiet", "week", "report"):          # every pipeline, as the talk box on the page answers them
+        if word in ("quiet", "week", "report") and not self._named_exactly(raw):     # every pipeline, as the talk box answers them
             from .instant import SAID
             with self.on(""):
                 return self.instant.answer(word) + "\n\n_%s_" % SAID
@@ -4299,6 +4299,11 @@ class Desk:
         if in_slack and self.card({"deal": deal["id"]}, session).get("posted"):
             return ""           # the card itself is the reply
         return self.text_card(deal)
+
+    def _named_exactly(self, word: str) -> bool:
+        """Whether a record on the first pipeline is called exactly this: then `/gtm <word>` opens it, as it always did."""
+        wanted = word.strip().casefold()
+        return any(str(deal["name"] or "").strip().casefold() == wanted for deal in self.store.list(status="all"))
 
     def brief_text(self) -> str:
         data = self.brief()

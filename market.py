@@ -325,6 +325,9 @@ class Markets:
                     sql += " AND market_id = ?"
                     params.append(market_id)
                 rows = conn.execute(sql + " ORDER BY status = 'dismissed', updated_at DESC", params).fetchall()
+                if not market_id:           # named alone, a company is not looked for on a map that was put away
+                    away = {r["id"] for r in conn.execute("SELECT id, detail FROM markets").fetchall() if _archived_at(dict(r))}
+                    rows = [r for r in rows if r["market_id"] not in away]
                 row = rows[0] if rows else None
         return _unpack_target(dict(row)) if row else None
 

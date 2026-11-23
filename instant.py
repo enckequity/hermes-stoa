@@ -14,7 +14,9 @@ So a handful of standing questions are answered here, from the desk, at once:
 
 Two ways in. The talk box on the Stoa page catches these exact questions (its suggestion buttons, and the same words
 typed), when nothing is attached; anything else goes to Hermes as before, and the answer has an "Ask Hermes instead".
-And ``/gtm today``, ``/gtm quiet``, ``/gtm week``, ``/gtm brief`` and ``/gtm report`` give the same answer in any Hermes chat.
+What the desk answered goes to Hermes with the next message sent to it, so a follow-up has it. In any Hermes chat,
+``/gtm quiet``, ``/gtm week`` and ``/gtm report`` give these same answers; ``/gtm today`` and ``/gtm brief`` give the
+desk's longer text answers for the first pipeline, as they always have.
 
 Hermes gives a plugin no way to answer a message typed in its own chat, so a question typed there still goes to the
 model. Every figure is the desk's own (the views behind ``gtm_pipeline`` and ``gtm_report``): nothing is counted
@@ -63,7 +65,8 @@ class Instant:
         """The answer to one standing question, for every pipeline on the desk."""
         if kind not in KINDS:
             return ""
-        listed = self.desk.pipelines()
+        # A tour shows one sample pipeline whichever pipeline is asked for, so it is answered once, under no name.
+        listed = [{"id": "", "name": ""}] if self.desk.tour() else self.desk.pipelines()
         parts = []
         for entry in listed:
             with self.desk.on(entry["id"]):
@@ -126,7 +129,7 @@ class Instant:
             out.append("Won\n\n" + "\n".join(self._more(won, ["- **%s**%s" % (row.get("name", ""), " · " + self._money(row.get("value")) if row.get("value") else "") for row in won])))
         if lost:
             out.append("Lost\n\n" + "\n".join(self._more(lost, ["- **%s**%s" % (row.get("name", ""), " · " + str(row["reason"]) if row.get("reason") else "") for row in lost])))
-        moves = [entry for entry in (self.desk.pipeline({"view": "activity"}).get("activity") or []) if entry.get("kind") == "stage"]
+        moves = [entry for entry in (self.desk.pipeline({"view": "activity", "days": 7, "limit": 500}).get("activity") or []) if entry.get("kind") == "stage"]
         if moves:
             names = {deal["id"]: deal["name"] for deal in self.desk.store.list(status="all")}
             out.append("Moved\n\n" + "\n".join(self._more(moves, ["- **%s** · %s" % (names.get(entry.get("deal"), entry.get("deal", "")), entry.get("text", "")) for entry in moves])))

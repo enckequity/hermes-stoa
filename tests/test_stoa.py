@@ -1109,6 +1109,13 @@ class CandidateMapTests(unittest.TestCase):
         # The same answers from /gtm in any chat, and from the page's route.
         self.assertIn("**In the last seven days:**", desk.slash("week"))
         self.assertIn("no model used", desk.slash("quiet"))
+        # A record called that is opened, as /gtm <name> always did.
+        desk.deal({"action": "add", "name": "Report", "company": "Report Ltd"})
+        self.assertNotIn("no model used", desk.slash("report"))
+        # On a tour the sample is answered once, under no pipeline's name.
+        desk.tour_start("recruiting")
+        self.assertNotIn("### ", desk.instant.answer("quiet"))
+        desk.tour_end()
 
     def test_the_downloaded_page_is_made_from_the_gtm_tab_and_keeps_in_step_with_it(self):
         from stoa import page
@@ -5714,6 +5721,36 @@ class GtmTabTests(unittest.TestCase):
         self.assertTrue(by_hand["ok"], by_hand)
         self.assertEqual([d["name"] for d in self.records(self.deals)], ["Ledgerline"])
 
+    def test_a_hand_over_goes_only_to_a_deal_pipeline_and_only_by_a_person_or_a_won_lead(self):
+        # A recruiting pipeline is never where a company lands, first in the list or chosen.
+        made = self.call("gtm_playbook", action="add_pipeline", pipeline_name="Search work", playbook="recruiting")
+        self.assertTrue(made["ok"], made)
+        searches = next(p["id"] for p in self.desk.pipelines() if p["name"] == "Search work")
+        self.assertEqual(self.desk.handoffs.target_of("main"), self.deals)
+        refused = self.call("gtm_playbook", action="set_handover", pipeline="Client lead desk", to="Search work")
+        self.assertFalse(refused["ok"])
+        self.assertIn("recruiting pipeline", refused["error"])
+        with mock.patch.object(self.desk.handoffs, "_settings", lambda: {"main": {"to": searches}}):
+            self.assertEqual(self.desk.handoffs.target_of("main"), self.deals)           # a choice made some other way is not followed there
+        # A scheduled job cannot open a deal or change where leads go.
+        lead = self.lead("Rosa Lind", "Ledgerline")
+        for action, more in (("hand_over", {"deal": lead}), ("set_handover", {"to": ""})):
+            told = json.loads(self._cron("gtm_playbook", action=action, pipeline="Client lead desk", **more))
+            self.assertFalse(told["ok"], action)
+            self.assertIn("scheduled job", told["error"])
+        self.assertEqual(self.records(self.deals), [])
+
+    def test_a_hand_over_that_stops_part_way_is_kept_as_done(self):
+        lead = self.lead("Dana Whitfield", "Calder Bank")
+        with mock.patch.object(self.desk, "contact", side_effect=RuntimeError("database is locked")):
+            with self.assertRaises(RuntimeError):
+                self.desk.handoffs.hand_over("main", lead)
+        deals = self.records(self.deals)
+        self.assertEqual([d["name"] for d in deals], ["Calder Bank"])
+        self.assertEqual(self.desk.handoffs.pairs(), {"main:%s" % lead: "%s:%s" % (self.deals, deals[0]["id"])})     # the pair is kept
+        again = self.call("gtm_playbook", action="hand_over", pipeline="Client lead desk", deal=lead)
+        self.assertFalse(again["ok"])                                                    # and not opened twice
+
     def test_a_motion_is_credited_with_a_lead_and_the_deal_it_became_once(self):
         made = self.call("gtm_motion", action="add", name="Fraud summit dinner", kind="event", status="running", tags=["FSD26"])
         self.assertTrue(made["ok"], made)
@@ -5757,6 +5794,13 @@ class GtmTabTests(unittest.TestCase):
         self.assertEqual([m["name"] for m in self.desk.markets.list_markets(archived=True)], ["Neobanks"])
         self.assertIsNone(self.desk.markets._market("Neobanks"))
         self.assertEqual(self.desk.markets._market("").get("name"), "Credit unions")            # the only map left is "the map"
+        # A company on it is not found by its name alone either, only on its own map.
+        self.assertTrue(self.desk.markets.unarchive("Neobanks")["ok"])
+        self.assertTrue(self.desk.markets.add({"market": "Neobanks", "companies": [{"company": "Kestrel Labs", "segment": "x"}]})["ok"])
+        self.assertTrue(self.desk.markets.archive("Neobanks")["ok"])
+        self.assertIsNone(self.desk.markets.target("Kestrel Labs"))
+        kept = self.desk.markets.list_markets(archived=True)[0]
+        self.assertEqual(self.desk.markets.target("Kestrel Labs", kept["id"])["company"], "Kestrel Labs")
         self.assertFalse(self.desk.markets.remove("Credit unions", archived=True)["ok"])         # only an archived one goes this way
         self.assertTrue(self.desk.markets.unarchive("neobanks")["ok"])
         self.assertEqual(len(self.desk.markets.list_markets()), 2)
