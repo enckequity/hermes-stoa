@@ -877,7 +877,8 @@ class Markets:
 
     def search(self, args: dict) -> dict:
         key = self.desk.secret(EXA_KEY)
-        if not key:
+        host_search = None if key else getattr(self.desk, "host_search", None)
+        if not key and not callable(host_search):
             return {"ok": False, "error": "Exa is not set up (EXA_API_KEY), so use your own web search tool to find companies, "
                                           "then record them with gtm_market(action='add')."}
         query = str(args.get("query") or "").strip()
@@ -887,15 +888,22 @@ class Markets:
         if market is not None:
             stop = self._over_budget(market)
             cap = self._limits(market)["searches"]
-            if not stop and cap and self._count(market["id"], "exa:" + month) >= cap:
+            if not stop and key and cap and self._count(market["id"], "exa:" + month) >= cap:
                 stop = ("This map has used the %d Exa searches a person set as its limit for the month. Stop searching for it and tell "
                         "the person; they can raise the limit under Map facts." % cap)
             if stop:
                 return {"ok": False, "error": stop}
-        result = sources.exa_companies(key, query, _whole(args.get("limit") or 8, 8, 1, 15), http=self.desk.http)
-        if result.get("ok") and market is not None:
-            self.store.bump("map:%s:exa" % market["id"])
-            self.store.bump("map:%s:exa:%s" % (market["id"], month))
+        limit = _whole(args.get("limit") or 8, 8, 1, 15)
+        if key:
+            result = sources.exa_companies(key, query, limit, http=self.desk.http)
+            if result.get("ok") and market is not None:
+                self.store.bump("map:%s:exa" % market["id"])
+                self.store.bump("map:%s:exa:%s" % (market["id"], month))
+        else:
+            result = host_search(query, limit)
+            if result is None:
+                return {"ok": False, "error": "Exa is not set up (EXA_API_KEY), so use your own web search tool to find companies, "
+                                              "then record them with gtm_market(action='add')."}
         if result.get("ok"):
             result["note"] = ("These are candidates, not yet on the map. Judge each against the market brief and add the ones "
                               "that fit with gtm_market(action='add'), giving the reason and the source URL.")

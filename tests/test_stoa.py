@@ -7073,5 +7073,49 @@ class StorageHardeningTests(unittest.TestCase):
         self.assertEqual((len(ok), len(refused)), (1, 3))
 
 
+class HostHookTests(unittest.TestCase):
+    """Opt-in host hooks (instant toggle, host_search fallback, STANDALONE UI gating) keep Hermes defaults intact."""
+
+    def test_instant_route_respects_host_instant_setting(self):
+        import dashboard.plugin_api as api
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cfg = {"instant": True}
+            desk = Desk(data_dir=lambda: root, get_config=lambda k, d=None: cfg.get(k, d),
+                        set_config=lambda k, v: cfg.__setitem__(k, v), get_secret=lambda _k: None)
+            orig_desk = api._profile_desk
+            api._profile_desk = lambda: desk
+            try:
+                on = api.instant({"text": "What needs me today?"})
+                self.assertEqual(on["kind"], "today")
+                cfg["instant"] = False
+                off = api.instant({"text": "What needs me today?"})
+                self.assertEqual(off, {"kind": ""})
+            finally:
+                api._profile_desk = orig_desk
+
+    def test_market_search_uses_host_search_fallback_without_exa_key(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            desk = Desk(data_dir=lambda: root, get_config=lambda _k, d=None: d,
+                        set_config=lambda _k, _v: None, get_secret=lambda _k: None)
+            # Default (Hermes): no host_search -> Exa error
+            no_key = desk.markets.search({"query": "devtools"})
+            self.assertFalse(no_key["ok"])
+            self.assertIn("EXA_API_KEY", no_key["error"])
+            # Host registers search fallback -> returns candidates + standard note
+            calls = []
+            desk.host_search = lambda q, limit: (calls.append((q, limit)), {"ok": True, "results": [{"title": "Acme", "url": "https://acme.example"}]})[1]
+            got = desk.markets.search({"query": "devtools", "limit": 5})
+            self.assertTrue(got["ok"])
+            self.assertEqual(calls, [("devtools", 5)])
+            self.assertIn("gtm_market(action='add')", got["note"])
+            # Host fallback returning None -> standard Exa error
+            desk.host_search = lambda _q, _l: None
+            none_res = desk.markets.search({"query": "devtools"})
+            self.assertFalse(none_res["ok"])
+            self.assertIn("EXA_API_KEY", none_res["error"])
+
+
 if __name__ == "__main__":
     unittest.main()

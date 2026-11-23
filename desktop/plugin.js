@@ -24,6 +24,7 @@ let storage = null // ctx.storage, set in register()
 // rather than assumed, so on a Hermes without one the page falls back to its own plain version instead of breaking.
 const { ModelCatalogMenu, ModelMenuCloseContext, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, MessageTextContent } = SDK
 const APP_MENU = Boolean(ModelCatalogMenu && ModelMenuCloseContext && DropdownMenu && DropdownMenuContent && DropdownMenuItem && DropdownMenuTrigger)
+const STANDALONE = Boolean(SDK.STANDALONE)
 
 /** Draws `children`; if they throw while drawing, draws `fallback` instead and says so once in the console. The app's
     parts are the app's to change, and a change there must cost the page a nicer menu, never the page. */
@@ -5370,7 +5371,10 @@ function Welcome({ skip, ink }) {
       h('div', { className: 'stoa-eyebrow' }, 'Welcome to Stoa'),
       h('div', { className: 'stoa-herotitle' }, 'The CRM Hermes runs for you.'),
       h('p', { className: 'stoa-reading', style: { marginTop: 0 } },
-        'You say what happened, in your own words. Hermes keeps the pipeline, logs your email and calls, drafts the follow-ups, and asks before anything changes. First: what kind of work is your pipeline for?')),
+        STANDALONE
+          ? 'You say what happened, in your own words. Stoa keeps the pipeline, drafts the follow-ups, and asks before anything changes. First: what kind of work is your pipeline for?'
+          : 'You say what happened, in your own words. Hermes keeps the pipeline, logs your email and calls, drafts the follow-ups, and asks before anything changes. First: what kind of work is your pipeline for?')),
+    SDK.WelcomeExtra ? h(SDK.WelcomeExtra) : null,
     h('div', { className: 'stoa-shapes', style: { marginTop: 14 } }, data.shapes.map(item => h(ShapeCard, { key: item.id, shape: item,
       onPick: chosen => $setupFlow.set({ mode: 'first', step: 'stages', shape: chosen.id }) }))),
     h('div', { className: 'stoa-sub', style: { marginTop: 10 } }, 'Two kinds of work? Set up one now; add the other as a second pipeline under Setup.'),
@@ -5407,6 +5411,11 @@ const TYPED = [['/gtm', 'the board, in any Hermes chat'], ['/gtm today', 'what n
   ['/gtm cash', 'won, invoiced, collected, overdue, and the forecast'], ['/gtm brief', 'the morning brief'], ['/gtm quiet, week, report', 'who has gone quiet, what moved this week, each pipeline by stage: every pipeline, no model'],
   ['/gtm <name>', 'one record as a card'],
   ['/gtm map', 'your market map'], ['!gtm …', 'the same in Slack, which keeps the slash for itself'], ['/blueprint', 'switch on an automation'], ['hermes stoa status', 'in a terminal: what is connected']]
+const TYPED_STANDALONE = [['/today', 'what needs you today (instant, no model)'], ['/quiet', 'who has gone quiet across every pipeline (instant)'],
+  ['/week', 'what moved this week (instant)'], ['/brief', 'the morning brief (instant)'], ['/report', 'every pipeline by stage (instant)'],
+  ['/calls', 'call notes and voice notes waiting to be filed'], ['/draft', 'draft a follow-up for a record'], ['/log', 'log a call, email, or meeting on a record'],
+  ['/motions', 'review active motions and lists'], ['/notes', 'open your notes inbox'], ['/new', 'start a fresh chat'],
+  ['Ctrl+Opt+Space', 'talk to Stoa from anywhere on your Mac']]
 const ALWAYS = ['Keeps one ledger: every change to a record or a person, what it replaced and what it left. Lines are never altered.',
   'Keeps each person once, however many records they are on.', 'Gives each record one next step and a date, and tells you when the date comes.',
   'Calls a record quiet when nothing has happened for longer than its stage allows.', 'Holds any list, and anything Hermes suggests, for your yes or no, with what it rests on.',
@@ -5587,7 +5596,7 @@ function NotesSources({ setup }) {
     tool.route === 'key' ? h(Keys, { setup, only: [tool.key] })
       : [h('ol', { key: 'steps', className: 'stoa-notesteps' }, (tool.steps || []).map((step, index) => h('li', { key: index }, step))),
         h('div', { key: 'add' }, addRow(tool.folder)),
-        tool.connection ? h('div', { key: 'conn', className: 'stoa-noteconn' },
+        !STANDALONE && tool.connection ? h('div', { key: 'conn', className: 'stoa-noteconn' },
           h('span', { className: 'stoa-eyebrow' }, 'Or with nothing to export'),
           h('p', { style: { margin: '4px 0 6px' } }, tool.connection.about + ' In Hermes, open Capabilities, then Connectors, add a connector with this address, and sign in to ' + tool.name + ' when it asks: ',
             h('code', { className: 'stoa-code' }, tool.connection.address)),
@@ -5721,6 +5730,13 @@ function scheduleWords(text) {
 /** The jobs Hermes can run on a schedule for the desk, each with whether it is on, and what one may change by itself. */
 function Automations({ setup }) {
   const next = stamp => { const d = new Date(stamp); return isNaN(d) ? '' : d.toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }) }
+  if (STANDALONE) {
+    return h('div', null,
+      h('p', { className: 'stoa-sub', style: { margin: '0 0 8px' } }, 'Switch scheduled jobs on, pick when they run, and choose which model runs them from the Scheduled section in the left panel.'),
+      h('div', { className: 'stoa-btns', style: { marginTop: 4 } }, h(Btn, { kind: 'primary', onClick: () => host.navigate('/cron') }, 'Open scheduled jobs')),
+      h('div', { className: 'stoa-steplabel' }, 'What a scheduled job may change without asking'),
+      h(Autonomy, { setup }))
+  }
   return h('div', null,
     h('p', { className: 'stoa-sub', style: { margin: '0 0 4px' } }, 'Switch on… opens a chat with the command typed. Press Enter, and Hermes asks when it should run and where to report. That is all there is to it.'),
     (setup.automations || []).map(item => {
@@ -5761,7 +5777,8 @@ function Setup({ state, go }) {
   const exportAll = () => wait(rest('/export').then(file => { download(file.filename, file.csv, 'text/csv'); host.notify({ kind: 'success', message: plural(file.rows, 'record', 'records') + ' exported.' }) })
     .catch(error => host.notifyError(error, 'Stoa could not export')))
   const ready = step.playbook.done && step.records.done
-  const extras = ['keys', 'notes', 'slack', 'sweep'].filter(id => step[id] && step[id].done).length
+  const extraIds = STANDALONE ? ['keys', 'notes', 'sweep'] : ['keys', 'notes', 'slack', 'sweep']
+  const extras = extraIds.filter(id => step[id] && step[id].done).length
   const label = text => h('div', { className: 'stoa-steplabel' }, text)
   return h('div', { className: 'stoa-setup2' },
     (setup.problems || []).length ? h('div', { className: 'stoa-box', style: { borderColor: 'var(--ui-orange)', marginBottom: 14 } },
@@ -5769,7 +5786,7 @@ function Setup({ state, go }) {
       setup.problems.map((line, index) => h('p', { key: index, className: 'stoa-sub', style: { margin: '4px 0 0', overflowWrap: 'anywhere' } }, line))) : null,
     h('div', { className: 'stoa-setintro' },
       h('h2', null, ready ? 'Your desk is set up' : 'Set up your desk'),
-      h('p', null, ready ? 'The two things it needs are done. Everything under “Make it do more” is optional: ' + extras + ' of 4 are on.'
+      h('p', null, ready ? 'The two things it needs are done. Everything under “Make it do more” is optional: ' + extras + ' of ' + extraIds.length + ' are on.'
         : 'Two steps make a working desk. The rest is optional and can wait.')),
 
     h('div', { className: 'stoa-setgroup' }, 'The two it needs'),
@@ -5810,7 +5827,7 @@ function Setup({ state, go }) {
         h(Keys, { setup, only: ['exa', 'pdl'] })),
       h(Step, { id: 'notes', optional: true, done: step.notes.done, title: 'Bring in your call notes', status: step.notes.detail },
         h(NotesSources, { setup })),
-      h(Step, { id: 'slack', optional: true, done: step.slack.done, title: 'Work from Slack', status: step.slack.detail },
+      !STANDALONE ? h(Step, { id: 'slack', optional: true, done: step.slack.done, title: 'Work from Slack', status: step.slack.detail },
         setup.slack ? h('div', null,
           h('p', { style: { margin: '0 0 6px' } }, 'In Slack, type ', h('code', { className: 'stoa-code' }, '!gtm'), ' for the board, ', h('code', { className: 'stoa-code' }, '!gtm today'), ' for what needs you, or ', h('code', { className: 'stoa-code' }, '!gtm'), ' and a name for that record\'s card. The buttons on a card move it at once.'),
           h('div', { className: 'stoa-facts', style: { marginTop: 8 } },
@@ -5821,7 +5838,7 @@ function Setup({ state, go }) {
           : h('div', null,
             h('p', { style: { margin: '0 0 6px' } }, 'Open Messaging, choose Slack and follow its steps. When Hermes is in your Slack there is nothing more to do here: typing ', h('code', { className: 'stoa-code' }, '!gtm'), ' in Slack shows the board.'),
             h('div', { className: 'stoa-btns' }, h(Btn, { kind: 'primary', onClick: () => host.navigate('/messaging') }, 'Open Messaging')),
-            setup.slack === false ? h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'Just connected it and this still says no? Restart Hermes once (hermes gateway restart) so Stoa\'s buttons are wired to Slack.') : null)),
+            setup.slack === false ? h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'Just connected it and this still says no? Restart Hermes once (hermes gateway restart) so Stoa\'s buttons are wired to Slack.') : null)) : null,
       h(Step, { id: 'sweep', optional: true, done: step.sweep.done, title: 'Let Hermes keep the desk current', status: step.sweep.detail },
         h(Automations, { setup }))),
 
@@ -5833,7 +5850,7 @@ function Setup({ state, go }) {
       h(Step, { id: 'rules', plain: true, title: 'The rules the desk keeps', status: 'Where it answers, what it may read and write, paid lookups' },
         setup.rules.filter(item => !item.own).map(item => h('div', { key: item.label, className: 'stoa-setrow', style: { display: 'block' } },
           h('small', { className: 'stoa-eyebrow', style: { display: 'block' } }, item.label), h('span', { style: { overflowWrap: 'anywhere' } }, item.value))),
-        h('div', { className: 'stoa-btns' }, h(Btn, { onClick: openSettings }, 'Change them in Stoa\'s settings'))),
+        !STANDALONE ? h('div', { className: 'stoa-btns' }, h(Btn, { onClick: openSettings }, 'Change them in Stoa\'s settings')) : null),
       h(Step, { id: 'data', plain: true, title: 'Your data', status: (data.records ? plural(data.records, 'record', 'records') : 'Nothing on the desk yet') + (setup.tour ? ' · sample data is on show' : '') },
         h('div', { className: 'stoa-facts', style: { marginTop: 0, paddingTop: 0, borderTop: 0 } },
           [['Open', data.open], ['Won', data.won], ['Lost', data.lost], ['Log entries', data.activities], ['Market maps', data.maps], ['Lists waiting', data.lists_waiting],
@@ -5845,8 +5862,8 @@ function Setup({ state, go }) {
           : 'A copy of the file is kept each day once there is something on the desk, the last fourteen, in a backups folder beside it.'),
         h('div', { className: 'stoa-btns' }, h(Btn, { disabled: busy, onClick: exportAll }, setup.tour ? 'Export the sample data as CSV' : 'Export everything as CSV'),
           setup.tour ? h(Btn, { kind: 'primary', disabled: busy, onClick: () => wait(tour('leave')) }, 'Leave the tour') : null),
-        h(HandedFiles),
-        h(TakenOff),
+        STANDALONE ? null : h(HandedFiles),
+        STANDALONE ? null : h(TakenOff),
         data.samples && !setup.tour ? h('div', { style: { marginTop: 10 } },
           h('div', { className: 'stoa-sub' }, plural(data.samples, 'sample record is', 'sample records are') + ' mixed into your own desk (an earlier version of Stoa put them there).'),
           h('div', { className: 'stoa-btns', style: { marginTop: 6 } }, h(Btn, { disabled: busy, onClick: () => wait(tour('tidy')) }, 'Remove them from my desk'))) : null),
@@ -5855,8 +5872,8 @@ function Setup({ state, go }) {
           h('div', null, h('div', { className: 'stoa-name' }, 'Say it'), h('div', { className: 'stoa-sub', style: { marginBottom: 6 } }, 'Press one to put it in the box below.'),
             SAY.map(line => h('button', { type: 'button', key: line, className: 'stoa-sayline', onClick: () => $draft.set(line.replace(/ \(then.*\)$/, '')) }, '“' + line + '”'))),
           h('div', null, h('div', { className: 'stoa-name', style: { marginBottom: 6 } }, 'Or do it by hand'), BY_HAND.map(line => h('p', { key: line, className: 'stoa-tip' }, line))),
-          h('div', null, h('div', { className: 'stoa-name' }, 'Or type it'), h('div', { className: 'stoa-sub', style: { marginBottom: 6 } }, 'In a chat. Typed in the box below, a command opens one.'),
-            TYPED.map(pair => h('p', { key: pair[0], className: 'stoa-tip' }, h('code', null, pair[0]), '  ' + pair[1]))))),
+          h('div', null, h('div', { className: 'stoa-name' }, 'Or type it'), h('div', { className: 'stoa-sub', style: { marginBottom: 6 } }, STANDALONE ? 'Shortcuts in the chat box, or from anywhere on your Mac.' : 'In a chat. Typed in the box below, a command opens one.'),
+            (STANDALONE ? TYPED_STANDALONE : TYPED).map(pair => h('p', { key: pair[0], className: 'stoa-tip' }, h('code', null, pair[0]), '  ' + pair[1]))))),
       h(Step, { id: 'always', plain: true, title: 'What the desk always does, and what your playbook decides', status: 'The parts that never change, and the parts that are yours' },
         h('div', { className: 'stoa-cols', style: { gap: 22 } },
           h('div', null, h('div', { className: 'stoa-name', style: { marginBottom: 6 } }, 'Always, whatever you sell'), ALWAYS.map(line => h('p', { key: line, className: 'stoa-tip' }, line))),
