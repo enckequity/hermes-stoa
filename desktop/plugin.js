@@ -6617,6 +6617,7 @@ function RecordPage({ id, state: shown, sessionId, back, backLabel, openRecord, 
         h(Section, { title: 'Notes' }, h(RecordNotes, { key: 'notes-' + deal.id, deal, bare: true })),
         // On a deal everyone is a person on it. Where the record is itself a person (a candidate, a lead) these are the others.
         h('section', { className: 'stoa-box stoa-rpsec' }, h(People, { deal, term: pb.terms.deal, title: pb.shape === 'deals' ? 'People' : 'Other people', whole: pb.shape === 'deals' })),
+        SDK.RecordExtra ? h(SDK.RecordExtra, { deal }) : null,
         h(Timeline, { deal, sessionId })),
       h(RecordRelated, { deal, pb, state, openRecord, openGroup, openCompany, openClient })))
 }
