@@ -64,6 +64,7 @@ const $tab = atom('today') // the page's tab: today | pipeline | database | cash
 const $draft = atom('') // words put in the dock for the person to finish and send
 let onPage = false // the Stoa page is what is on screen: a click that calls for writing goes to its dock
 const $onPage = atom(false) // the same, for the pane to watch: beside the open desk it shows other things
+const deskShowing = () => onPage && (typeof SDK.isDeskVisible === 'function' ? SDK.isDeskVisible() : true)
 const $want = atom('') // a record picked in the pane while the desk is open: the page opens it
 const $view = atom('board') // the pipeline tab: board | companies | groups
 const $pipe = atom('') // which pipeline the page is showing ('' = the first): an id from state.pipelines
@@ -72,7 +73,7 @@ let lastTimer = 0
 
 /** Offer to take back what was just done. The offer goes away by itself. */
 function offerUndo(last) {
-  if (!last || !onPage) return
+  if (!last || !deskShowing()) return
   $last.set(last)
   clearTimeout(lastTimer)
   lastTimer = setTimeout(() => { if ($last.get() === last) $last.set(null) }, 14000)
@@ -150,7 +151,7 @@ function useDesk(pipe) {
 
 /** Send one line into the chat, as if typed: the conversation the card is in, else the one in focus. */
 function toChat(text, sessionId, lane) {
-  if (onPage) {
+  if (deskShowing()) {
     if ($talk.get().busy) {
       host.notify({ kind: 'info', message: 'Hermes is still on the last thing. Ask again when it has answered.' })
       return false
@@ -1881,6 +1882,8 @@ function Assets({ hub }) {
     h('button', { type: 'button', className: 'sd-m-open stoa-grow', onClick: () => open(asset), title: asset.url || 'Open ' + asset.name },
       h('span', { className: 'stoa-name' }, asset.label), h('span', { className: 'stoa-sub' }, '  ' + (asset.url ? asset.url.replace(/^https?:\/\/(www\.)?/, '').split('/')[0] : bytes(asset.size)))),
     h('span', { className: 'stoa-chip' }, asset.kind_label),
+    SDK.onPreview ? h('button', { type: 'button', className: 'sd-m-x', title: 'Preview in Stoa', 'aria-label': 'Preview ' + asset.label,
+      onClick: () => SDK.onPreview(asset.url ? { kind: 'url', url: asset.url, name: asset.label } : { kind: 'asset', id: asset.id, name: asset.label, file: asset.name }) }, '◉') : null,
     asset.file ? h('button', { type: 'button', className: 'sd-m-x', title: 'Save a copy', 'aria-label': 'Save a copy of ' + asset.label, onClick: () => saveCopy(asset) }, '↓') : null,
     h('button', { type: 'button', className: 'sd-m-x', title: 'Remove it from the desk', 'aria-label': 'Remove ' + asset.label, onClick: () => remove(asset) }, '×'))),
   !hub.assets.length && !mode ? h('p', { className: 'stoa-sub', style: { margin: '6px 0 0' } }, 'The pitch deck, a one-pager, a case study. Drop a file here, or link to where it lives.') : null,
@@ -7609,6 +7612,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
       h('div', { className: 'stoa-btns', style: { margin: 0 } },
         h(ModelPick, { lane: 'maps' }),
         h(Btn, { title: 'This map by the numbers: what is on it, where it came from, what it has cost, and its limits', onClick: () => setMode('facts') }, 'Map facts'),
+        SDK.onPreview ? h(Btn, { title: 'Preview the shareable map page inside Stoa', onClick: () => SDK.onPreview({ kind: 'map', id: market.id, name: market.name, pipeline: $pipe.get() || '' }) }, 'Preview') : null,
         h(Btn, { disabled: Boolean(saving), title: 'The whole map as one web page, with buyers\' names and what is in your pipeline', onClick: () => save(false) }, saving === 'own' ? 'Saving…' : 'Download page'),
         h(Btn, { disabled: Boolean(saving), title: 'The same page without buyers\' names or your pipeline: the one to host or send to a client', onClick: () => save(true) }, saving === 'share' ? 'Saving…' : 'Download a copy to share'))),
     mode === 'facts' ? h(MapFacts, { market, onClose: () => setMode(''), onFill: act.fill }) : null,
@@ -8714,7 +8718,12 @@ function Page() {
   const split = useRef(null)
   const typing = useValue($typing)
   // While the page is on screen, a click that calls for writing goes to its own dock.
-  useEffect(() => { onPage = true; $onPage.set(true); return () => { onPage = false; $onPage.set(false); $last.set(null) } }, [])
+  useEffect(() => {
+    onPage = true
+    $onPage.set(deskShowing())
+    const unsub = typeof SDK.onDeskVisible === 'function' ? SDK.onDeskVisible(() => $onPage.set(deskShowing())) : null
+    return () => { if (unsub) unsub(); onPage = false; $onPage.set(false); $last.set(null) }
+  }, [])
   // A record picked in the pane beside the desk opens here, on a tab that has room for it.
   const want = useValue($want)
   useEffect(() => {
