@@ -1774,7 +1774,9 @@ function Assets({ hub }) {
   const addLink = async () => {
     try { queryClient.setQueryData(HUB, await api('/app/hub/assets', { method: 'POST', body: row })); setRow({ label: '', url: '', kind: 'deck' }); setMode('') } catch (error) { host.notifyError(error, 'Not added') }
   }
-  const open = asset => (asset.url ? window.open(asset.url, '_blank', 'noopener') : saveCopy(asset))
+  // A host that can open a kept file in its own app (the Stoa Mac app does, with whatever opens a deck there) says so
+  // with window.__stoaOpenAsset; anywhere else a kept file is saved to the computer.
+  const open = asset => (asset.url ? window.open(asset.url, '_blank', 'noopener') : typeof window.__stoaOpenAsset === 'function' ? window.__stoaOpenAsset(asset.id) : saveCopy(asset))
   const remove = async asset => { try { queryClient.setQueryData(HUB, await api('/app/hub/items/' + asset.id + '/remove', { method: 'POST', body: {} })) } catch (error) { host.notifyError(error, 'Not removed') } }
   const carrying = event => Boolean(event.dataTransfer) && [...event.dataTransfer.types].includes('Files')
   return h('div', { className: 'sd-hub-list', 'data-over': over ? '1' : '0',
