@@ -1,5 +1,5 @@
 /**
- * Stoa in the Hermes Desktop app and the Webapp.
+ * Stoa in the Desktop app and the Webapp.
  *
  * One file, no build step. It adds a Stoa page (Today, the pipeline, the market map, the activity
  * log and Setup), a live pane that sits beside the conversation, and five components the agent
@@ -19,9 +19,9 @@ import { Component, createContext, createElement as h, useContext, useEffect, us
 
 let rest = null // ctx.rest, set in register()
 let storage = null // ctx.storage, set in register()
-// The talk box is a thin shell over Hermes's own parts wherever the app hands them to a plugin: the model menu the
+// The talk box is a thin shell over the assistant's own parts wherever the app hands them to a plugin: the model menu the
 // real chat box uses, the app's message renderer, and the gateway's own way of attaching a file. Each is looked up
-// rather than assumed, so on a Hermes without one the page falls back to its own plain version instead of breaking.
+// rather than assumed, so on a the assistant without one the page falls back to its own plain version instead of breaking.
 const { ModelCatalogMenu, ModelMenuCloseContext, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, MessageTextContent } = SDK
 const APP_MENU = Boolean(ModelCatalogMenu && ModelMenuCloseContext && DropdownMenu && DropdownMenuContent && DropdownMenuItem && DropdownMenuTrigger)
 
@@ -151,7 +151,7 @@ function useDesk(pipe) {
 function toChat(text, sessionId, lane) {
   if (onPage) {
     if ($talk.get().busy) {
-      host.notify({ kind: 'info', message: 'Hermes is still on the last thing. Ask again when it has answered.' })
+      host.notify({ kind: 'info', message: 'The assistant is still on the last thing. Ask again when it has answered.' })
       return false
     }
     say(text, null, lane === 'maps' ? 'maps' : 'desk')
@@ -199,7 +199,7 @@ async function track(target, sessionId, pipe) {
 }
 
 // -- a command typed on the page ----------------------------------------------------------------------
-// A line that starts with "/" is a Hermes command (/blueprint, /gtm today). The app's own chat box runs those. The
+// A line that starts with "/" is a the assistant command (/blueprint, /gtm today). The app's own chat box runs those. The
 // desk's talk box cannot: it hands every line to the agent as words, where "/blueprint" means nothing. So a command
 // is taken to a new chat, typed there and left for the person to send.
 const isCommand = line => /^\/[a-z][\w:-]*(\s|$)/i.test(String(line || '').trim())      // "/gtm today" is one; "/Users/me/list.csv" is a path
@@ -250,11 +250,11 @@ const talking = { turn: 0, lane: 'desk' }      // the turn in flight, and which 
 const setTalk = patch => $talk.set({ ...$talk.get(), ...patch })
 const kept = lane => (storage && storage.get(LANES[lane].key, {})) || {}
 const keep = (lane, patch) => { if (storage) storage.set(LANES[lane].key, { ...kept(lane), ...patch }) }
-// The model each conversation runs on. A conversation in Hermes keeps the model it began with, so the page keeps the
+// The model each conversation runs on. A conversation in the assistant keeps the model it began with, so the page keeps the
 // person's pick on this computer and gives it to the conversation: the one it has, and any it starts afterwards.
-// A pick is { model, provider }, or null for whatever Hermes's own default is; the map's research does not follow the
-// desk's, so a cheap model picked for the talk box never does the market research. `asking` holds a pick Hermes
-// wants a second yes for, with Hermes's own words for why.
+// A pick is { model, provider }, or null for whatever the assistant's own default is; the map's research does not follow the
+// desk's, so a cheap model picked for the talk box never does the market research. `asking` holds a pick the assistant
+// wants a second yes for, with the assistant's own words for why.
 const $model = atom({ desk: null, maps: null, asking: null })
 const setModel = patch => $model.set({ ...$model.get(), ...patch })
 
@@ -273,10 +273,10 @@ async function modelTo(sessionId, pick, sure) {
 }
 
 /** How hard a conversation thinks, set the way the app's own menu sets it (`config.set reasoning <level>` for that
-    conversation). A level Hermes will not take for the model is said, and the model pick stands. */
+    conversation). A level the assistant will not take for the model is said, and the model pick stands. */
 async function effortTo(sessionId, effort) {
   try { await host.request('config.set', { key: 'reasoning', session_id: sessionId, value: effort }) } catch (error) {
-    host.notify({ kind: 'warning', message: 'Hermes did not set thinking to ' + effort + ': ' + why(error) })
+    host.notify({ kind: 'warning', message: 'The assistant did not set thinking to ' + effort + ': ' + why(error) })
   }
 }
 
@@ -285,7 +285,7 @@ async function effortTo(sessionId, effort) {
 async function pickEffort(row, effort, lane = 'desk') {
   const now = $model.get()[lane]
   if (!row.isActive || !now || now.model !== row.model || now.provider !== row.provider) return pickModel({ model: row.model, provider: row.provider, effort }, false, null, lane)
-  if ($talk.get().busy) { host.notify({ kind: 'info', message: 'Hermes is still on the last thing. Change it when it has answered.' }); return false }
+  if ($talk.get().busy) { host.notify({ kind: 'info', message: 'The assistant is still on the last thing. Change it when it has answered.' }); return false }
   const pick = { ...now, effort }
   if (hasTalk(lane)) await effortTo(await talkOpen(true, lane), effort)
   keep(lane, { model: pick })
@@ -294,30 +294,30 @@ async function pickEffort(row, effort, lane = 'desk') {
 }
 
 /** The person picked a model for one of the page's conversations. Kept for later ones; the one in hand is switched
-    now. `pick` null is "Hermes's default": nothing is kept, and the conversation in hand goes to `usual`, the
+    now. `pick` null is "The assistant's default": nothing is kept, and the conversation in hand goes to `usual`, the
     profile's own model. */
 async function pickModel(pick, sure, usual, lane = 'desk') {
-  if ($talk.get().busy) { host.notify({ kind: 'info', message: 'Hermes is still on the last thing. Change the model when it has answered.' }); return false }
+  if ($talk.get().busy) { host.notify({ kind: 'info', message: 'The assistant is still on the last thing. Change the model when it has answered.' }); return false }
   const target = pick || usual
   try {
     if (hasTalk(lane) && target && target.model && target.provider) {
       const result = await modelTo(await talkOpen(true, lane), target, sure)
-      if (result.confirm_required) { setModel({ asking: { lane, pick, usual, message: String(result.confirm_message || 'Hermes asks you to confirm this model.') } }); return true }
+      if (result.confirm_required) { setModel({ asking: { lane, pick, usual, message: String(result.confirm_message || 'The assistant asks you to confirm this model.') } }); return true }
       if (result.warning) host.notify({ kind: 'warning', message: String(result.warning) })
     }
     keep(lane, { model: pick })
     setModel({ [lane]: pick, asking: null })
-    host.notify({ kind: 'success', message: LANES[lane].name + (pick ? ' now runs on ' + pick.model + '.' : ' is back on Hermes\'s default model.') })
+    host.notify({ kind: 'success', message: LANES[lane].name + (pick ? ' now runs on ' + pick.model + '.' : ' is back on the assistant\'s default model.') })
     return true
   } catch (error) {
-    host.notifyError(error, 'Hermes could not change the model')
+    host.notifyError(error, 'The assistant could not change the model')
     return false
   }
 }
 
 /** Leave a conversation and begin another with the next thing sent to it. The old one stays in the sidebar. */
 function freshTalk(lane = 'desk') {
-  if ($talk.get().busy) return host.notify({ kind: 'info', message: 'Hermes is still on the last thing. Start a new conversation when it has answered.' })
+  if ($talk.get().busy) return host.notify({ kind: 'info', message: 'The assistant is still on the last thing. Start a new conversation when it has answered.' })
   const session = sessions[lane]
   const left = session.stored || kept(lane).stored || session.left || ''
   Object.assign(session, { runtime: '', stored: '', primed: false, left })
@@ -357,26 +357,26 @@ async function talkOpen(bare, lane = 'desk') {
   if (session.runtime) return session.runtime
   const stored = session.stored || kept(lane).stored || ''
   if (!session.left) session.left = kept(lane).left || ''      // a reload between leaving one and starting the next
-  // A new conversation begins on the pick. If Hermes will not take it (the model is gone, the key was removed) the
-  // conversation still opens, on Hermes's default, and says so. `bare` is the picker opening the conversation to
+  // A new conversation begins on the pick. If the assistant will not take it (the model is gone, the key was removed) the
+  // conversation still opens, on the assistant's default, and says so. `bare` is the picker opening the conversation to
   // set a model on it itself.
-  const refused = (pick, error) => host.notify({ kind: 'warning', message: 'Hermes could not use ' + pick.model + ' (' + why(error) + '), so this is on its default model. Pick another ' + LANES[lane].where + '.' })
+  const refused = (pick, error) => host.notify({ kind: 'warning', message: 'The assistant could not use ' + pick.model + ' (' + why(error) + '), so this is on its default model. Pick another ' + LANES[lane].where + '.' })
   if (stored) {
     try {
       const resumed = await host.request('session.resume', { session_id: stored, omit_messages: true })
       if (resumed && resumed.session_id) {
-        // Nothing is set here. Hermes keeps a conversation's model with the conversation (it survives a restart), and
+        // Nothing is set here. The assistant keeps a conversation's model with the conversation (it survives a restart), and
         // setting it again on every visit would push a long conversation onto another model without the warning
-        // Hermes gives for that. A pick reaches a conversation when it is made, and when one is created.
+        // the assistant gives for that. A pick reaches a conversation when it is made, and when one is created.
         Object.assign(session, { runtime: resumed.session_id, stored, primed: true })
         return session.runtime
       }
     } catch { /* that conversation is gone: start another */ }
   }
-  // A title is a conversation's identity in Hermes: asking for a new one called "Stoa desk" while one of that name
+  // A title is a conversation's identity in the assistant: asking for a new one called "Stoa desk" while one of that name
   // exists hands back the one that exists (seen on a real run). So the first carries the plain title and one begun
   // with New conversation carries the day and time, to the second if the minute is taken. The pick rides on the
-  // request, so the conversation begins on that model; if Hermes will not have it, it begins on the default.
+  // request, so the conversation begins on that model; if the assistant will not have it, it begins on the default.
   const pick = bare ? null : $model.get()[lane]
   const left = session.left
   const stamp = seconds => new Date().toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', ...(seconds ? { second: '2-digit' } : {}) })
@@ -393,9 +393,9 @@ async function talkOpen(bare, lane = 'desk') {
   const same = made => Boolean(left) && Boolean(made) && [made.stored_session_id, made.session_id].includes(left)
   let made = await create(false)
   if (same(made)) made = await create(true)
-  if (same(made)) throw new Error('Hermes handed back the conversation you just left instead of a new one')
+  if (same(made)) throw new Error('The assistant handed back the conversation you just left instead of a new one')
   const runtime = (made && made.session_id) || ''
-  if (!runtime) throw new Error('Hermes did not open a conversation')
+  if (!runtime) throw new Error('The assistant did not open a conversation')
   Object.assign(session, { runtime, stored: made.stored_session_id || runtime, primed: false, left: '' })
   keep(lane, { stored: session.stored, left: '' })
   return runtime
@@ -408,30 +408,30 @@ const readAsDataUrl = file => new Promise((resolve, reject) => {
   reader.readAsDataURL(file)
 })
 
-/** Hand files to Hermes the way the app's own chat box does, before the message that goes with them: an image is
+/** Hand files to the assistant the way the app's own chat box does, before the message that goes with them: an image is
     staged with `image.attach_bytes`, anything else is put in the conversation's workspace (`file.attach`) and comes
-    back as a reference that goes at the head of the message, where Hermes's own file tools read it. Returns those
+    back as a reference that goes at the head of the message, where the assistant's own file tools read it. Returns those
     references, and the pictures to name on the message itself: the gateway the Webapp and Desktop app talk to only
     stages a picture and answers with its path and type, and the message must then carry them (seen on a real run:
     without that the model is told nothing of the picture). An older gateway queues the picture itself and answers
     with no type, and then there is nothing to carry. */
-// Hermes keeps its own copy of a file it is handed, and nothing of Hermes's clears it. The page tells the backend
-// the path Hermes gave back, so the copy is on Stoa's list and goes after the days set (Setup, Your data).
+// the assistant keeps its own copy of a file it is handed, and nothing of the assistant's clears it. The page tells the backend
+// the path the assistant gave back, so the copy is on Stoa's list and goes after the days set (Setup, Your data).
 const noteHanded = (path, name) => { if (path) rest('/files/handed', { method: 'POST', body: { path: String(path), name, lane: talking.lane } }).catch(() => {}) }
 
 async function handOver(sessionId, files) {
   const refs = [], pictures = []
   for (const item of files) {
-    setTurn({ note: 'Handing ' + item.name + ' to Hermes…' })
+    setTurn({ note: 'Handing ' + item.name + ' to the assistant…' })
     const url = await readAsDataUrl(item.file)
     if (item.image) {
       const got = await host.request('image.attach_bytes', { session_id: sessionId, content_base64: url.replace(/^data:[^,]*,/, ''), filename: item.name }, 120000)
-      if (!got || got.attached === false) throw new Error((got && got.message) || 'Hermes did not take ' + item.name)
+      if (!got || got.attached === false) throw new Error((got && got.message) || 'The assistant did not take ' + item.name)
       if (got.path && got.mime) pictures.push({ path: String(got.path), mime: String(got.mime) })
       noteHanded(got.path, item.name)
     } else {
       const got = await host.request('file.attach', { session_id: sessionId, data_url: url, name: item.name }, 120000)
-      if (!got || !got.ref_text) throw new Error((got && got.message) || 'Hermes did not take ' + item.name)
+      if (!got || !got.ref_text) throw new Error((got && got.message) || 'The assistant did not take ' + item.name)
       refs.push(got.ref_text)
       noteHanded(got.path, item.name)
     }
@@ -440,7 +440,7 @@ async function handOver(sessionId, files) {
 }
 
 /** Send a line to one of the page's conversations: the desk's, or (lane 'maps') the map's research. `file` is one
-    file or several: a small text file rides in the message itself, anything else is handed to Hermes first. */
+    file or several: a small text file rides in the message itself, anything else is handed to the assistant first. */
 async function say(text, file, lane = 'desk', fromBox = false) {
   const line = String(text || '').trim()
   const files = [].concat(file || []).filter(Boolean)
@@ -455,7 +455,7 @@ async function say(text, file, lane = 'desk', fromBox = false) {
   const sent = here ? '(On the Stoa page I am looking at the pipeline “' + here + '”.)\n\n' + typed : typed
   $talk.set({ busy: true, open: true,
     turns: $talk.get().turns.slice(-7).concat([{ you: shown, file: files.map(item => item.name).join(', '), lane, reply: '', note: 'Sending…', error: '' }]) })
-  let reached = false      // whether Hermes took the message: until it has, a failure gives the words and the files back
+  let reached = false      // whether the assistant took the message: until it has, a failure gives the words and the files back
   const submit = async () => {
     const id = await talkOpen(false, lane)
     const { refs, pictures } = whole.length ? await handOver(id, whole) : { refs: [], pictures: [] }
@@ -472,7 +472,7 @@ async function say(text, file, lane = 'desk', fromBox = false) {
       session.runtime = '' // the gateway let the idle session go: resume it (or start another) and send once more
       await submit()
     }
-    if (talking.turn === turn && $talk.get().busy) setTurn(last => (last.reply ? {} : { note: lane === 'maps' ? 'Hermes is researching…' : 'Hermes is working on it…' }))
+    if (talking.turn === turn && $talk.get().busy) setTurn(last => (last.reply ? {} : { note: lane === 'maps' ? 'The assistant is researching…' : 'The assistant is working on it…' }))
     setTimeout(() => {
       if (talking.turn !== turn || !$talk.get().busy) return
       setTalk({ busy: false })
@@ -482,7 +482,7 @@ async function say(text, file, lane = 'desk', fromBox = false) {
     setTalk({ busy: false })
     const back = !reached && lane === 'desk' && (files.length > 0 || fromBox)
     const said = String((error && error.message) || error).trim()
-    setTurn({ note: '', error: 'Hermes could not take that: ' + said + (/[.!?]$/.test(said) ? '' : '.') + (back ? (files.length ? ' Your words and files are back in the box.' : ' Your words are back in the box.') : '') })
+    setTurn({ note: '', error: 'The assistant could not take that: ' + said + (/[.!?]$/.test(said) ? '' : '.') + (back ? (files.length ? ' Your words and files are back in the box.' : ' Your words are back in the box.') : '') })
     if (back) {      // typed words and picked files are a person's work: a failed hand-over does not throw them away
       if (files.length && !$attached.get().length) $attached.set(files)
       if (line) $draft.set(line)
@@ -501,13 +501,13 @@ function openTalk() {
 
 // A file handed to the desk. A CSV is read by the desk itself and comes back as a review, with no
 // model in between. A small text file rides along in the next message. Anything else (a PDF, a Word
-// file, a spreadsheet, a picture) waits by the box and is handed to Hermes with the next message, the
-// way the app's own chat box hands one over, so Hermes reads it with its own tools.
+// file, a spreadsheet, a picture) waits by the box and is handed to the assistant with the next message, the
+// way the app's own chat box hands one over, so the assistant reads it with its own tools.
 const LIST_FILE = /\.(csv|tsv)$/i
 const TEXT_FILE = /\.(txt|md|markdown|json|vcf|log|ya?ml)$/i
-const IMAGE_FILE = /\.(png|jpe?g|gif|webp)$/i      // what Hermes takes as a picture to look at; any other picture goes as a file
+const IMAGE_FILE = /\.(png|jpe?g|gif|webp)$/i      // what the assistant takes as a picture to look at; any other picture goes as a file
 const MAX_FILES = 6
-const MAX_FILE_BYTES = 25 * 1024 * 1024               // Hermes's own limit for a picture sent as bytes; kept for every file, so the box stays quick
+const MAX_FILE_BYTES = 25 * 1024 * 1024               // the assistant's own limit for a picture sent as bytes; kept for every file, so the box stays quick
 
 async function takeFile(file) {
   if (!file) return
@@ -517,7 +517,7 @@ async function takeFile(file) {
       const text = await file.text()
       const result = await rest('/intake', { method: 'POST', body: { name: file.name, text } })
       refresh()
-      if (result.unread) { // the desk could not tell which column is the name: Hermes reads it, and asks if it cannot tell either
+      if (result.unread) { // the desk could not tell which column is the name: The assistant reads it, and asks if it cannot tell either
         if (text.length > 60000) return host.notify({ kind: 'info', message: 'Stoa could not tell which column of ' + file.name + ' holds the name. It is too long for the box here: press "Open the conversation" and drop it there.' })
         host.notify({ kind: 'info', message: result.headline })
         return say('Stoa could not tell which column of this list holds the name. Read it, work out which column is which, and put it on the desk as a list for my review. If you cannot tell, ask me.', { name: file.name, text })
@@ -550,7 +550,7 @@ async function takeFile(file) {
 // map's company fields: `company` is the person, `size` their title, `uses` where they work now. What a map's rows
 // are is written on the map and comes with it as `rows` ("people" or "companies"); it is never worked out from what
 // is on the map. A recruiting map of companies (the older kind, people named under each) is read as that.
-const MAP_COMPANIES = { people: false, thing: 'company', things: 'companies', thingCap: 'Company', find: 'Find a company', gone: 'Hermes does not propose a dismissed company again.' }
+const MAP_COMPANIES = { people: false, thing: 'company', things: 'companies', thingCap: 'Company', find: 'Find a company', gone: 'The assistant does not propose a dismissed company again.' }
 const MAP_SALES = { ...MAP_COMPANIES, recruiting: false, reason: 'a reason to call', inPipe: ' in the pipeline' }
 const MAP_ROLES = {
   ...MAP_COMPANIES, recruiting: true, reason: 'a reason to move', inPipe: ' already candidates',
@@ -564,7 +564,7 @@ const CANDIDATE_ROW = 'Every row on this map is one candidate: `company` = their
   + '`location`, `segment` = their pool, `fit` 1 to 5 for the role, `why` = the evidence, `requirements` checked for that person, `signal` and `signal_date` = why they would move now, '
   + 'and `source` = the public page you found them on. No `people`, `domain` or headcount. Only people a source shows.'
 const MAP_PEOPLE = {
-  ...MAP_ROLES, people: true, thing: 'candidate', things: 'candidates', thingCap: 'Candidate', find: 'Find a candidate', gone: 'Hermes does not propose a dismissed candidate again.',
+  ...MAP_ROLES, people: true, thing: 'candidate', things: 'candidates', thingCap: 'Candidate', find: 'Find a candidate', gone: 'The assistant does not propose a dismissed candidate again.',
   inPipe: ' in your pipeline',
   lens: { seg: 'Pools', pri: 'Priority', held: 'Employer' },
   how: { seg: 'Each dot is a candidate, and each ring a pool that would get a different pitch. The best fit sits in the middle.',
@@ -584,7 +584,7 @@ const MAP_PEOPLE = {
 const rowsOf = market => String((market && (market.rows || (market.numbers && market.numbers.rows))) || '')
 const mapWords = (shape, market) => (shape !== 'roles' ? MAP_SALES : rowsOf(market) === 'people' ? MAP_PEOPLE : MAP_ROLES)
 
-/** What Hermes is asked for when a new map is started on a recruiting pipeline: the candidates for the role described.
+/** What the assistant is asked for when a new map is started on a recruiting pipeline: the candidates for the role described.
     `search`: the search the map is for, if the person chose one. `web` false: only the people named in the request. */
 const roleMapAsk = (said, search, web) => 'Map the candidates for a role I am recruiting for, and keep it on the desk as a map of its own: ' + said
   + (search ? ' It is for my search “' + search + '”: pass search="' + search.replace(/"/g, '') + '" to gtm_market(action="define") so its candidates join that search, name the map after it, and save the role'
@@ -693,7 +693,7 @@ function MapFor({ value, onChange, web, onWeb }) {
         h('option', { value: '' }, 'A new search, named after the role'),
         rows.map(row => h('option', { key: row.name, value: row.name }, row.name + (row.client && !row.name.toLowerCase().includes(row.client.toLowerCase()) ? '  ·  ' + row.client : ''))))) : null,
     h('label', { className: 'stoa-mapweb' }, h('input', { type: 'checkbox', checked: web !== false, onChange: event => onWeb(event.target.checked) }),
-      h('span', null, 'Look for more candidates'), h('span', { className: 'stoa-sub' }, web !== false ? 'Each one found comes with the public page they were found on.' : 'Hermes is asked to put only the people you name above on the map.')))
+      h('span', null, 'Look for more candidates'), h('span', { className: 'stoa-sub' }, web !== false ? 'Each one found comes with the public page they were found on.' : 'The assistant is asked to put only the people you name above on the map.')))
 }
 
 /** At the head of a candidate map: the search its candidates join when they are added to the pipeline, and a way to
@@ -1819,7 +1819,7 @@ const Chip = ({ tone, wrap, children }) => h('span', { className: 'stoa-chip', '
 const Btn = ({ kind, children, ...props }) => h('button', { type: 'button', className: 'stoa-btn', 'data-kind': kind || '', ...props }, children)
 
 /** Delete, beside a record's Edit. Two presses. The record is taken off the desk, not destroyed: everything on it is
- *  kept, and it is put back from the Activity tab or from Your data in Setup, where it can also be deleted for good. */
+ *  kept, and it is put back from the Activity tab or from Your data in Setup. Nothing deletes it for good. */
 function RemoveRecord({ deal, after }) {
   const pipe = useContext(InPipe)
   const [sure, setSure] = useState(false)
@@ -1843,31 +1843,20 @@ function RemoveRecord({ deal, after }) {
     h(Btn, { kind: 'quiet', disabled: busy, onClick: () => setSure(false) }, 'Keep'))
 }
 
-/** In Setup, under Your data: the records taken off the desk, each to be put back or deleted for good. */
+/** In Setup, under Your data: the records taken off the desk, each to be put back. */
 function TakenOff() {
   const query = useQuery({ queryKey: ['stoa', 'removed'], queryFn: () => rest('/removed'), staleTime: 3000 })
   const [sure, setSure] = useState('')
   useEffect(() => { if (!sure) return undefined; const timer = setTimeout(() => setSure(''), 5000); return () => clearTimeout(timer) }, [sure])
   const rows = (query.data && query.data.records) || []
   if (!rows.length) return null
-  const destroy = async row => {
-    if (sure !== row.id) return setSure(row.id)
-    try {
-      await rest('/deal/' + encodeURIComponent(row.id) + '/destroy', { method: 'POST', body: {} })
-      refresh()
-    } catch (error) {
-      host.notifyError(error, 'Stoa could not delete that')
-    }
-    setSure('')
-  }
   return h('div', { style: { marginTop: 14 } },
     h('div', { className: 'stoa-name' }, 'Taken off the desk'),
-    h('div', { className: 'stoa-sub', style: { marginBottom: 4 } }, 'Each is kept with everything on it until you delete it for good. Deleting for good cannot be undone.'),
+    h('div', { className: 'stoa-sub', style: { marginBottom: 4 } }, 'Each is kept with everything on it and can be put back.'),
     rows.map(row => h('div', { key: row.id, className: 'stoa-row', style: { cursor: 'default', alignItems: 'center' } },
       h('span', { className: 'stoa-grow' }, h('span', { className: 'stoa-name' }, row.name),
         h('span', { className: 'stoa-sub' }, '  ' + [row.company && row.company !== row.name ? row.company : '', row.stage, 'taken off ' + ago(row.removed_at)].filter(Boolean).join(' · '))),
-      h(Btn, { kind: 'quiet', onClick: () => putBack(row.id) }, 'Put back'),
-      h(Btn, { kind: sure === row.id ? 'danger' : 'quiet', title: 'The record, its log and its people\'s links are destroyed', onClick: () => destroy(row) }, sure === row.id ? 'Delete for good?' : 'Delete for good'))))
+      h(Btn, { kind: 'quiet', onClick: () => putBack(row.id) }, 'Put back'))))
 }
 
 function Fit({ value }) {
@@ -2641,7 +2630,7 @@ function Pane() {
         h('div', { className: 'stoa-sechead' }, h('span', { className: 'stoa-eyebrow' }, 'Waiting for your approval'), h('span', { className: 'stoa-num' }, state.intakes.length)),
         state.intakes.map(item => h('div', { key: item.id, style: { marginBottom: 8 } }, h(Review, { id: item.id })))) : null,
       !state.deals.length ? h('p', { className: 'stoa-sub', style: { padding: '8px' } },
-        'Nothing on the desk yet. Tell Hermes about a ' + pb.terms.deal + ', send it a list, or ask it to map a market.') : null,
+        'Nothing on the desk yet. Tell the assistant about a ' + pb.terms.deal + ', send it a list, or ask it to map a market.') : null,
       due.length || quiet.length ? h('div', { className: 'stoa-sec' },
         h('div', { className: 'stoa-sechead' }, h('span', { className: 'stoa-eyebrow' }, 'Needs you'), h('span', { className: 'stoa-num' }, due.length + quiet.length)),
         due.map(deal => listed(deal, 'due:' + deal.id, deal.next_step || deal.stage_label, dueLabel(deal), dueTone(deal))),
@@ -2686,7 +2675,7 @@ function Words({ text }) {
   const bold = line => line.split(/(\*\*[^*]+\*\*)/g).map((part, index) => (/^\*\*[^*]+\*\*$/.test(part) ? h('b', { key: index }, part.slice(2, -2)) : part))
   const plain = h('div', { className: 'stoa-reply' }, clean.split(/\n{2,}/).map((block, index) => h('p', { key: index },
     block.split('\n').map((line, at) => h('span', { key: at, style: { display: 'block' } }, bold(line.replace(/^\s*[-*]\s+/, '•  ').replace(/^#+\s+/, '')))))))
-  // Hermes's own renderer where the app gives it: tables, lists, code and links then look as they do in a chat.
+  // the assistant's own renderer where the app gives it: tables, lists, code and links then look as they do in a chat.
   if (!MessageTextContent) return plain
   return h(Guard, { what: 'the app\'s message renderer', fallback: plain }, h('div', { className: 'stoa-reply stoa-reply-app' }, h(MessageTextContent, { text: clean })))
 }
@@ -2696,7 +2685,7 @@ function Words({ text }) {
 const Recognition = typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null
 
 /** Which model one of the page's conversations runs on: the desk's (under the talk box) or the map's research (beside
-    Map facts). The menu is Hermes's own, the one the real chat box opens: search, providers, favourites, a custom
+    Map facts). The menu is the assistant's own, the one the real chat box opens: search, providers, favourites, a custom
     model by name, and how hard to think on each row. What a pick MEANS is ours: it is kept for that conversation
     and set on it (see pickModel and pickEffort). */
 function ModelPick({ lane = 'desk' }) {
@@ -2707,7 +2696,7 @@ function ModelPickApp({ lane }) {
   const picked = useValue($model)[lane]
   const talk = useValue($talk)
   const [open, setOpen] = useState(false)
-  const query = useQuery({ queryKey: ['stoa', 'models'], queryFn: () => host.request('model.options', {}), staleTime: 60000, retry: false })      // only for the name of Hermes's default
+  const query = useQuery({ queryKey: ['stoa', 'models'], queryFn: () => host.request('model.options', {}), staleTime: 60000, retry: false })      // only for the name of the assistant's default
   const data = query.data || {}
   const usual = data.model && data.provider ? { model: String(data.model), provider: String(data.provider) } : null
   const short = name => String(name || '').replace(/^.*\//, '')
@@ -2716,7 +2705,7 @@ function ModelPickApp({ lane }) {
   const controller = {
     allowSpeed: false,
     current: { model: now.model, provider: now.provider, effort: (picked && picked.effort) || '', fast: false },
-    presetFor: () => ({}),      // what the chat box last used for a model is the chat box's; a pick here starts on Hermes's default depth
+    presetFor: () => ({}),      // what the chat box last used for a model is the chat box's; a pick here starts on the assistant's default depth
     applyPreset: () => {},
     // Thinking depth, from the row's own submenu. Speed is not offered (allowSpeed): there is no way to carry it here yet.
     setOptions: (patch, row) => { if (patch.effort !== undefined) pickEffort(row, patch.effort, lane) },
@@ -2726,23 +2715,23 @@ function ModelPickApp({ lane }) {
   return h(DropdownMenu, { open, onOpenChange: setOpen },
     h(DropdownMenuTrigger, { asChild: true },
       h('button', { type: 'button', className: maps ? 'stoa-btn' : 'stoa-footbtn', 'aria-label': maps ? 'The model for map research' : 'The model for the desk\'s conversation',
-        title: maps ? 'The model Hermes researches your maps with: starting a map, growing it, filling in what is missing. It is kept apart from the talk box\'s model, and has a conversation of its own.'
+        title: maps ? 'The model the assistant researches your maps with: starting a map, growing it, filling in what is missing. It is kept apart from the talk box\'s model, and has a conversation of its own.'
           : 'The model the desk\'s conversation runs on. Map research has its own, beside Map facts on the Market map tab.' },
         (maps ? 'Research: ' : '') + (short(now.model) || 'Model'), '\u00a0', h('span', { className: 'stoa-menucaret', 'aria-hidden': true }, '▾'))),
     h(DropdownMenuContent, { align: maps ? 'end' : 'start', side: maps ? 'bottom' : 'top', className: 'w-72 p-0' },
       h(ModelMenuCloseContext.Provider, { value: () => setOpen(false) },
         h(ModelCatalogMenu, { controller, request: (method, params) => host.request(method, params || {}),
           footer: [
-            picked && usual ? row('usual', 'Use Hermes\'s default', short(usual.model), () => pickModel(null, false, usual, lane)) : null,
+            picked && usual ? row('usual', 'Use the assistant\'s default', short(usual.model), () => pickModel(null, false, usual, lane)) : null,
             maps && hasTalk('maps') ? row('fresh', 'New research conversation', 'The next request starts afresh; the maps keep everything', () => freshTalk('maps')) : null,
-            talk.busy ? h('div', { key: 'busy', className: 'stoa-sub', style: { padding: '6px 10px' } }, 'Hermes is answering; a change waits until it is done.') : null] }))))
+            talk.busy ? h('div', { key: 'busy', className: 'stoa-sub', style: { padding: '6px 10px' } }, 'The assistant is answering; a change waits until it is done.') : null] }))))
 }
 
-/** The same choice on a Hermes whose app does not hand a plugin its model menu: a plain list of every model Hermes names. */
+/** The same choice on a the assistant whose app does not hand a plugin its model menu: a plain list of every model the assistant names. */
 function ModelPickPlain({ lane = 'desk' }) {
   const picked = useValue($model)[lane]
   const talk = useValue($talk)
-  const query = useQuery({ queryKey: ['stoa', 'models'], queryFn: () => host.request('model.options', {}), staleTime: 60000, retry: false })      // no conversation named: the profile's own default, which is what "Hermes's default" means here
+  const query = useQuery({ queryKey: ['stoa', 'models'], queryFn: () => host.request('model.options', {}), staleTime: 60000, retry: false })      // no conversation named: the profile's own default, which is what "The assistant's default" means here
   const data = query.data || {}
   const usual = data.model ? String(data.model) : ''
   const short = name => String(name || '').replace(/^.*\//, '')
@@ -2756,19 +2745,19 @@ function ModelPickPlain({ lane = 'desk' }) {
   const name = picked ? short(picked.model) : usual ? short(usual) : 'Model'
   const maps = lane === 'maps'
   return h(Menu, { kind: maps ? '' : 'foot', up: !maps, right: maps, label: maps ? 'Research: ' + name : name,
-    title: maps ? 'The model Hermes researches your maps with: starting a map, growing it, filling in what is missing. It is kept apart from the talk box\'s model, and has a conversation of its own.'
+    title: maps ? 'The model the assistant researches your maps with: starting a map, growing it, filling in what is missing. It is kept apart from the talk box\'s model, and has a conversation of its own.'
       : 'The model the desk\'s conversation runs on. Map research has its own, beside Map facts on the Market map tab.' },
-    h(MenuItem, { title: 'Hermes\'s default', sub: picked ? 'Whatever this profile is set to use' : (usual ? short(usual) + ' · in use' : 'In use'), on: !picked,
+    h(MenuItem, { title: 'The assistant\'s default', sub: picked ? 'Whatever this profile is set to use' : (usual ? short(usual) + ' · in use' : 'In use'), on: !picked,
       onClick: () => { if (picked) pickModel(null, false, data.model && data.provider ? { model: String(data.model), provider: String(data.provider) } : null, lane) } }),
-    query.isLoading ? h('div', { className: 'stoa-sub', style: { padding: '8px 10px' } }, 'Asking Hermes for its models…') : null,
-    query.error ? h('div', { className: 'stoa-sub', style: { padding: '8px 10px' } }, 'Hermes did not give its list of models: ' + why(query.error)) : null,
+    query.isLoading ? h('div', { className: 'stoa-sub', style: { padding: '8px 10px' } }, 'Asking the assistant for its models…') : null,
+    query.error ? h('div', { className: 'stoa-sub', style: { padding: '8px 10px' } }, 'The assistant did not give its list of models: ' + why(query.error)) : null,
     rows.map(row => [h('div', { key: row.slug + ':rule', className: 'stoa-menurule' }),
       h('div', { key: row.slug + ':name', className: 'stoa-eyebrow', style: { padding: '4px 10px 2px' } }, row.name || row.slug),
       (row.models || []).map(model => h(MenuItem, { key: row.slug + ':' + model, title: short(model), sub: price(row, model), on: Boolean(picked) && picked.model === model && picked.provider === row.slug,
         onClick: () => pickModel({ model, provider: row.slug }, false, null, lane) }))]),
     maps && hasTalk('maps') ? [h('div', { key: 'rule', className: 'stoa-menurule' }),
       h(MenuItem, { key: 'fresh', title: 'New research conversation', sub: 'The next request starts afresh; the maps keep everything', onClick: () => freshTalk('maps') })] : null,
-    talk.busy ? h('div', { className: 'stoa-sub', style: { padding: '6px 10px' } }, 'Hermes is answering; a change waits until it is done.') : null)
+    talk.busy ? h('div', { className: 'stoa-sub', style: { padding: '6px 10px' } }, 'The assistant is answering; a change waits until it is done.') : null)
 }
 
 // The Mac's own dictation (and anything else that types through an input method) keeps the words marked while it
@@ -2940,7 +2929,7 @@ function Dock({ state }) {
         h('span', { className: 'stoa-eyebrow' }, 'Stoa desk'),
         h('span', { style: { display: 'flex', gap: 2 } },
           h(Btn, { kind: 'quiet', onClick: openTalk }, 'Open the conversation'),
-          h(Btn, { kind: 'quiet', 'aria-label': 'Hide the conversation', title: 'Hide the conversation (Esc). It carries on, and the desk updates when Hermes is done.', onClick: () => setTalk({ open: false }) }, 'Hide', h(Icon, { name: 'down', size: 13 })))),
+          h(Btn, { kind: 'quiet', 'aria-label': 'Hide the conversation', title: 'Hide the conversation (Esc). It carries on, and the desk updates when the assistant is done.', onClick: () => setTalk({ open: false }) }, 'Hide', h(Icon, { name: 'down', size: 13 })))),
       talk.turns.map((turn, index) => h('div', { key: index, className: 'stoa-turn' },
         h('div', { className: 'stoa-youline' }, h('span', { className: 'stoa-you' }, turn.you, turn.file ? h('small', null, turn.file) : null, turn.lane === 'maps' ? h('small', null, 'Map research') : null)),
         turn.reply ? h(Words, { text: turn.reply }) : null,
@@ -2958,11 +2947,11 @@ function Dock({ state }) {
       h(Btn, { onClick: () => pickModel(asking.pick, true, asking.usual, asking.lane || 'desk') }, 'Switch this conversation'),
       h(Btn, { kind: 'quiet', onClick: () => setModel({ asking: null }) }, 'Cancel')) : null,
     h('div', { className: 'stoa-glass stoa-composer' },
-      files.length ? h('div', { className: 'stoa-filechips' }, files.map(item => h('div', { key: item.name, className: 'stoa-filechip', title: typeof item.text === 'string' ? 'Goes in the message as text' : item.image ? 'Hermes is shown this picture with your message' : 'Handed to Hermes with your message, to read with its own tools' },
+      files.length ? h('div', { className: 'stoa-filechips' }, files.map(item => h('div', { key: item.name, className: 'stoa-filechip', title: typeof item.text === 'string' ? 'Goes in the message as text' : item.image ? 'The assistant is shown this picture with your message' : 'Handed to the assistant with your message, to read with its own tools' },
         h(Icon, { name: 'clip', size: 13 }), item.name,
         h('button', { type: 'button', className: 'stoa-icon', style: { width: 22, height: 22 }, 'aria-label': 'Remove ' + item.name, onClick: () => $attached.set($attached.get().filter(other => other !== item)) }, h(Icon, { name: 'x', size: 13 }))))) : null,
       h('div', { className: 'stoa-composerrow' },
-        h('button', { type: 'button', className: 'stoa-icon', title: 'Hand it a file. A CSV becomes a review to approve. Anything else (a PDF, a Word file, a spreadsheet, a picture, a text file) goes to Hermes with your next message.', 'aria-label': 'Attach a file',
+        h('button', { type: 'button', className: 'stoa-icon', title: 'Hand it a file. A CSV becomes a review to approve. Anything else (a PDF, a Word file, a spreadsheet, a picture, a text file) goes to the assistant with your next message.', 'aria-label': 'Attach a file',
           onClick: () => picker.current && picker.current.click() }, h(Icon, { name: 'clip' })),
         h('input', { ref: picker, type: 'file', hidden: true, multiple: true,
           onChange: async event => { const picked = [...event.target.files]; event.target.value = ''; for (const one of picked) await takeFile(one) } }),
@@ -2984,7 +2973,7 @@ function Dock({ state }) {
         h(ModelPick, { lane: 'desk' }),
         h('span', { className: 'stoa-grow' }),
         talk.turns.length || hasTalk() ? h('button', { type: 'button', className: 'stoa-footbtn', disabled: talk.busy,
-          title: 'Begin a new conversation with the next thing you say. Hermes re-reads the whole conversation on every step, so a long one costs more each time; the desk itself keeps everything, so nothing is lost by starting again.',
+          title: 'Begin a new conversation with the next thing you say. The assistant re-reads the whole conversation on every step, so a long one costs more each time; the desk itself keeps everything, so nothing is lost by starting again.',
           onClick: () => freshTalk('desk') }, 'New conversation') : null))))
 }
 
@@ -3042,7 +3031,7 @@ function Snooze({ deal, busy, run }) {
     .concat([h('option', { key: 'date', value: 'date' }, 'Pick a date…')]))
 }
 
-/** Hand a record's next step to Hermes from the page: it writes in the dock's conversation. */
+/** Hand a record's next step to the assistant from the page: it writes in the dock's conversation. */
 function draftFor(deal, quiet, sessionId, pipe, where) {
   if (quiet || !deal.next_step) return act(deal.id, { verb: 'draft' }, sessionId, pipe)
   toChat('On the Stoa desk' + (where || '') + ', ' + deal.name + ' (record ' + deal.id + ') has this next step due: “' + deal.next_step + '”. Draft what it needs and show me.', sessionId)
@@ -3080,7 +3069,7 @@ function Fold({ id, count, tone, title, help, summary, aside, children }) {
 const TODAY_LISTS = [
   { key: 'overdue', title: 'Overdue', tone: 'bad', help: 'The next step had a date, and the date has passed.' },
   { key: 'due_today', title: 'Due today', tone: 'warn', help: 'The next step is dated today.' },
-  { key: 'drafts', title: 'Writing waiting for Hermes', tone: 'good', help: 'A button asked for a draft and nobody has picked it up yet.' },
+  { key: 'drafts', title: 'Writing waiting for the assistant', tone: 'good', help: 'A button asked for a draft and nobody has picked it up yet.' },
   { key: 'invoices_overdue', title: 'Invoices overdue', tone: 'bad', help: 'Sent, not paid in full, and past the due date.' },
   { key: 'to_invoice', title: 'Won, not invoiced', tone: 'warn', help: 'Won in the last two months with no invoice on the record. Shown once the desk keeps invoices at all.' },
   { key: 'quiet', title: 'Gone quiet', tone: '', help: 'No call, email, note or move for longer than the stage allows. Your playbook sets the days for each stage.' },
@@ -3109,18 +3098,18 @@ function Today({ state, openId, setOpenId, openClient }) {
   const facts = dayFacts(pb)
   const moves = {
     overdue: deal => [h(Btn, { key: 'done', kind: 'go', title: 'Log it as done and say what comes next', onClick: () => setForm({ id: deal.id, mode: 'done' }) }, '✓  Done'),
-      h(Btn, { key: 'draft', title: 'Hermes drafts what this step needs', onClick: () => draftFor(deal) }, 'Draft it'),
+      h(Btn, { key: 'draft', title: 'The assistant drafts what this step needs', onClick: () => draftFor(deal) }, 'Draft it'),
       h(Snooze, { key: 'snooze', deal, busy: busy === deal.id, run: body => run(deal.id, body) })],
     invoices_overdue: (deal, row) => [
       h(Btn, { key: 'paid', kind: 'go', title: 'Everything still owed came in', onClick: () => bill(deal.id, { verb: 'pay', invoice: String(row.invoice) }) }, 'Paid'),
-      h(Btn, { key: 'remind', title: 'Hermes drafts a payment reminder', onClick: () => toChat('On the Stoa desk, ' + deal.name + ' (record ' + deal.id + ') has an invoice'
+      h(Btn, { key: 'remind', title: 'The assistant drafts a payment reminder', onClick: () => toChat('On the Stoa desk, ' + deal.name + ' (record ' + deal.id + ') has an invoice'
         + (row.number ? ' #' + row.number : '') + ' with ' + exact(row.owed, pb.currency) + ' still owed, ' + row.days + ' days past due. Draft a short, polite payment reminder and show me.') }, 'Draft a reminder'),
       h(Snooze, { key: 'snooze', deal, busy: busy === deal.id, run: body => run(deal.id, body) })],
     to_invoice: deal => [
       h(Btn, { key: 'bill', kind: 'go', onClick: () => { $billing.set(deal.id); setOpenId(deal.id) } }, 'Add invoice'),
       h(Snooze, { key: 'snooze', deal, busy: busy === deal.id, run: body => run(deal.id, body) })],
     drafts: deal => [h(Btn, { key: 'write', kind: 'go', onClick: () => toChat('Do the writing task waiting on ' + deal.name + ' on the Stoa desk (record ' + deal.id + ').') }, 'Write it now')],
-    quiet: deal => [h(Btn, { key: 'draft', kind: 'go', title: 'Hermes drafts a follow-up from the record and its log', onClick: () => draftFor(deal, true) }, 'Draft a nudge'),
+    quiet: deal => [h(Btn, { key: 'draft', kind: 'go', title: 'The assistant drafts a follow-up from the record and its log', onClick: () => draftFor(deal, true) }, 'Draft a nudge'),
       h(Snooze, { key: 'snooze', deal, busy: busy === deal.id, run: body => run(deal.id, body) })],
     new: deal => [h(Btn, { key: 'plan', kind: 'go', onClick: () => setForm({ id: deal.id, mode: 'plan' }) }, 'Plan the next step')],
     unplanned: (deal, row) => [h(Btn, { key: 'plan', kind: 'go', onClick: () => setForm({ id: deal.id, mode: 'plan' }) }, 'Plan the ' + (row.delivery || 'next').toLowerCase() + ' step')],
@@ -3352,12 +3341,12 @@ function SetupFlow() {
                 h(Field, { label: 'When it is won, it is', value: won, placeholder: shape && shape.won, onChange: event => setWon(event.target.value) }),
                 h(Field, { label: 'When it is lost, it is', value: lost, placeholder: shape && shape.lost, onChange: event => setLost(event.target.value) }))),
             h('details', { className: 'stoa-modalsec stoa-describe' },
-              h('summary', null, 'Not sure? Describe your business and Hermes sets the stages'),
+              h('summary', null, 'Not sure? Describe your business and the assistant sets the stages'),
               h('textarea', { className: 'stoa-field stoa-notes', rows: 3, value: describe, placeholder: 'I am a contract recruiter for a VC fund; I place engineers and product people at its portfolio companies…',
                 onChange: event => setDescribe(event.target.value) }),
               h('div', { className: 'stoa-btns' }, h(Btn, { disabled: !ready || busy || !describe.trim(), onClick: () => submit(describe.trim()) },
-                verb === 'add' ? 'Open it, then ask Hermes' : 'Save these, then ask Hermes'),
-              h('span', { className: 'stoa-sub', style: { alignSelf: 'center' } }, 'Hermes answers in the box at the foot of the page.')))),
+                verb === 'add' ? 'Open it, then ask the assistant' : 'Save these, then ask the assistant'),
+              h('span', { className: 'stoa-sub', style: { alignSelf: 'center' } }, 'The assistant answers in the box at the foot of the page.')))),
       data && step === 'stages' ? h('div', { className: 'stoa-modalfoot' },
         flow.step === 'stages' && flow.mode === 'edit' ? h('span') : h(Btn, { kind: 'quiet', disabled: busy, onClick: () => setStep('shape') }, '‹  Back'),
         h('span', { className: 'stoa-grow' }),
@@ -3375,9 +3364,9 @@ function Welcome({ skip, ink }) {
     h('div', { className: 'stoa-hero' },
       h('div', { className: 'stoa-heroart' }, h(Art, { name: 'welcome', ink })),
       h('div', { className: 'stoa-eyebrow' }, 'Welcome to Stoa'),
-      h('div', { className: 'stoa-herotitle' }, 'The CRM Hermes runs for you.'),
+      h('div', { className: 'stoa-herotitle' }, 'The CRM the assistant runs for you.'),
       h('p', { className: 'stoa-reading', style: { marginTop: 0 } },
-        'You say what happened, in your own words. Hermes keeps the pipeline, logs your email and calls, drafts the follow-ups, and asks before anything changes. First: what kind of work is your pipeline for?')),
+        'You say what happened, in your own words. The assistant keeps the pipeline, logs your email and calls, drafts the follow-ups, and asks before anything changes. First: what kind of work is your pipeline for?')),
     h('div', { className: 'stoa-shapes', style: { marginTop: 14 } }, data.shapes.map(item => h(ShapeCard, { key: item.id, shape: item,
       onPick: chosen => $setupFlow.set({ mode: 'first', step: 'stages', shape: chosen.id }) }))),
     h('div', { className: 'stoa-sub', style: { marginTop: 10 } }, 'Two kinds of work? Set up one now; add the other as a second pipeline under Setup.'),
@@ -3410,12 +3399,12 @@ const BY_HAND = ['Drag a card to another column to move it; drop it on the last 
   'Press a stage in the funnel to pick out its column on the board; press it again to let go.', 'Press a company name on a record, or Companies on the pipeline, for everything at that company.',
   'Press a card or a row to open the record: advance it, mark the step done, snooze it, or edit any fact.', 'Drop a CSV anywhere on the page. It comes back as a review; nothing is written until you apply.',
   'Use the microphone in the box at the foot of the page to dictate.']
-const TYPED = [['/gtm', 'the board, in any Hermes chat'], ['/gtm today', 'what needs you, most pressing first'],
+const TYPED = [['/gtm', 'the board, in any the assistant chat'], ['/gtm today', 'what needs you, most pressing first'],
   ['/gtm cash', 'won, invoiced, collected, overdue, and the forecast'], ['/gtm brief', 'the morning brief'], ['/gtm <name>', 'one record as a card'],
   ['/gtm map', 'your market map'], ['!gtm …', 'the same in Slack, which keeps the slash for itself'], ['/blueprint', 'switch on an automation'], ['hermes stoa status', 'in a terminal: what is connected']]
 const ALWAYS = ['Keeps one ledger: every change to a record or a person, what it replaced and what it left. Lines are never altered.',
   'Keeps each person once, however many records they are on.', 'Gives each record one next step and a date, and tells you when the date comes.',
-  'Calls a record quiet when nothing has happened for longer than its stage allows.', 'Holds any list, and anything Hermes suggests, for your yes or no, with what it rests on.',
+  'Calls a record quiet when nothing has happened for longer than its stage allows.', 'Holds any list, and anything the assistant suggests, for your yes or no, with what it rests on.',
   'Remembers a no, and does not ask again.', 'Lets you take a change back, whoever made it, unless that would overwrite a later one.',
   'Takes a record off the desk without destroying it, so it can be put back.',
   'Logs what it finds in your email, calls and Slack on the right record, whoever on it sent it.', 'Posts cards in Slack whose buttons act at once, and only for the people allowed to press them.',
@@ -3464,7 +3453,7 @@ function Pipelines({ state, setup }) {
         : h(Btn, { kind: 'quiet', disabled: busy, onClick: () => { setRenaming(item.id); setTitle(item.name) } }, 'Rename'),
       !item.first && !item.open && renaming !== item.id ? h(Btn, { kind: 'quiet', disabled: busy, title: 'Only a pipeline with nothing in it can be removed',
         onClick: () => send({ verb: 'remove', id: item.id }, item.name + ' was removed.') }, 'Remove') : null)),
-    h('p', { className: 'stoa-sub', style: { margin: '10px 0 0' } }, 'Each pipeline has its own records, its own playbook and its own autonomy setting: your own sales beside the work you do for clients, say. In a chat, name the pipeline; left out, Hermes means the first.'),
+    h('p', { className: 'stoa-sub', style: { margin: '10px 0 0' } }, 'Each pipeline has its own records, its own playbook and its own autonomy setting: your own sales beside the work you do for clients, say. In a chat, name the pipeline; left out, the assistant means the first.'),
     pipes.length < 6 ? h('div', { className: 'stoa-btns', style: { marginTop: 10 } }, h(Btn, { onClick: () => $setupFlow.set({ mode: 'add', step: 'shape' }) }, '+  Pipeline')) : null))
 }
 
@@ -3495,11 +3484,11 @@ function NameBox({ state }) {
           onClick: () => save({ ink: item[0] }) }, item[1])))))
 }
 
-/** Where Hermes keeps this plugin's settings, its keys among them: its own form, which is where a key is saved. */
+/** Where the assistant keeps this plugin's settings, its keys among them: its own form, which is where a key is saved. */
 const openSettings = () => host.navigate('/settings?tab=plugins&agent=stoa')
 
 /** The keys a person may add, each optional: what it is for, how to get one, whether it is set, and a test.
-    Hermes keeps a key and Stoa only reads it, so adding one happens on Hermes's settings page, one press away. */
+    The assistant keeps a key and Stoa only reads it, so adding one happens on the assistant's settings page, one press away. */
 function Keys({ setup, only }) {
   const [tests, setTests] = useState({})
   const test = key => {
@@ -3521,7 +3510,7 @@ function Keys({ setup, only }) {
           result.message ? h('div', { role: 'status', style: { marginTop: 6 } }, h(Chip, { tone: result.ok ? 'good' : result.state === 'unreachable' ? 'warn' : 'bad' }, result.ok ? 'works' : result.state === 'unreachable' ? 'no answer' : 'not working'), '  ' + result.message) : null,
           h('div', { className: 'stoa-btns', style: { marginTop: 8 } },
             key.set ? h(Btn, { disabled: Boolean(result.busy), title: key.check, onClick: () => test(key) }, result.busy ? 'Testing…' : 'Test') : null,
-            h(Btn, { kind: key.set ? undefined : 'primary', title: 'Opens Hermes\'s settings for Stoa, where the key is saved', onClick: openSettings }, key.set ? 'Change key' : 'Add key'),
+            h(Btn, { kind: key.set ? undefined : 'primary', title: 'Opens the assistant\'s settings for Stoa, where the key is saved', onClick: openSettings }, key.set ? 'Change key' : 'Add key'),
             h('a', { className: 'stoa-alink', style: { alignSelf: 'center', marginLeft: 4 }, href: key.get, target: '_blank', rel: 'noreferrer' }, key.set ? 'Open ' + key.where : 'Get a key'))))
     }))
 }
@@ -3544,7 +3533,7 @@ function Step({ id, done, optional, plain, title, status, open: openFirst, child
 /** Where call notes come from, on Setup. Pick where your notes live and it shows the way in for that tool; the folders,
     keys and connections in use are listed under it; and "what Stoa would pick up" shows the notes waiting and the record
     each looks to be about, before any sweep has run. Nothing here involves a model except the button that hands the
-    waiting notes to Hermes. */
+    waiting notes to the assistant. */
 function NotesSources({ setup }) {
   const notes = setup.notes || {}
   const tools = notes.tools || []
@@ -3574,7 +3563,7 @@ function NotesSources({ setup }) {
   const look = () => call('look', rest('/notes/look')).then(answer => { setResult(null); setFound(answer.found || []) })
   const fileNow = () => {
     if (toChat('Go through the notes inbox on the Stoa desk. Read each waiting note, file it on the record it is about with a short summary and the next step it implies, and skip any that is not about the pipeline. Then tell me what you filed, and any stage change you would recommend. Do not change a stage yourself.'))
-      host.notify({ kind: 'info', message: 'Hermes is going through your notes. The conversation above the talk box shows what it files.' })
+      host.notify({ kind: 'info', message: 'The assistant is going through your notes. The conversation above the talk box shows what it files.' })
   }
   const typed = path.trim()
   const day = stamp => { const d = new Date(String(stamp || '').slice(0, 10) + 'T12:00:00'); return isNaN(d) ? '' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) }
@@ -3586,7 +3575,7 @@ function NotesSources({ setup }) {
       h(Btn, { disabled: !typed || Boolean(busy), title: 'Says what is in the folder without changing anything', onClick: check }, busy === 'check' ? 'Checking…' : 'Check'),
       h(Btn, { kind: 'primary', disabled: !typed || Boolean(busy), onClick: () => add(path) }, busy === 'save' ? 'Adding…' : 'Add folder')),
     h('p', { className: 'stoa-sub', style: { margin: '6px 0 0' } }, 'Paste the folder\'s path. On a Mac: in Finder, right-click the folder, hold the Option key, and choose Copy as Pathname. ',
-      h('button', { type: 'button', className: 'stoa-linkbtn', disabled: Boolean(busy), title: 'Looks in a few usual places on the computer Hermes runs on, such as Documents, Plaud and Obsidian. It counts the notes there and opens none.', onClick: look },
+      h('button', { type: 'button', className: 'stoa-linkbtn', disabled: Boolean(busy), title: 'Looks in a few usual places on the computer the assistant runs on, such as Documents, Plaud and Obsidian. It counts the notes there and opens none.', onClick: look },
         busy === 'look' ? 'Looking…' : 'Or have Stoa look for a folder.')))
   const ways = tool ? h('div', { className: 'stoa-noteway' },
     h('p', { style: { margin: '0 0 6px' } }, tool.about),
@@ -3595,14 +3584,14 @@ function NotesSources({ setup }) {
         h('div', { key: 'add' }, addRow(tool.folder)),
         tool.connection ? h('div', { key: 'conn', className: 'stoa-noteconn' },
           h('span', { className: 'stoa-eyebrow' }, 'Or with nothing to export'),
-          h('p', { style: { margin: '4px 0 6px' } }, tool.connection.about + ' In Hermes, open Capabilities, then Connectors, add a connector with this address, and sign in to ' + tool.name + ' when it asks: ',
+          h('p', { style: { margin: '4px 0 6px' } }, tool.connection.about + ' In the assistant, open Capabilities, then Connectors, add a connector with this address, and sign in to ' + tool.name + ' when it asks: ',
             h('code', { className: 'stoa-code' }, tool.connection.address)),
-          h('p', { className: 'stoa-sub', style: { margin: '0 0 6px' } }, 'Then tell Stoa to have Hermes look there on each notes sweep. This way is new: Hermes reads the notes with the connector\'s own tools, so how well it works depends on that connector.'),
+          h('p', { className: 'stoa-sub', style: { margin: '0 0 6px' } }, 'Then tell Stoa to have the assistant look there on each notes sweep. This way is new: The assistant reads the notes with the connector\'s own tools, so how well it works depends on that connector.'),
           h('div', { className: 'stoa-btns', style: { margin: 0 } },
             h(Btn, { onClick: () => host.navigate('/capabilities') }, 'Open Capabilities'),
             connections.includes(tool.connection.name)
               ? h(Btn, { kind: 'quiet', disabled: Boolean(busy), onClick: () => connect(connections.filter(name => name !== tool.connection.name)) }, 'Stop looking in ' + tool.name)
-              : h(Btn, { disabled: Boolean(busy) || notes.can_save === false, onClick: () => connect(connections.concat([tool.connection.name])) }, 'Have Hermes look in ' + tool.name))) : null]) : null
+              : h(Btn, { disabled: Boolean(busy) || notes.can_save === false, onClick: () => connect(connections.concat([tool.connection.name])) }, 'Have the assistant look in ' + tool.name))) : null]) : null
   const waiting = preview.data
   return h('div', { className: 'stoa-notes' },
     h('p', { className: 'stoa-sub', style: { margin: '0 0 10px' } }, 'Each note is filed on the record it is about, with the next step it implies. Stoa reads what your recorder wrote (the summary, the transcript); it does not record or transcribe anything itself.'),
@@ -3630,8 +3619,8 @@ function NotesSources({ setup }) {
       notes.granola || notes.fireflies ? h(Keys, { key: 'keys', setup, only: [notes.granola ? 'granola' : '', notes.fireflies ? 'fireflies' : ''].filter(Boolean) }) : null,
       connections.map(name => h('div', { key: 'c:' + name, className: 'stoa-setrow' },
         h(Lamp, { on: null }),
-        h('span', { className: 'stoa-grow' }, h('span', { className: 'stoa-name', style: { display: 'block' } }, cap(name) + ', through Hermes'),
-          h('span', { className: 'stoa-sub' }, 'On a notes sweep Hermes looks there with that connector\'s own tools. Stoa cannot see into it, so it shows no count.')),
+        h('span', { className: 'stoa-grow' }, h('span', { className: 'stoa-name', style: { display: 'block' } }, cap(name) + ', through the assistant'),
+          h('span', { className: 'stoa-sub' }, 'On a notes sweep the assistant looks there with that connector\'s own tools. Stoa cannot see into it, so it shows no count.')),
         h(Btn, { kind: 'quiet', disabled: Boolean(busy), onClick: () => connect(connections.filter(other => other !== name)) }, 'Remove'))),
       !tool && folders.length < 8 ? h('div', { key: 'more', style: { marginTop: 8 } }, addRow()) : null,
 
@@ -3648,22 +3637,22 @@ function NotesSources({ setup }) {
                 waiting.notes.map(note => h('div', { key: note.id, className: 'stoa-noterow' },
                   h('span', { className: 'stoa-num' }, day(note.when)),
                   h('span', { className: 'stoa-grow', style: { minWidth: 0 } }, h('span', { className: 'stoa-name', style: { display: 'block', overflowWrap: 'anywhere' } }, note.title),
-                    h('span', { className: 'stoa-sub' }, [where[note.source] || note.source, note.parts > 1 ? note.parts + ' files, read as one' : '', note.handed ? 'a PDF: Hermes reads it' : ''].filter(Boolean).join(' · '))),
+                    h('span', { className: 'stoa-sub' }, [where[note.source] || note.source, note.parts > 1 ? note.parts + ' files, read as one' : '', note.handed ? 'a PDF: The assistant reads it' : ''].filter(Boolean).join(' · '))),
                   h('span', { className: 'stoa-notematch', 'data-on': note.suggested.length ? '1' : '0' }, note.suggested.length
                     ? [h('b', { key: 'n' }, note.suggested[0].name), h('small', { key: 'w' }, note.suggested[0].why)]
                     : h('small', null, 'no record matched yet')))),
-                h('p', { key: 'unmatched', className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'A note with no match is still read: Hermes works out who it is about from what it says, and asks before adding anyone new.'),
+                h('p', { key: 'unmatched', className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'A note with no match is still read: The assistant works out who it is about from what it says, and asks before adding anyone new.'),
                 h('div', { key: 'go', className: 'stoa-btns' },
-                  h(Btn, { kind: 'primary', title: 'Sends Hermes a line asking it to read and file the waiting notes. It proposes stage changes; it does not make them.', onClick: fileNow }, 'Have Hermes file them now'),
+                  h(Btn, { kind: 'primary', title: 'Sends the assistant a line asking it to read and file the waiting notes. It proposes stage changes; it does not make them.', onClick: fileNow }, 'Have the assistant file them now'),
                   h(Btn, { kind: 'quiet', onClick: () => queryClient.invalidateQueries({ queryKey: ['stoa', 'notes-preview'] }) }, 'Look again'))]
                 : h('p', { className: 'stoa-sub', style: { margin: 0 } }, 'Nothing is waiting. A new note shows here as soon as it is saved, and is gone once it is filed or skipped.'),
-              h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'To have this happen without asking, switch on File meeting notes in the next step but one, “Let Hermes keep the desk current”.')))] : null)
+              h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'To have this happen without asking, switch on File meeting notes in the next step but one, “Let the assistant keep the desk current”.')))] : null)
 }
 
-/** A schedule in words where it is one of the plain kinds ("30 8 * * 1-5" is weekdays at 8:30); otherwise as Hermes shows it. */
+/** A schedule in words where it is one of the plain kinds ("30 8 * * 1-5" is weekdays at 8:30); otherwise as the assistant shows it. */
 const fileSize = bytes => (bytes >= 1048576 ? (bytes / 1048576).toFixed(1) + ' MB' : bytes >= 1024 ? Math.round(bytes / 1024) + ' KB' : bytes + ' bytes')
 
-/** The copies Hermes keeps of files dropped in the talk box: which are still there, when each goes, and removing them now. */
+/** The copies the assistant keeps of files dropped in the talk box: which are still there, when each goes, and removing them now. */
 function HandedFiles() {
   const KEY = ['stoa', 'files']
   const query = useQuery({ queryKey: KEY, queryFn: () => rest('/files'), staleTime: 3000 })
@@ -3692,7 +3681,7 @@ function HandedFiles() {
   return h('div', { style: { marginTop: 14, paddingTop: 12, borderTop: '1px dotted var(--ui-stroke-primary)' } },
     h('small', { className: 'stoa-eyebrow', style: { display: 'block', marginBottom: 6 } }, 'Files dropped in the talk box'),
     h('div', { className: 'stoa-sub', style: { overflowWrap: 'anywhere' } },
-      'Hermes keeps its own copy of a file you drop here, on the computer it runs on' + (where ? ' (' + where + ')' : '') + ', and nothing of Hermes\'s clears it. Stoa removes the copies its talk box caused after ',
+      'The assistant keeps its own copy of a file you drop here, on the computer it runs on' + (where ? ' (' + where + ')' : '') + ', and nothing of the assistant\'s clears it. Stoa removes the copies its talk box caused after ',
       h('select', { className: 'stoa-select', style: { height: 24, padding: '0 6px', margin: '0 2px' }, 'aria-label': 'Remove dropped files after', value: String(days), disabled: busy || !data.can_save,
         onChange: event => send('/files/keep', { days: Number(event.target.value) }) }, choices.map(item => h('option', { key: item[0], value: String(item[0]) }, item[1]))),
       data.can_save ? '.' : '. Change it in Stoa\'s settings.', ' Your own file, where you had it, is never touched.'),
@@ -3706,10 +3695,10 @@ function HandedFiles() {
         sure ? h(Btn, { disabled: busy, onClick: () => send('/files/remove', {}, removed) }, 'Yes, remove ' + (data.files.length === 1 ? 'it' : 'all ' + data.files.length))
           : h(Btn, { disabled: busy, onClick: () => setSure(true) }, data.files.length === 1 ? 'Remove it now' : 'Remove them now'),
         sure ? h(Btn, { kind: 'quiet', onClick: () => setSure(false) }, 'Keep them') : null),
-      sure ? h('div', { className: 'stoa-sub', style: { marginTop: 6 } }, 'Hermes will not be able to read ' + (data.files.length === 1 ? 'it' : 'them') + ' again in the conversation ' + (data.files.length === 1 ? 'it was' : 'they were') + ' dropped in.') : null)
+      sure ? h('div', { className: 'stoa-sub', style: { marginTop: 6 } }, 'The assistant will not be able to read ' + (data.files.length === 1 ? 'it' : 'them') + ' again in the conversation ' + (data.files.length === 1 ? 'it was' : 'they were') + ' dropped in.') : null)
       : h('div', { className: 'stoa-sub', style: { marginTop: 6 } }, 'None are there now.' + (data.removed ? ' ' + plural(data.removed, 'copy has', 'copies have') + ' been removed so far.' : '')),
     others > 0 ? h('div', { className: 'stoa-sub', style: { marginTop: 6, overflowWrap: 'anywhere' } },
-      plural(others, 'other file is', 'other files are') + ' in Hermes\'s folders (' + data.folders.filter(folder => folder.files).map(folder => folder.files + ' in ' + folder.name + ', ' + fileSize(folder.bytes)).join('; ')
+      plural(others, 'other file is', 'other files are') + ' in the assistant\'s folders (' + data.folders.filter(folder => folder.files).map(folder => folder.files + ' in ' + folder.name + ', ' + fileSize(folder.bytes)).join('; ')
       + ' in all): from other chats, or dropped here before Stoa kept a list. Stoa does not touch those. Clear them yourself if they should not stay.') : null,
     data.elsewhere ? h('div', { className: 'stoa-sub', style: { marginTop: 6 } },
       plural(data.elsewhere, 'file', 'files') + ' went where Stoa does not reach (this profile keeps attachments in each conversation\'s workspace), so ' + (data.elsewhere === 1 ? 'it is' : 'they are') + ' not on the list.') : null)
@@ -3724,22 +3713,22 @@ function scheduleWords(text) {
   return days + ' at ' + (times.length > 1 ? times.slice(0, -1).join(', ') + ' and ' + times[times.length - 1] : times[0])
 }
 
-/** The jobs Hermes can run on a schedule for the desk, each with whether it is on, and what one may change by itself. */
+/** The jobs the assistant can run on a schedule for the desk, each with whether it is on, and what one may change by itself. */
 function Automations({ setup }) {
   const next = stamp => { const d = new Date(stamp); return isNaN(d) ? '' : d.toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }) }
   return h('div', null,
-    h('p', { className: 'stoa-sub', style: { margin: '0 0 4px' } }, 'Switch on… opens a chat with the command typed. Press Enter, and Hermes asks when it should run and where to report. That is all there is to it.'),
+    h('p', { className: 'stoa-sub', style: { margin: '0 0 4px' } }, 'Switch on… opens a chat with the command typed. Press Enter, and the assistant asks when it should run and where to report. That is all there is to it.'),
     (setup.automations || []).map(item => {
       const made = item.state === 'on' || item.state === 'paused'
       return h('div', { key: item.name, className: 'stoa-setrow' },
         h(Lamp, { on: item.state === 'on' ? true : item.state === 'unknown' ? null : false }),
         h('span', { className: 'stoa-grow' }, h('span', { className: 'stoa-name', style: { display: 'block' } }, item.title), h('span', { className: 'stoa-sub' }, item.description),
-          made ? h('span', { className: 'stoa-stepstatus' }, [item.state === 'on' ? 'On' : 'Paused in Hermes', scheduleWords(item.schedule), item.state === 'on' && next(item.next) ? 'next ' + next(item.next) : ''].filter(Boolean).join(' · ')) : null),
-        made ? h(Btn, { kind: 'quiet', title: 'Opens Hermes\'s scheduled jobs, where it is paused, changed or removed', onClick: () => host.navigate('/cron') }, 'Change…')
+          made ? h('span', { className: 'stoa-stepstatus' }, [item.state === 'on' ? 'On' : 'Paused in the assistant', scheduleWords(item.schedule), item.state === 'on' && next(item.next) ? 'next ' + next(item.next) : ''].filter(Boolean).join(' · ')) : null),
+        made ? h(Btn, { kind: 'quiet', title: 'Opens the assistant\'s scheduled jobs, where it is paused, changed or removed', onClick: () => host.navigate('/cron') }, 'Change…')
           : h(Btn, { title: 'Opens a chat with /blueprint stoa:' + item.name + ' typed. Nothing is switched on until you run it there.', onClick: () => typeInChat('/blueprint stoa:' + item.name) }, 'Switch on…'))
     }),
-    h('div', { className: 'stoa-btns', style: { marginTop: 8 } }, h(Btn, { kind: 'quiet', onClick: () => host.navigate('/cron') }, 'See all of Hermes\'s scheduled jobs')),
-    h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'The sweep of email, calls and Slack reads them through the tools Hermes itself is connected to. If it finds nothing, connect them under Capabilities.  ',
+    h('div', { className: 'stoa-btns', style: { marginTop: 8 } }, h(Btn, { kind: 'quiet', onClick: () => host.navigate('/cron') }, 'See all of the assistant\'s scheduled jobs')),
+    h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'The sweep of email, calls and Slack reads them through the tools the assistant itself is connected to. If it finds nothing, connect them under Capabilities.  ',
       h('button', { type: 'button', className: 'stoa-alink stoa-linkbtn', onClick: () => host.navigate('/capabilities') }, 'Open Capabilities')),
     h('div', { className: 'stoa-steplabel' }, 'What a scheduled job may change without asking'),
     h(Autonomy, { setup }))
@@ -3789,16 +3778,16 @@ function Setup({ state, go }) {
             step.playbook.done ? h(Btn, { kind: 'primary', onClick: () => $setupFlow.set({ mode: 'edit', step: 'stages' }) }, 'Edit stages')
               : h(Btn, { kind: 'primary', onClick: () => $setupFlow.set({ mode: state.fresh ? 'first' : 'edit', step: 'shape' }) }, 'Set it up'),
             step.playbook.done ? h(Btn, { onClick: () => $setupFlow.set({ mode: 'edit', step: 'shape' }) }, 'Change what it is for') : null,
-            h(Btn, { kind: 'quiet', onClick: () => $draft.set('Change my Stoa playbook: ') }, 'Ask Hermes for anything else (fields, drafts, timing)')),
+            h(Btn, { kind: 'quiet', onClick: () => $draft.set('Change my Stoa playbook: ') }, 'Ask the assistant for anything else (fields, drafts, timing)')),
         h('div', { className: 'stoa-facts', style: { marginTop: 12 } },
           [['The words', sets.words], ['A nudge is due after', sets.quiet.map(item => item.stage + ' ' + item.days + 'd').join(' · ')], ['Reasons for a loss', sets.lost_reasons.join(' · ')],
-            ['Extra facts on a record', sets.fields.join(' · ') || 'none'], ['Hermes drafts when a record enters', sets.drafts.join(' · ') || 'nothing'],
+            ['Extra facts on a record', sets.fields.join(' · ') || 'none'], ['The assistant drafts when a record enters', sets.drafts.join(' · ') || 'nothing'],
             ['A lookup finds', sets.lookup === 'none' ? 'nothing (switched off)' : 'the ' + sets.lookup]].map(pair =>
             h('div', { key: pair[0], style: { gridColumn: '1 / -1' } }, h('small', { className: 'stoa-eyebrow' }, pair[0]), h('span', null, pair[1]))))),
       h(Step, { id: 'records', done: step.records.done, open: step.playbook.done && !step.records.done, title: 'Put your first ' + terms.deal + ' on it', status: step.records.detail },
         h('p', { className: 'stoa-sub', style: { margin: '0 0 8px' } }, 'Any of these works. Use whichever is closest to hand.'),
         h('div', { className: 'stoa-ways' },
-          h('div', null, h('div', { className: 'stoa-name' }, 'Tell Hermes'), h('div', { className: 'stoa-sub' }, 'In the box at the foot of this page, in your own words.'),
+          h('div', null, h('div', { className: 'stoa-name' }, 'Tell the assistant'), h('div', { className: 'stoa-sub' }, 'In the box at the foot of this page, in your own words.'),
             h('button', { type: 'button', className: 'stoa-sayline', style: { marginTop: 4 }, onClick: () => $draft.set(SAY[0]) }, '“' + SAY[0] + '”')),
           h('div', null, h('div', { className: 'stoa-name' }, 'Bring a list'), h('div', { className: 'stoa-sub' }, 'A CSV from a spreadsheet or another CRM. Stoa shows what it would add, and nothing is written until you press Apply.'),
             h('input', { ref: picker, type: 'file', hidden: true, accept: '.csv,.tsv,text/csv', onChange: event => { takeFile(event.target.files[0]); event.target.value = '' } }),
@@ -3812,7 +3801,7 @@ function Setup({ state, go }) {
     h('div', { className: 'stoa-setgroup' }, 'Make it do more', h('span', null, 'each one is optional')),
     h('div', { className: 'stoa-steps' },
       h(Step, { id: 'keys', optional: true, done: step.keys.done, title: 'Find companies and fill in people', status: step.keys.detail },
-        h('p', { className: 'stoa-sub', style: { margin: '0 0 4px' } }, 'Two outside services, each with a key. Hermes keeps your keys and Stoa only reads them: Add key opens Hermes\'s settings for Stoa, where you paste the key and press Save. Then come back and press Test.'),
+        h('p', { className: 'stoa-sub', style: { margin: '0 0 4px' } }, 'Two outside services, each with a key. The assistant keeps your keys and Stoa only reads them: Add key opens the assistant\'s settings for Stoa, where you paste the key and press Save. Then come back and press Test.'),
         h(Keys, { setup, only: ['exa', 'pdl'] })),
       h(Step, { id: 'notes', optional: true, done: step.notes.done, title: 'Bring in your call notes', status: step.notes.detail },
         h(NotesSources, { setup })),
@@ -3825,10 +3814,10 @@ function Setup({ state, go }) {
           h('div', { className: 'stoa-btns' }, h(Btn, { onClick: openSettings }, 'Change either in Stoa\'s settings')),
           h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'Both settings take Slack\'s own ids. For a person: open their profile in Slack, press the three dots, and choose Copy member ID. For a channel: open the channel\'s details and copy the Channel ID at the bottom.'))
           : h('div', null,
-            h('p', { style: { margin: '0 0 6px' } }, 'Open Messaging, choose Slack and follow its steps. When Hermes is in your Slack there is nothing more to do here: typing ', h('code', { className: 'stoa-code' }, '!gtm'), ' in Slack shows the board.'),
+            h('p', { style: { margin: '0 0 6px' } }, 'Open Messaging, choose Slack and follow its steps. When the assistant is in your Slack there is nothing more to do here: typing ', h('code', { className: 'stoa-code' }, '!gtm'), ' in Slack shows the board.'),
             h('div', { className: 'stoa-btns' }, h(Btn, { kind: 'primary', onClick: () => host.navigate('/messaging') }, 'Open Messaging')),
-            setup.slack === false ? h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'Just connected it and this still says no? Restart Hermes once (hermes gateway restart) so Stoa\'s buttons are wired to Slack.') : null)),
-      h(Step, { id: 'sweep', optional: true, done: step.sweep.done, title: 'Let Hermes keep the desk current', status: step.sweep.detail },
+            setup.slack === false ? h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'Just connected it and this still says no? Restart the assistant once (hermes gateway restart) so Stoa\'s buttons are wired to Slack.') : null)),
+      h(Step, { id: 'sweep', optional: true, done: step.sweep.done, title: 'Let the assistant keep the desk current', status: step.sweep.detail },
         h(Automations, { setup }))),
 
     h('div', { className: 'stoa-setgroup' }, 'Your desk', h('span', null, 'change these whenever you like')),
@@ -3845,7 +3834,7 @@ function Setup({ state, go }) {
           [['Open', data.open], ['Won', data.won], ['Lost', data.lost], ['Log entries', data.activities], ['Market maps', data.maps], ['Lists waiting', data.lists_waiting],
             ['Changes on the ledger', data.ledger], ['Taken off the desk', data.archived]].map(pair =>
             h('div', { key: pair[0] }, h('small', { className: 'stoa-eyebrow' }, pair[0]), h('span', null, String(pair[1]))))),
-        h('div', { className: 'stoa-sub', style: { marginTop: 10, overflowWrap: 'anywhere' } }, 'One file on the computer Hermes runs on: ' + data.path),
+        h('div', { className: 'stoa-sub', style: { marginTop: 10, overflowWrap: 'anywhere' } }, 'One file on the computer the assistant runs on: ' + data.path),
         h('div', { className: 'stoa-sub', style: { marginTop: 4, overflowWrap: 'anywhere' } }, data.backups && data.backups.count
           ? 'A copy is kept each day, the last fourteen: ' + plural(data.backups.count, 'copy', 'copies') + ' so far, the newest from ' + data.backups.newest + ', in ' + data.backups.folder + '.'
           : 'A copy of the file is kept each day once there is something on the desk, the last fourteen, in a backups folder beside it.'),
@@ -3869,12 +3858,12 @@ function Setup({ state, go }) {
           h('div', null, h('div', { className: 'stoa-name', style: { marginBottom: 6 } }, 'Decided by your playbook'),
             [['What a record is called', sets.words], ['The stages', sets.stages.join(' → ')], ['How long before a nudge is due', 'per stage, ' + Math.min(...sets.quiet.map(item => item.days)) + ' to ' + Math.max(...sets.quiet.map(item => item.days)) + ' days'],
               ['Why records are lost', sets.lost_reasons.length + ' reasons to pick from'], ['The extra facts worth keeping', sets.fields.length ? sets.fields.join(', ') : 'none'],
-              ['What Hermes writes at each stage', sets.drafts.length ? plural(sets.drafts.length, 'stage has', 'stages have') + ' a draft' : 'nothing yet']].map(pair =>
+              ['What the assistant writes at each stage', sets.drafts.length ? plural(sets.drafts.length, 'stage has', 'stages have') + ' a draft' : 'nothing yet']].map(pair =>
               h('p', { key: pair[0], className: 'stoa-tip' }, h('b', null, pair[0] + ': '), pair[1])))))),
     h('div', { className: 'stoa-sub', style: { textAlign: 'center', padding: '16px 0 4px' } }, 'Stoa ' + setup.version))
 }
 
-// -- what Hermes proposes: one decision each, with what it rests on -------------------------------
+// -- what the assistant proposes: one decision each, with what it rests on -------------------------------
 const EVIDENCE = { email: 'Email', call: 'Call', slack: 'Slack', meeting: 'Meeting', note: 'Note', calendar: 'Calendar' }
 
 async function decide(item, verb) {
@@ -3907,7 +3896,7 @@ function Proposal({ item, busy, run, open, follow }) {
     (item.warnings || []).map((warning, index) => h('div', { key: 'w' + index, className: 'stoa-sub' }, warning)),
     h('div', { className: 'stoa-btns', style: { marginTop: 10 } },
       h(Btn, { kind: 'go', disabled: busy, onClick: () => run('approve') }, 'Approve'),
-      h(Btn, { kind: 'quiet', disabled: busy, title: 'Leave the desk as it is. Hermes will not propose this again.', onClick: () => run('decline') }, 'Decline')))
+      h(Btn, { kind: 'quiet', disabled: busy, title: 'Leave the desk as it is. The assistant will not propose this again.', onClick: () => run('decline') }, 'Decline')))
 }
 
 /** What sort of change a proposal is, by the heaviest thing it would do. */
@@ -3948,7 +3937,7 @@ function Approvals({ state, setOpenId }) {
   }
   const kinds = KINDS.map(kind => ({ id: kind[0], one: kind[1], several: kind[2], items: proposals.filter(item => kindOf(item) === kind[0]) })).filter(kind => kind.items.length > 1)
   return h(Fold, { id: 'approvals', count: items.length, tone: 'good', title: 'Waiting for your approval',
-    help: 'Changes Hermes suggests and lists you were sent. Nothing is written until you approve it.',
+    help: 'Changes the assistant suggests and lists you were sent. Nothing is written until you approve it.',
     summary: names(sorted.map(item => (item.list ? 'a list you were sent' : item.name))),
     aside: proposals.length > 1 ? h(Btn, { disabled: Boolean(busy), onClick: () => many(proposals, 'all') }, 'Approve all ' + proposals.length) : null },
     kinds.length && kinds[0].items.length < proposals.length ? h('div', { className: 'stoa-kinds' }, kinds.map(kind =>
@@ -4097,7 +4086,7 @@ function Autonomy({ setup }) {
       .then(() => setBusy(false))
   }
   return h('div', null,
-    h('div', { className: 'stoa-sub', style: { marginBottom: 8 } }, 'In a chat, Hermes does what you ask. This is for the jobs that run when you are not there. Only you can change it here: Hermes has no way to.'),
+    h('div', { className: 'stoa-sub', style: { marginBottom: 8 } }, 'In a chat, the assistant does what you ask. This is for the jobs that run when you are not there. Only you can change it here: The assistant has no way to.'),
     auto.levels.map(level => h('button', { type: 'button', key: level.id, className: 'stoa-level', 'data-on': level.id === auto.level ? '1' : '0', disabled: busy,
       'aria-pressed': level.id === auto.level, onClick: () => pick(level.id) },
     h(Lamp, { on: level.id === auto.level }),
@@ -5221,15 +5210,15 @@ const hashOf = text => { let n = 2166136261; for (let i = 0; i < text.length; i+
 const agoWords = days => (days === null || days === undefined ? '' : days === 0 ? 'today' : days === 1 ? 'yesterday' : days < 60 ? days + ' days ago' : Math.round(days / 30) + ' months ago')
 /** A company's name as it is written on the map: whole when short, cut with an ellipsis when long. The panel and the table give it in full. */
 const shortName = name => (String(name).length > 22 ? String(name).slice(0, 21).trimEnd() + '…' : String(name))
-/** What every company Hermes adds to a map should carry, said the same way wherever the page asks for more. */
+/** What every company the assistant adds to a map should carry, said the same way wherever the page asks for more. */
 const RECORD = 'For each one record its source, its headcount, what it uses today for the job we do, and any signal with the date it happened.'
 const namesOf = list => (list.length <= 2 ? list.map(c => c.company).join(' and ') : list[0].company + ', ' + list[1].company + ' and ' + (list.length - 2) + ' more')
 
-/** Every company on a map, with what the picture needs worked out: a fit out of 100 (Hermes's judgement, or the
+/** Every company on a map, with what the picture needs worked out: a fit out of 100 (The assistant's judgement, or the
     requirements weighed the way the person set them), whether there is a reason to call now, and who the buyer is. */
 function mapCompanies(market, weights, seenAt) {
   const own = Object.values(weights || {}).some(weight => weight !== 2)
-  // "New" is a company that arrived since you last had this map open: what Hermes has just found, not the whole of a map you are seeing for the first time.
+  // "New" is a company that arrived since you last had this map open: what the assistant has just found, not the whole of a map you are seeing for the first time.
   const isFresh = c => { const at = Date.parse(c.added_at || '') || 0; return Boolean(at) && Boolean(seenAt) && at > seenAt }
   const out = []
   for (const segment of market.segments) {
@@ -5443,13 +5432,13 @@ function MapPicture({ market, list, lens, sizeBy, sel, shown, onPick, onLasso, o
         if (g.ghost) {
           return h('div', { key: 'ghost', className: 'stoa-mapghost', style: { left: g.cx, top: g.cy, width: Math.min(2 * g.R - 34, 216) } },
             h('span', { className: 'stoa-eyebrow' }, say.recruiting ? 'Next to this role' : 'Next to this market'), h('b', null, say.recruiting ? 'A neighbouring pool' : 'A neighbouring segment'),
-            h('p', null, 'Hermes can suggest who else has this problem.'), h(Btn, { onClick: onSuggest }, 'Ask Hermes'))
+            h('p', null, 'The assistant can suggest who else has this problem.'), h(Btn, { onClick: onSuggest }, 'Ask the assistant'))
         }
         const count = g.m.length, avg = count ? Math.round(g.m.reduce((sum, n) => sum + n.c.score, 0) / count) : 0
         return h('div', { key: lens + g.key, className: 'stoa-mapcap', style: { left: g.cx, top: g.cy + g.R + 6, width: g.colW - 8 } },
           h('b', null, g.name), h('span', null, plural(count, say.thing, say.things) + (lens === 'held' ? ' · ' + Math.round(100 * count / L.ns.length) + '%' : ' · fit ' + avg)),
           lens === 'seg' && count <= 3 ? h('span', { className: 'stoa-chip', 'data-tone': 'warn', style: { marginLeft: 6 } }, 'thin') : null,
-          lens === 'seg' ? h(Btn, { kind: 'quiet', title: 'Ask Hermes to find more ' + say.things + ' for this ' + (say.recruiting ? 'pool' : 'segment'), onClick: () => onGrow(g.name) }, '+ Grow') : null)
+          lens === 'seg' ? h(Btn, { kind: 'quiet', title: 'Ask the assistant to find more ' + say.things + ' for this ' + (say.recruiting ? 'pool' : 'segment'), onClick: () => onGrow(g.name) }, '+ Grow') : null)
       }),
       hovered ? h('div', { className: 'stoa-maptip', style: { left: Math.max(4, hovered.x + hovered.r + 14 + 236 > L.W ? hovered.x - hovered.r - 14 - 232 : hovered.x + hovered.r + 14), top: Math.max(4, Math.min(L.H - 120, hovered.y - 24)) } },
         h('b', null, hovered.c.company), h(Fit, { value: squaresOf(hovered.c.score) }), h('span', { className: 'stoa-sub' }, '  fit ' + hovered.c.score + (hovered.c.size ? ' · ' + hovered.c.size : '') + (say.people && hovered.c.uses ? ' at ' + hovered.c.uses : '')),
@@ -5477,7 +5466,7 @@ function Menu({ label, title, kind, up, right, children }) {
 const MenuItem = ({ title, sub, on, danger, onClick }) => h('button', { type: 'button', role: 'menuitem', className: 'stoa-menuitem', 'data-on': on ? '1' : '0', 'data-danger': danger ? '1' : '0', onClick },
   h('span', null, title), sub ? h('small', null, sub) : null)
 
-/** Starting a map is Hermes's work: it has to go and find the companies. This takes what you sell and who to, and hands it over. */
+/** Starting a map is the assistant's work: it has to go and find the companies. This takes what you sell and who to, and hands it over. */
 function NewMap({ first, onClose, shape }) {
   const role = shape === 'roles'
   const mapPipe = useContext(InPipe) || $pipe.get()        // on the page itself nothing names a pipeline but the one it is showing
@@ -5494,20 +5483,20 @@ function NewMap({ first, onClose, shape }) {
     const sent = toChat(role ? roleMapAsk(said, search, findMore) : 'Map a new market for me and keep it on the desk as a map of its own: ' + said + ' Name the market, split it into segments that would each get a different pitch, set the requirements, '
       + 'then research companies. For each one record the evidence and its source, its headcount, what it uses today for the job we do, any signal with the date it happened, and the likely buyer if you come across one. Tell me when it is on the desk.', null, 'maps')
     if (!sent) return
-    host.notify({ kind: 'info', message: 'Hermes is mapping it. The map appears here when it is saved, which takes a few minutes.' })
+    host.notify({ kind: 'info', message: 'The assistant is mapping it. The map appears here when it is saved, which takes a few minutes.' })
     setText('')
     if (onClose) onClose()
   }
   return h('div', { className: 'stoa-box stoa-mapform' },
     h('label', { className: 'stoa-name', htmlFor: 'stoa-newmap' }, role ? (first ? 'Map the candidates for a role' : 'A new candidate map') : first ? 'Map your first market' : 'A new map'),
-    h('p', { className: 'stoa-sub', style: { margin: '4px 0 8px' } }, role ? 'Describe the role and who would fit it. Hermes splits the candidates into pools, finds people who could fill the role from public sources, each with their own fit and the evidence for it, and saves them as a map of its own. It takes a few minutes, and you can keep working while it does.' : 'Say what you sell and who you are after. Hermes names the market, splits it into segments, researches companies and saves it as a map of its own. It takes a few minutes, and you can keep working while it does.'),
+    h('p', { className: 'stoa-sub', style: { margin: '4px 0 8px' } }, role ? 'Describe the role and who would fit it. The assistant splits the candidates into pools, finds people who could fill the role from public sources, each with their own fit and the evidence for it, and saves them as a map of its own. It takes a few minutes, and you can keep working while it does.' : 'Say what you sell and who you are after. The assistant names the market, splits it into segments, researches companies and saves it as a map of its own. It takes a few minutes, and you can keep working while it does.'),
     h('textarea', { id: 'stoa-newmap', className: 'stoa-field stoa-maptext', rows: 3, autoFocus: !first, value: text, placeholder: role ? 'A Head of Events for a 40-person trade association in Columbus. Has run a 3,000-person annual show end to end. $130–150k, hybrid.' : 'We sell a fraud prevention tool to fintechs and marketplaces in the US with a small risk team.', onChange: event => setText(event.target.value) }),
     role ? h(MapFor, { pipe: mapPipe, value: search, onChange: setGoes, web: findMore, onWeb: setFindMore }) : null,
-    h('div', { className: 'stoa-btns' }, h(Btn, { kind: 'primary', disabled: !text.trim(), onClick: go }, 'Have Hermes map it'), onClose ? h(Btn, { kind: 'quiet', onClick: onClose }, 'Cancel') : null))
+    h('div', { className: 'stoa-btns' }, h(Btn, { kind: 'primary', disabled: !text.trim(), onClick: go }, 'Have the assistant map it'), onClose ? h(Btn, { kind: 'quiet', onClick: onClose }, 'Cancel') : null))
 }
 
 /** A map by the numbers, in a window over the page: what is on it and how complete it is, where it came from, what it
-    has cost so far, and the limits set on it. Hermes's cost is Hermes's own estimate, counted for the turns that worked on this map. */
+    has cost so far, and the limits set on it. The assistant's cost is the assistant's own estimate, counted for the turns that worked on this map. */
 function MapFacts({ market, onClose, onFill }) {
   const pipe = useContext(InPipe)
   const box = useRef(null)
@@ -5549,28 +5538,28 @@ function MapFacts({ market, onClose, onFill }) {
             h('div', { key: pair[0] }, h('b', null, pair[1]), h('small', null, pair[0])))),
           cover.map(row => h('div', { key: row[0], className: 'stoa-factrow' }, h('span', null, row[0]), h('span', { className: 'stoa-num' }, row[1] + ' of ' + row[2]),
             h('u', { className: 'stoa-mapmeter' }, h('i', { style: { width: (row[2] ? Math.round(100 * row[1] / row[2]) : 0) + '%' } })))),
-          askable.length ? h('div', { className: 'stoa-btns', style: { marginTop: 12 } }, h(Btn, { title: 'Sends Hermes a line asking it to fill in ' + askable.map(gap => gap.what).join(', ') + ' where a source says so', onClick: () => { if (onFill(askable)) close() } }, 'Ask Hermes to fill in what is missing')) : null),
+          askable.length ? h('div', { className: 'stoa-btns', style: { marginTop: 12 } }, h(Btn, { title: 'Sends the assistant a line asking it to fill in ' + askable.map(gap => gap.what).join(', ') + ' where a source says so', onClick: () => { if (onFill(askable)) close() } }, 'Ask the assistant to fill in what is missing')) : null),
         h('section', null, h('div', { className: 'stoa-sechead', style: { padding: '0 0 8px' } }, h('span', { className: 'stoa-eyebrow' }, 'Where it came from')),
           facts.sources.links ? [h('p', { key: 'p', style: { margin: '0 0 8px' } }, plural(facts.sources.links, 'source link', 'source links') + ' from ' + plural(facts.sources.sites, 'site', 'sites') + '.'),
             facts.sources.top.map(row => h('div', { key: row.site, className: 'stoa-factrow', 'data-plain': '1' }, h('span', { style: { overflowWrap: 'anywhere' } }, row.site), h('span', { className: 'stoa-num' }, plural(row.links, 'link', 'links'))))]
             : h('p', { className: 'stoa-sub' }, 'No ' + (persons ? 'candidate' : 'company') + ' on this map has a source link yet.'),
           h('div', { className: 'stoa-sechead', style: { padding: '0 0 8px', marginTop: 18 } }, h('span', { className: 'stoa-eyebrow' }, 'What it has cost')),
           h('div', { className: 'stoa-factcost' },
-            h('div', null, h('b', null, cost.runs ? (cost.usd === null ? 'No price known' : usd(cost.usd)) : usd(0)), h('small', null, 'Hermes\'s work, as Hermes estimates it')),
+            h('div', null, h('b', null, cost.runs ? (cost.usd === null ? 'No price known' : usd(cost.usd)) : usd(0)), h('small', null, 'The assistant\'s work, as the assistant estimates it')),
             h('p', { className: 'stoa-sub' }, cost.runs
               ? plural(cost.runs, 'turn', 'turns') + ' · ' + plural(cost.calls, 'model call', 'model calls') + ' · ' + cost.minutes + ' min of model time · ' + big(cost.tokens.in + cost.tokens.cache_read + cost.tokens.cache_write) + ' tokens in, ' + big(cost.tokens.out) + ' out'
                 + (cost.usd !== null ? ' · ' + usd(cost.usd_month) + ' this month' : '') + (cost.unpriced && cost.usd !== null ? ' · ' + plural(cost.unpriced, 'call', 'calls') + ' had no price and is not in the figure' : '')
-              : 'Nothing counted yet. Counting starts the next time Hermes works on this map.')),
+              : 'Nothing counted yet. Counting starts the next time the assistant works on this map.')),
           h('div', { className: 'stoa-factrow', 'data-plain': '1' }, h('span', null, 'People Data Labs lookups'), h('span', { className: 'stoa-num' }, cost.lookups_month + ' this month · ' + cost.lookups + ' in all')),
           h('div', { className: 'stoa-factrow', 'data-plain': '1' }, h('span', null, 'Exa searches through Stoa'), h('span', { className: 'stoa-num' }, cost.searches_month + ' this month · ' + cost.searches + ' in all')),
-          h('p', { className: 'stoa-sub', style: { marginTop: 8 } }, 'The dollar figure is Hermes\'s own estimate from the provider\'s price list, for the turns that worked on this map' + (cost.since ? ' since ' + day(cost.since) : '') + '. It is not an invoice. Web research Hermes does with its own tools is inside that figure; only searches made through Stoa are counted on the Exa line.'))),
+          h('p', { className: 'stoa-sub', style: { marginTop: 8 } }, 'The dollar figure is the assistant\'s own estimate from the provider\'s price list, for the turns that worked on this map' + (cost.since ? ' since ' + day(cost.since) : '') + '. It is not an invoice. Web research the assistant does with its own tools is inside that figure; only searches made through Stoa are counted on the Exa line.'))),
       h('form', { key: 'limits', className: 'stoa-factlimits', onSubmit: save },
         h('div', { className: 'stoa-sechead', style: { padding: '0 0 8px' } }, h('span', { className: 'stoa-eyebrow' }, 'Limits for this map'), h('span', { className: 'stoa-sub' }, 'leave a box empty for no limit')),
-        limitRow('companies', (persons ? 'Candidates' : 'Companies') + ' on the map', 'Hermes stops adding when the map holds this many', on.companies + ' now'),
-        limitRow('budget', 'Hermes\'s work a month, in dollars', 'By Hermes\'s estimate; past it, Stoa refuses new ' + (persons ? 'candidates' : 'companies') + ' and searches for this map', usd(cost.usd_month) + ' this month'),
+        limitRow('companies', (persons ? 'Candidates' : 'Companies') + ' on the map', 'The assistant stops adding when the map holds this many', on.companies + ' now'),
+        limitRow('budget', 'The assistant\'s work a month, in dollars', 'By the assistant\'s estimate; past it, Stoa refuses new ' + (persons ? 'candidates' : 'companies') + ' and searches for this map', usd(cost.usd_month) + ' this month'),
         limitRow('lookups', 'People Data Labs lookups a month', 'For this map alone, inside the cap for the whole desk', cost.lookups_month + ' this month'),
         limitRow('searches', 'Exa searches a month', 'Searches made through Stoa for this map', cost.searches_month + ' this month'),
-        h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'At a limit, Stoa refuses the next step and tells Hermes to stop and tell you. It cannot stop a turn that is already running.'),
+        h('p', { className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'At a limit, Stoa refuses the next step and tells the assistant to stop and tell you. It cannot stop a turn that is already running.'),
         h('div', { className: 'stoa-btns' }, h(Btn, { type: 'submit', kind: 'primary', disabled: saving || typed === null }, saving ? 'Saving…' : 'Save limits')))]
   }
   return h('dialog', { ref: box, className: 'stoa-dialog', 'aria-label': 'Map facts: ' + market.name, onClose, onClick: event => { if (event.target === box.current) close() } },
@@ -5589,8 +5578,8 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
   const [mode, setMode] = useState('')      // a form open under the map's name: new | rename | delete
   const [draft, setDraft] = useState('')
   const rail = useRef(null)
-  const who = shape === 'roles' ? { one: 'person', many: 'people', Cap: 'Person', find: ['Find a person', 'Find people'], ask: 'Ask Hermes who to approach', likely: 'the best person to approach' }
-    : { one: 'buyer', many: 'buyers', Cap: 'Buyer', find: ['Find a buyer', 'Find buyers'], ask: 'Ask Hermes who the buyer is', likely: 'the most likely buyer' }
+  const who = shape === 'roles' ? { one: 'person', many: 'people', Cap: 'Person', find: ['Find a person', 'Find people'], ask: 'Ask the assistant who to approach', likely: 'the best person to approach' }
+    : { one: 'buyer', many: 'buyers', Cap: 'Buyer', find: ['Find a buyer', 'Find buyers'], ask: 'Ask the assistant who the buyer is', likely: 'the most likely buyer' }
   const [picked, setPicked] = useState([])
   const [quick, setQuick] = useState('all')
   const [find, setFind] = useState('')
@@ -5642,12 +5631,12 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
   const ask = line => toChat(line, null)                 // the desk's conversation: writing, such as a first note
   const research = line => toChat(line, null, 'maps')   // the map's own: finding, checking and filling in companies
   const here = ' my market map “' + market.name + '”'
-  // How many more companies to ask Hermes for: five, or what the limits a person set on this map leave room for. At a
+  // How many more companies to ask the assistant for: five, or what the limits a person set on this map leave room for. At a
   // limit it says so and asks for nothing, so no research is paid for that the map would then refuse.
   const roomFor = () => {
     const room = market.room
     if (room && (room.stop || room.companies === 0)) {
-      host.notify({ kind: 'info', message: room.stop ? 'This map has used the budget set for Hermes\'s work this month. Raise it under Map facts to carry on.' : 'This map is at its limit of ' + plural(room.limit, mapSay.thing, mapSay.things) + '. Raise it under Map facts, or dismiss a ' + mapSay.thing + ' to make room.' })
+      host.notify({ kind: 'info', message: room.stop ? 'This map has used the budget set for the assistant\'s work this month. Raise it under Map facts to carry on.' : 'This map is at its limit of ' + plural(room.limit, mapSay.thing, mapSay.things) + '. Raise it under Map facts, or dismiss a ' + mapSay.thing + ' to make room.' })
       return ''
     }
     return ['one', 'two', 'three', 'four', 'five'][Math.min(5, room && room.companies !== null ? room.companies : 5) - 1]
@@ -5661,7 +5650,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
     }),
     dismiss: companies => send('dismiss', companies.filter(c => c.status !== 'tracked'), null, result => { setPicked([]); return (result.dismissed || []).length ? plural(result.dismissed.length, mapSay.thing, mapSay.things) + ' taken off the map. “Dismissed” above the map puts one back.' : 'Records already in the pipeline stay on the map.' }),
     // One person at each company, with a title like the buyers already named on this map: one lookup apiece, never more.
-    // With a key but no buyer named yet there is no title to look for, so Hermes works out who the buyer is instead.
+    // With a key but no buyer named yet there is no title to look for, so the assistant works out who the buyer is instead.
     buyers: companies => {
       const need = companies.filter(c => !c.buyer)
       if (!need.length) return null
@@ -5700,7 +5689,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
       nobody.length && !mapSay.people ? (market.lookups && (market.buyer_titles || []).length
         ? h(Btn, { key: 'buy', disabled: Boolean(busy), title: 'One People Data Labs lookup per company, for one person ranked manager or above with a title like the buyers already on this map (' + market.buyer_titles.slice(0, 3).join(', ') + '). Read the title before you use the name. One person is one credit, so this spends at most ' + plural(nobody.length, 'credit', 'credits') + ', inside your monthly cap.',
           onClick: () => act.buyers(companies) }, busy === 'buyers' ? 'Looking…' : (companies.length === 1 ? who.find[0] : who.find[1]) + ' · ' + plural(nobody.length, 'lookup', 'lookups'))
-        : h(Btn, { key: 'buy', title: market.lookups ? 'No buyer is named on this map yet, so there is no job title to look for. Hermes works out who the buyer is at each company.' : 'Hermes works out who the buyer is with its web search. A People Data Labs key (Setup) lets it look people up.',
+        : h(Btn, { key: 'buy', title: market.lookups ? 'No buyer is named on this map yet, so there is no job title to look for. The assistant works out who the buyer is at each company.' : 'The assistant works out who the buyer is with its web search. A People Data Labs key (Setup) lets it look people up.',
           onClick: () => act.buyers(companies) }, who.ask)) : null,
       h(Btn, { key: 'draft', onClick: () => act.draft(companies) }, 'Draft outreach'),
       h(Btn, { key: 'more', onClick: () => act.more(companies) }, companies.length === 1 ? 'More like this' : 'More like these'),
@@ -5721,7 +5710,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
       h('div', { className: 'stoa-sub' }, [c.domain, c.location].filter(Boolean).join(' · ')),
       h('div', { className: 'stoa-chips' }, status(c), c.signal ? h(Chip, { tone: 'warn', wrap: true }, c.signal) : null,
         c.signal ? h('span', { className: 'stoa-sub' }, agoWords(c.days) || 'no date on it') : null),
-      h('div', { className: 'stoa-mapscore' }, h('span', { className: 'stoa-eyebrow' }, c.weighed ? 'Fit, by your weights' : 'Fit, Hermes\'s judgement'), h('b', null, c.score), h(Fit, { value: squaresOf(c.score) })),
+      h('div', { className: 'stoa-mapscore' }, h('span', { className: 'stoa-eyebrow' }, c.weighed ? 'Fit, by your weights' : 'Fit, the assistant\'s judgement'), h('b', null, c.score), h(Fit, { value: squaresOf(c.score) })),
       c.why ? h('p', { style: { margin: '10px 0' } }, c.why) : null,
       h('div', { className: 'stoa-btns' }, c.status === 'tracked' && c.deal ? h(Btn, { kind: 'primary', onClick: () => openRecord(c.deal) }, 'Open the record') : null, actions([c])),
       (c.requirements || []).length ? [label('Against your brief'), c.requirements.map(req => h('div', { key: req.label, className: 'stoa-mapreq', 'data-on': req.shown ? '1' : '0' },
@@ -5786,7 +5775,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
           (markets || []).map(item => h(MenuItem, { key: item.id, on: item.id === market.id, title: item.name,
             sub: (shape === 'roles' ? item.counts.mapped + ' on the map' : plural(item.counts.mapped, 'company', 'companies')) + (shortDay(item.updated) ? ' · updated ' + shortDay(item.updated) : ''), onClick: () => onMarket(item.id) })),
           h('div', { className: 'stoa-menurule' }),
-          h(MenuItem, { title: '+  New map…', sub: shape === 'roles' ? 'Describe the role, and the candidates for it are found and mapped' : 'Tell Hermes what you sell and who to, and it maps the market', onClick: () => setMode('new') }),
+          h(MenuItem, { title: '+  New map…', sub: shape === 'roles' ? 'Describe the role, and the candidates for it are found and mapped' : 'Tell the assistant what you sell and who to, and it maps the market', onClick: () => setMode('new') }),
           h(MenuItem, { title: 'Rename this map…', onClick: () => { setDraft(market.name); setMode('rename') } }),
           rowsOf(market) ? h(MenuItem, { title: rowsOf(market) === 'people' ? 'Dots are candidates · change to companies' : 'Dots are companies · change to candidates',
             sub: rowsOf(market) === 'people' ? 'For a map of where the people work, with people named under each company' : 'For a map where every row is one person. Nothing on the map is changed, only how it is read',
@@ -5810,7 +5799,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
         h(Btn, { kind: 'quiet', onClick: () => setMode('') }, 'Cancel'))) : null,
     mode === 'delete' ? h('div', { className: 'stoa-box stoa-mapform', role: 'alertdialog', 'aria-label': 'Delete this map' },
       h('div', { className: 'stoa-name' }, 'Delete “' + market.name + '”?'),
-      h('p', { className: 'stoa-sub', style: { margin: '4px 0 0' } }, 'The map and the ' + plural(list.length + dismissed.length, mapSay.thing, mapSay.things) + ' on it go for good: this cannot be taken back from the page. '
+      h('p', { className: 'stoa-sub', style: { margin: '4px 0 0' } }, 'The map and the ' + plural(list.length + dismissed.length, mapSay.thing, mapSay.things) + ' on it go from the desk: this cannot be taken back from the page, but a copy is kept in the trash folder beside the desk. '
         + (market.numbers.in_pipeline ? 'The ' + plural(market.numbers.in_pipeline, 'record', 'records') + ' already in your pipeline ' + (market.numbers.in_pipeline === 1 ? 'stays' : 'stay') + ' there.' : 'Nothing in your pipeline is touched.')),
       h('div', { className: 'stoa-btns' }, h(Btn, { kind: 'danger', disabled: Boolean(busy), onClick: () => manage('remove', {}, result => result.name + ' was deleted, with ' + plural(result.companies, mapSay.thing, mapSay.things) + '.') }, busy === 'remove' ? 'Deleting…' : 'Delete the map'),
         h(Btn, { autoFocus: true, onClick: () => setMode('') }, 'Keep it'))) : null,
@@ -5843,7 +5832,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
       h('div', { className: 'stoa-mapb' },
         h('div', { className: 'stoa-mapcols' },
           h('div', null, label('What matters'),
-            h('p', { className: 'stoa-sub stoa-mapnote' }, weighed ? 'Fit is worked out from your weights, for every company Hermes checked against the brief.' : 'Fit is Hermes\'s judgement. Change how much a requirement counts and the map re-scores itself.'),
+            h('p', { className: 'stoa-sub stoa-mapnote' }, weighed ? 'Fit is worked out from your weights, for every company the assistant checked against the brief.' : 'Fit is the assistant\'s judgement. Change how much a requirement counts and the map re-scores itself.'),
             (market.rates || []).map(rate => { const weight = weights[rate.label] === undefined ? 2 : weights[rate.label]
               return h('div', { key: rate.label, className: 'stoa-mapweight' },
                 h('div', { className: 'stoa-mapwlabel' }, rate.label),
@@ -5852,10 +5841,10 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
                     h('button', { type: 'button', key: word, className: 'stoa-tab', style: { height: 22, padding: '0 7px', fontSize: 10 }, 'data-on': weight === index ? '1' : '0', 'aria-pressed': weight === index,
                       onClick: () => setWeights({ ...weights, [rate.label]: index }) }, word))),
                   facetBtn('req', rate.label, 'Shows: ' + rate.label, rate.rate + '%', rate.rate, '', rate.of ? rate.shown + ' of ' + rate.of + ' show it' : 'not checked yet'))) }),
-            weighed ? h('div', { className: 'stoa-btns', style: { marginTop: 10 } }, h(Btn, { onClick: () => setWeights({}) }, 'Back to Hermes\'s judgement')) : null,
+            weighed ? h('div', { className: 'stoa-btns', style: { marginTop: 10 } }, h(Btn, { onClick: () => setWeights({}) }, 'Back to the assistant\'s judgement')) : null,
             h('form', { className: 'stoa-pathrow', style: { marginTop: 12 }, onSubmit: event => { event.preventDefault(); if (wanted.trim() && act.require(wanted.trim())) setWanted('') } },
               h('input', { className: 'stoa-field', style: { fontFamily: 'inherit' }, value: wanted, placeholder: 'A new requirement, in your words', 'aria-label': 'A new requirement', onChange: event => setWanted(event.target.value) }),
-              h(Btn, { type: 'submit', disabled: !wanted.trim(), title: 'Hermes adds the requirement and checks every company on the map against it' }, 'Ask Hermes'))),
+              h(Btn, { type: 'submit', disabled: !wanted.trim(), title: 'The assistant adds the requirement and checks every company on the map against it' }, 'Ask the assistant'))),
           h('div', null, label('Who holds this market'),
             (market.holds || []).length ? [h('p', { key: 'p', className: 'stoa-sub stoa-mapnote' }, 'What the ' + market.holds_of + ' companies we could place use today, and how many use each. Press one to light it up on the map.'),
               market.holds.map(hold => facetBtn('uses', hold.name, 'Uses: ' + hold.name, hold.share + '%', hold.share, hold.name, String(hold.count)))] : h('p', { className: 'stoa-sub stoa-mapnote' }, 'Nothing recorded yet about what these companies use today.')),
@@ -5863,7 +5852,7 @@ function MarketMap({ market, markets, onMarket, shape, openRecord }) {
             MAP_BANDS.some(name => list.some(c => c.band === name)) ? [h('p', { key: 'p', className: 'stoa-sub stoa-mapnote' }, 'Share of companies by the people who work there, how many that is, and their average fit. Press one to light it up on the map.'),
               MAP_BANDS.map(name => { const group = list.filter(c => c.band === name); if (!group.length) return null
                 return facetBtn('size', name, name + ' people', Math.round(100 * group.length / list.length) + '%', Math.round(100 * group.length / list.length), name + ' people', group.length + ' · fit ' + Math.round(group.reduce((sum, c) => sum + c.score, 0) / group.length)) })]
-              : h('p', { className: 'stoa-sub stoa-mapnote' }, 'No headcounts recorded yet. Ask Hermes to add each company\'s size.'))),
+              : h('p', { className: 'stoa-sub stoa-mapnote' }, 'No headcounts recorded yet. Ask the assistant to add each company\'s size.'))),
         h('div', { className: 'stoa-sechead', style: { padding: '0 0 6px', marginTop: 22 } }, h('span', { className: 'stoa-eyebrow' }, 'The ' + (mapSay.things || 'companies')), h('span', { className: 'stoa-sub' }, showing.length + ' of ' + list.length + ' showing')),
         h('div', { className: 'stoa-maptablewrap' }, h('table', { className: 'stoa-maptable' },
           h('colgroup', null, h('col', { style: { width: 36 } }), cols.map(col => h('col', { key: col[0], style: col[2] ? { width: col[2] } : undefined }))),
@@ -5932,8 +5921,8 @@ function Market({ market, sessionId, compact }) {
 
 // -- reports ----------------------------------------------------------------------------------------
 // Every figure on this tab is counted by the plugin from the desk's own records (/reports): nothing here asks a
-// model for a number. Hermes comes into it only on a press: "Ask for a report" and "Change it in words" (it saves
-// one from your words, as a draft you keep or discard) and "Ask Hermes about it".
+// model for a number. The assistant comes into it only on a press: "Ask for a report" and "Change it in words" (it saves
+// one from your words, as a draft you keep or discard) and "Ask the assistant about it".
 const $rep = atom({ period: '90', compare: true, list: false, open: '', making: false })
 const setRep = patch => {
   const next = { ...$rep.get(), ...patch }
@@ -6159,7 +6148,7 @@ function ReportOpen({ id, state, choices, back, openRecord }) {
     const sent = toChat(result.custom
       ? 'Change the Stoa report "' + result.title + '" like this: "' + text + '". Use gtm_report with action "save" and `replaces` set to "' + result.id + '", then tell me in a line what changed.'
       : 'Make a Stoa report like "' + result.title + '" but: "' + text + '". Use gtm_report with action "save" (a short title, and my words as `asked`), then tell me in a line what it shows.')
-    if (sent) { setWords(''); host.notify({ kind: 'info', message: 'Hermes is on it. What it makes shows up here as a draft for you to keep or discard.' }) }
+    if (sent) { setWords(''); host.notify({ kind: 'info', message: 'The assistant is on it. What it makes shows up here as a draft for you to keep or discard.' }) }
   }
   const views = [['bars', 'Bars'], ['table', 'Table']].concat(result.over && result.over.length > 1 ? [['time', 'Over time']] : [])
   const table = () => h('div', { className: 'stoa-repscroll' }, h('table', { className: 'stoa-reptable' },
@@ -6169,7 +6158,7 @@ function ReportOpen({ id, state, choices, back, openRecord }) {
   return h('div', { className: 'stoa-rep' },
     h(BackRow, { back, label: 'Reports' }),
     result.draft ? h('div', { className: 'stoa-repdraft', role: 'status' },
-      h('span', null, h('b', null, result.replaces ? 'Hermes made a new version of a report.' : 'Hermes made this report.'),
+      h('span', null, h('b', null, result.replaces ? 'The assistant made a new version of a report.' : 'The assistant made this report.'),
         result.asked ? ' You asked: “' + result.asked + '”.' : '', ' It is a draft until you keep it.'),
       h('div', null, h(Btn, { kind: 'go', disabled: busy, onClick: () => run({ verb: 'keep' }, out => setRep({ open: (out && out.id) || result.id })) }, result.replaces ? 'Keep it in place of the old one' : 'Keep it'),
         h(Btn, { disabled: busy, onClick: () => run({ verb: 'discard' }, back) }, 'Discard'))) : null,
@@ -6177,7 +6166,7 @@ function ReportOpen({ id, state, choices, back, openRecord }) {
       h('div', { style: { minWidth: 0 } }, h('div', { className: 'stoa-eyebrow' }, 'Report'), h('h2', null, result.title), h('p', null, result.line),
         h('div', { style: { display: 'flex', gap: 12, marginTop: 6, flexWrap: 'wrap' } },
           result.pinned ? h(Chip, { tone: 'good' }, 'on the dashboard') : null, result.custom && !result.draft ? h(Chip, null, 'made here') : null,
-          result.draft ? h(Chip, { tone: 'warn' }, 'draft from Hermes') : null)),
+          result.draft ? h(Chip, { tone: 'warn' }, 'draft from the assistant') : null)),
       h('div', null,
         result.period ? h('select', { className: 'stoa-select', 'aria-label': 'Period', value: rep.period, onChange: event => setRep({ period: event.target.value }) },
           choices.periods.map(option => h('option', { key: option[0], value: option[0] }, option[1]))) : null,
@@ -6213,11 +6202,11 @@ function ReportOpen({ id, state, choices, back, openRecord }) {
             h('textarea', { className: 'stoa-field', style: { height: 'auto', padding: '7px 8px', fontFamily: 'var(--stoa-mono)', lineHeight: 1.5, resize: 'vertical' }, rows: 3, value: words,
               'aria-label': result.custom ? 'How to change this report' : 'What the new report should show', placeholder: 'Split it by owner. Or: only ' + pb.terms.deals + ' over 50k.', onChange: event => setWords(event.target.value) }),
             h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', justifyContent: 'space-between', marginTop: 8 } },
-              h('span', { className: 'stoa-sub', style: { flex: '1 1 160px' } }, 'This one goes to Hermes. What it makes waits here as a draft: you keep it or discard it.'),
+              h('span', { className: 'stoa-sub', style: { flex: '1 1 160px' } }, 'This one goes to the assistant. What it makes waits here as a draft: you keep it or discard it.'),
               h(Btn, { type: 'submit', disabled: !words.trim() }, result.custom ? 'Change' : 'Make it')))),
         h(Section, { title: 'More' },
           h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 8 } },
-            h(Btn, { onClick: askAbout, title: 'Sends these figures to Hermes, in the talk box below' }, 'Ask Hermes about it'),
+            h(Btn, { onClick: askAbout, title: 'Sends these figures to the assistant, in the talk box below' }, 'Ask the assistant about it'),
             result.custom && !result.draft && !removing ? h(Btn, { disabled: busy, onClick: () => setRemoving(true) }, 'Remove this report') : null,
             removing ? h(Btn, { disabled: busy, onClick: () => run({ verb: 'remove' }, back) }, 'Yes, remove it') : null,
             removing ? h(Btn, { kind: 'quiet', onClick: () => setRemoving(false) }, 'Keep it') : null),
@@ -6230,7 +6219,7 @@ function Reports({ state, openRecord }) {
   const [busy, setBusy] = useState(false)
   const [ask, setAsk] = useState('')
   const data = query.data
-  // A draft that was not there a moment ago (Hermes has just made it) is the one to show.
+  // A draft that was not there a moment ago (The assistant has just made it) is the one to show.
   const draftIds = data ? data.reports.filter(item => item.draft).map(item => item.id).join('|') : null
   const known = useRef(null)
   useEffect(() => {
@@ -6243,7 +6232,7 @@ function Reports({ state, openRecord }) {
   const pipe = state.pipeline || ''
   const lastPipe = useRef(pipe)
   useEffect(() => { if (lastPipe.current !== pipe) { lastPipe.current = pipe; setRep({ open: '', making: false }) } }, [pipe])
-  if (!data) return h('div', { className: 'stoa-rep' }, h('p', { className: 'stoa-sub' }, query.error ? 'The reports could not be loaded. Restart Hermes if you have just updated Stoa.' : 'Working them out…'))
+  if (!data) return h('div', { className: 'stoa-rep' }, h('p', { className: 'stoa-sub' }, query.error ? 'The reports could not be loaded. Restart the assistant if you have just updated Stoa.' : 'Working them out…'))
   if (rep.open && data.reports.some(item => item.id === rep.open)) {
     return h(ReportOpen, { key: rep.open, id: rep.open, state, choices: data.choices, back: () => setRep({ open: '' }), openRecord })
   }
@@ -6268,7 +6257,7 @@ function Reports({ state, openRecord }) {
     const text = ask.trim()
     if (!text) return
     const sent = toChat('Make a report on the Stoa desk for this: "' + text + '". Use gtm_report with action "save" (give it a short title, and pass my words as `asked`), then tell me in a line what it shows.')
-    if (sent) { setAsk(''); host.notify({ kind: 'info', message: 'Hermes is on it. The report shows up here as a draft for you to keep or discard.' }) }
+    if (sent) { setAsk(''); host.notify({ kind: 'info', message: 'The assistant is on it. The report shows up here as a draft for you to keep or discard.' }) }
   }
   const hints = ['Value of open ' + pb.terms.deals + ' by owner', 'Lost ' + pb.terms.deals + ' by stage', 'New ' + pb.terms.deals + ' each month, and how they ended']
   return h('div', { className: 'stoa-rep' },
@@ -6284,7 +6273,7 @@ function Reports({ state, openRecord }) {
         h(Btn, { onClick: savePage, title: 'The dashboard as one web page: figures only, no ' + pb.terms.deal + ' is named' }, 'Download'),
         h(Btn, { onClick: () => setRep({ making: !rep.making }) }, '+  New report'))),
     drafts.length ? h('div', { className: 'stoa-repdraft', role: 'status' },
-      h('span', null, h('b', null, drafts.length === 1 ? 'Hermes made a report: ' + drafts[0].title + '.' : 'Hermes made ' + drafts.length + ' reports.'), ' A draft until you keep it.'),
+      h('span', null, h('b', null, drafts.length === 1 ? 'The assistant made a report: ' + drafts[0].title + '.' : 'The assistant made ' + drafts.length + ' reports.'), ' A draft until you keep it.'),
       h('div', null, drafts.slice(0, 3).map(item => h(Btn, { key: item.id, kind: 'go', onClick: () => open(item.id) }, drafts.length === 1 ? 'Look at it' : item.title)))) : null,
     rep.making ? h('section', { className: 'stoa-box', style: { marginBottom: 14 } },
       h('div', { className: 'stoa-rephead', style: { marginBottom: 10 } }, h('h3', { className: 'stoa-eyebrow' }, 'A new report'),
@@ -6294,7 +6283,7 @@ function Reports({ state, openRecord }) {
       ? h('div', { className: 'stoa-replist' }, data.reports.map(item => h('div', { key: item.id, className: 'stoa-repitem' },
         h('div', null, h('button', { type: 'button', className: 'stoa-proplink stoa-name', onClick: () => open(item.id) }, item.title), h('span', { className: 'stoa-sub' }, item.line)),
         h('div', null,
-          item.draft ? h(Chip, { tone: 'warn' }, 'draft from Hermes') : item.custom ? h(Chip, null, 'made here') : null,
+          item.draft ? h(Chip, { tone: 'warn' }, 'draft from the assistant') : item.custom ? h(Chip, null, 'made here') : null,
           item.draft ? null : h(Btn, { kind: 'quiet', onClick: () => repAct(item.id, { verb: item.pinned ? 'unpin' : 'pin' }) }, item.pinned ? 'Take off the dashboard' : 'Put on the dashboard'),
           item.pinned && !item.draft ? h(Btn, { kind: 'quiet', title: 'Move it earlier on the dashboard', 'aria-label': 'Move ' + item.title + ' earlier', onClick: () => repAct(item.id, { verb: 'up' }) }, '↑') : null,
           item.pinned && !item.draft ? h(Btn, { kind: 'quiet', title: 'Move it later on the dashboard', 'aria-label': 'Move ' + item.title + ' later', onClick: () => repAct(item.id, { verb: 'down' }) }, '↓') : null,
@@ -6308,7 +6297,7 @@ function Reports({ state, openRecord }) {
         h('input', { id: 'stoa-repask', className: 'stoa-field', value: ask, placeholder: 'Win rate by owner this quarter', onChange: event => setAsk(event.target.value) }),
         h(Btn, { type: 'submit', disabled: !ask.trim() }, 'Make it')),
       h('div', { className: 'stoa-repchips' }, hints.map(text => h(Btn, { key: text, onClick: () => setAsk(text) }, text))),
-      h('p', { className: 'stoa-sub', style: { margin: 0, maxWidth: '76ch' } }, 'Hermes turns the words into a saved report, once, and it waits as a draft for you to keep. After that Stoa works it out from your desk each time you open it: no model call, nothing sent anywhere.')))
+      h('p', { className: 'stoa-sub', style: { margin: 0, maxWidth: '76ch' } }, 'The assistant turns the words into a saved report, once, and it waits as a draft for you to keep. After that Stoa works it out from your desk each time you open it: no model call, nothing sent anywhere.')))
 }
 
 // -- the database: every account, deal and person on the desk, to look through ------------------------
@@ -6930,7 +6919,7 @@ function Page() {
   // A desk whose records are never billed has no Cash tab: if that was the last one shown, show Today.
   const cashShown = Boolean(query.data && query.data.playbook && (query.data.playbook.billing !== 'none' || hasClientMoney(query.data)))
   useEffect(() => { if (tab === 'cash' && query.data && !cashShown) $tab.set('today') }, [tab, cashShown, Boolean(query.data)])
-  // A map that was not there a moment ago (Hermes has just saved it) is the one to show.
+  // A map that was not there a moment ago (The assistant has just saved it) is the one to show.
   const mapIds = query.data ? query.data.markets.map(item => item.id).join('|') : null
   const knownMaps = useRef(null)
   useEffect(() => {
@@ -6999,7 +6988,7 @@ function Page() {
     onDragLeave: event => { if (!event.currentTarget.contains(event.relatedTarget)) setDropping(false) },
     onDrop: async event => { if (!carrying(event)) return; event.preventDefault(); setDropping(false); for (const one of [...event.dataTransfer.files]) await takeFile(one) } },
   h(Style),
-  dropping ? h('div', { className: 'stoa-dropnote' }, 'Drop it on the desk: a CSV becomes a review to approve, anything else goes to Hermes with your next message') : null,
+  dropping ? h('div', { className: 'stoa-dropnote' }, 'Drop it on the desk: a CSV becomes a review to approve, anything else goes to the assistant with your next message') : null,
   h('div', { className: 'stoa-wrap' },
     state.tour ? h('div', { className: 'stoa-tour', role: 'status' },
       h('span', null, h('b', null, 'Sample data'), ' · ' + state.tour.title + '. Everyone on it is made up, and your own desk is untouched.'),
@@ -7121,15 +7110,15 @@ function TodayInChat({ attrs, sessionId }) {
   const snooze = deal => h(Snooze, { key: 'snooze', deal, busy: busy === deal.id, run: body => run(deal.id, body) })
   const moves = {
     overdue: deal => [h(Btn, { key: 'done', kind: 'go', title: 'Log it as done and say what comes next', onClick: () => setForm({ id: deal.id, mode: 'done' }) }, '✓  Done'),
-      h(Btn, { key: 'draft', title: 'Hermes drafts what this step needs', onClick: () => draftFor(deal, false, here, pipe, where) }, 'Draft it'), snooze(deal)],
+      h(Btn, { key: 'draft', title: 'The assistant drafts what this step needs', onClick: () => draftFor(deal, false, here, pipe, where) }, 'Draft it'), snooze(deal)],
     drafts: deal => [h(Btn, { key: 'write', kind: 'go', onClick: () => toChat('Do the writing task waiting on ' + deal.name + ' on the Stoa desk' + where + ' (record ' + deal.id + ').', here) }, 'Write it now')],
     invoices_overdue: (deal, row) => [
       h(Btn, { key: 'paid', kind: 'go', title: 'Everything still owed came in', onClick: () => bill(deal.id, { verb: 'pay', invoice: String(row.invoice) }, pipe) }, 'Paid'),
-      h(Btn, { key: 'remind', title: 'Hermes drafts a payment reminder', onClick: () => toChat('On the Stoa desk' + where + ', ' + deal.name + ' (record ' + deal.id + ') has an invoice'
+      h(Btn, { key: 'remind', title: 'The assistant drafts a payment reminder', onClick: () => toChat('On the Stoa desk' + where + ', ' + deal.name + ' (record ' + deal.id + ') has an invoice'
         + (row.number ? ' #' + row.number : '') + ' with ' + exact(row.owed, pb.currency) + ' still owed, ' + row.days + ' days past due. Draft a short, polite payment reminder and show me.', here) }, 'Draft a reminder'),
       snooze(deal)],
     to_invoice: deal => [h(Btn, { key: 'open', kind: 'go', title: 'Open the record: its invoices are at the foot', onClick: () => setOpenId(deal.id) }, 'Add invoice'), snooze(deal)],
-    quiet: deal => [h(Btn, { key: 'draft', kind: 'go', title: 'Hermes drafts a follow-up from the record and its log', onClick: () => draftFor(deal, true, here, pipe, where) }, 'Draft a nudge'), snooze(deal)],
+    quiet: deal => [h(Btn, { key: 'draft', kind: 'go', title: 'The assistant drafts a follow-up from the record and its log', onClick: () => draftFor(deal, true, here, pipe, where) }, 'Draft a nudge'), snooze(deal)],
     new: deal => [h(Btn, { key: 'plan', kind: 'go', onClick: () => setForm({ id: deal.id, mode: 'plan' }) }, 'Plan the next step')],
     unplanned: (deal, row) => [h(Btn, { key: 'plan', kind: 'go', onClick: () => setForm({ id: deal.id, mode: 'plan' }) }, 'Plan the ' + (row.delivery || 'next').toLowerCase() + ' step')]
   }
@@ -7177,7 +7166,7 @@ function TodayInChat({ attrs, sessionId }) {
 }
 
 // One report in a chat: its chart, worked out from the desk each time it is drawn, the records behind a bar, and Keep or
-// Discard while it is a draft Hermes made.
+// Discard while it is a draft the assistant made.
 const CHAT_PERIODS = [['30', 'Last 30 days'], ['90', 'Last 90 days'], ['quarter', 'This quarter'], ['year', 'This year'], ['all', 'All time']]
 
 function ReportInChat({ attrs, sessionId }) {
@@ -7229,7 +7218,7 @@ function ReportInChat({ attrs, sessionId }) {
       result.period ? h('select', { className: 'stoa-select', 'aria-label': 'Period', value: period, onChange: event => { setPeriod(event.target.value); setSel('') } },
         CHAT_PERIODS.map(item => h('option', { key: item[0], value: item[0] }, item[1]))) : null),
     result.draft ? h('div', { className: 'stoa-repdraft', role: 'status', style: { marginBottom: 10 } },
-      h('span', null, h('b', null, result.replaces ? 'Hermes made a new version of a report.' : 'Hermes made this report.'), ' It is a draft until you keep it.'),
+      h('span', null, h('b', null, result.replaces ? 'The assistant made a new version of a report.' : 'The assistant made this report.'), ' It is a draft until you keep it.'),
       h('div', null,
         h(Btn, { kind: 'go', disabled: busy, onClick: () => press('keep') }, result.replaces ? 'Keep it in place of the old one' : 'Keep it'),
         h(Btn, { disabled: busy, onClick: () => press('discard') }, 'Discard'))) : null,
@@ -7250,7 +7239,7 @@ function ReportInChat({ attrs, sessionId }) {
     h('div', { className: 'stoa-chatfoot' },
       h('span', { className: 'stoa-sub' }, (result.rows || []).some(item => (item.records || []).length) && !picked ? 'Press a bar\'s name to see what is behind it.' : ''),
       h('span', { className: 'stoa-btns', style: { margin: 0 } },
-        h(Btn, { kind: 'quiet', title: 'Sends these figures to Hermes in this chat', onClick: () => toChat('Read the Stoa report "' + result.title + '" with gtm_report (action "read", report "'
+        h(Btn, { kind: 'quiet', title: 'Sends these figures to the assistant in this chat', onClick: () => toChat('Read the Stoa report "' + result.title + '" with gtm_report (action "read", report "'
           + result.id + '", period "' + period + '"' + (name ? ', pipeline "' + name + '"' : '') + ') and tell me what stands out and what you would do about it.', here) }, 'Ask about it'),
         h(Btn, { kind: 'quiet', onClick: () => { setRep({ open: result.id, list: false, making: false, period }); openDesk('reports', pipe) } }, 'Open on the desk  ›'))))
 }
@@ -7321,7 +7310,7 @@ export default {
       if (mine(event)) setTurn(last => ({ note: 'Working on the desk…', reply: last.reply && !last.reply.endsWith('\n') ? last.reply + '\n\n' : last.reply }))
     })
     // A model that will not take the thinking level picked for a conversation refuses every turn in it, and what
-    // Hermes then says points at commands the talk box does not run. The box adds the way out that is on this page.
+    // the assistant then says points at commands the talk box does not run. The box adds the way out that is on this page.
     const wayOut = text => {
       const pick = $model.get()[talking.lane]
       return pick && pick.effort && /reasoning[ _]effort|thinking (level|budget)|reasoning\.effort/i.test(String(text || ''))
@@ -7341,7 +7330,7 @@ export default {
     ctx.onEvent('error', event => {
       if (!mine(event)) return
       const payload = (event && event.payload) || {}
-      const said = String(payload.message || payload.error || 'Hermes could not answer that.')
+      const said = String(payload.message || payload.error || 'The assistant could not answer that.')
       setTurn({ note: '', error: said, hint: wayOut(said) })
       setTalk({ busy: false })
     })

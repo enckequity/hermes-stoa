@@ -1,7 +1,7 @@
 """Outside data: People Data Labs enrichment and meeting notes (notes folders, Granola, Fireflies).
 
 Standard library only. Nothing here reads a credential: callers pass the key they got from
-Hermes's secret scope. Every network call in the plugin goes through ``http_json`` below, to
+The assistant's secret scope. Every network call in the plugin goes through ``http_json`` below, to
 exactly four hosts: api.peopledatalabs.com, public-api.granola.ai, api.fireflies.ai and api.exa.ai.
 """
 from __future__ import annotations
@@ -25,7 +25,7 @@ EXA = "https://api.exa.ai"
 GRANOLA = "https://public-api.granola.ai/v1"
 FIREFLIES = "https://api.fireflies.ai/graphql"
 # What a notes folder may hold. Stoa reads the first group itself. A PDF it cannot read with the standard library, so
-# it is listed and handed to Hermes, which reads it with its own tools. A recording is only counted, so the person
+# it is listed and handed to the assistant, which reads it with its own tools. A recording is only counted, so the person
 # can be told the folder holds audio and no words yet.
 NOTE_SUFFIXES = (".md", ".markdown", ".txt", ".docx", ".srt", ".vtt", ".html", ".htm", ".rtf")
 NOTE_HANDED = (".pdf",)
@@ -288,7 +288,7 @@ def count_notes(folder: Path) -> tuple:
 
 
 def folder_census(folder: Path) -> dict:
-    """What a folder holds, without opening anything: notes Stoa reads, files handed to Hermes (PDFs), recordings
+    """What a folder holds, without opening anything: notes Stoa reads, files handed to the assistant (PDFs), recordings
     with no words, the kinds of note found, and the newest note's date."""
     kinds: dict = {}
     notes = handed = audio = 0

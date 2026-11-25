@@ -3,8 +3,8 @@ version: 0.28.3
 manifest_version: 2
 api_version: 1
 description: >-
-  The CRM for Hermes Agent, a lightweight one you talk to: map a market, find the leads, run the
-  pipeline and see it through to cash. Hermes runs it and you approve: what it finds waits for
+  The CRM for the assistant, a lightweight one you talk to: map a market, find the leads, run the
+  pipeline and see it through to cash. The assistant runs it and you approve: what it finds waits for
   your yes or no, every change is on a ledger and can be taken back. A page and a live pane in the
   Desktop app and Webapp, Slack cards with buttons, and playbooks that fit it to any business.
 author: jarrett-del
@@ -44,7 +44,7 @@ config_schema:
     type: list
     default: []
     label: Limit to these chats
-    description: "Chat ids (for example Slack channel ids) where the desk is available. Empty means everywhere. Terminal and Desktop sessions are always allowed; add the word cron to let scheduled jobs use it too."
+    description: "Chat ids (for example Slack channel ids) where the desk is available. Empty means no chat: only terminal, Desktop and dashboard sessions, which are always allowed; add the word cron to let scheduled jobs use it too."
   slack_users:
     type: list
     default: []
@@ -64,7 +64,7 @@ config_schema:
     type: str
     default: ""
     label: Note connections
-    description: "Optional. The names of connectors Hermes already has that hold call notes (for example: plaud), with commas between. Hermes then looks there on a notes sweep, with that connector's own tools."
+    description: "Optional. The names of connectors the assistant already has that hold call notes (for example: plaud), with commas between. The assistant then looks there on a notes sweep, with that connector's own tools."
   notes_days:
     type: int
     default: 7
@@ -74,7 +74,7 @@ config_schema:
     type: int
     default: 7
     label: Keep dropped files for (days)
-    description: "A file dropped in the Stoa talk box is copied by Hermes into its own attachments folder. Stoa removes that copy after this many days. 0 keeps it until you remove it under Setup."
+    description: "A file dropped in the Stoa talk box is copied by the assistant into its own attachments folder. Stoa removes that copy after this many days. 0 keeps it until you remove it under Setup."
   pdl_monthly_cap:
     type: int
     default: 50

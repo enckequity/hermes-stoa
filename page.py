@@ -313,7 +313,7 @@ def render(summary: dict, terms: dict, share: bool = False) -> str:
                                                              ("Company", "Why it fits", "Size and place", "Signal" + ("" if share else " and buyers")))
                       + ("".join(rows),)))
 
-    out.append("<footer>Compiled with Stoa for Hermes Agent%s from public sources. Fit is a judgement against the brief above, "
+    out.append("<footer>Compiled%s from public sources. Fit is a judgement against the brief above, "
                "and each row carries the evidence for it. This is a picture of %s, not a census of it; nobody on it was "
                "contacted to make it.</footer></body></html>" % (" on " + esc(date) if date else "", "who could fill a role" if people else "a market"))
     return "".join(out)

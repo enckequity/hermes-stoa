@@ -3,7 +3,7 @@
 Every figure here is counted by the plugin from the desk's database. No model is called to make one and nothing is
 sent anywhere, so a report costs nothing to open and reads the same every time. A report is a small description
 (what is counted, grouped by what, over which records) and the arithmetic below. Nine come with the desk; a person
-on the page, or Hermes when asked in words, can add more from the same few choices. One that Hermes makes waits as
+on the page, or the assistant when asked in words, can add more from the same few choices. One that the assistant makes waits as
 a draft until the person keeps it.
 
 Reports belong to a pipeline: its stages are what most of them are measured against.
@@ -39,7 +39,7 @@ BUILT_IN = (
     {"id": "lost", "kind": "groups", "title": "Why we lost",
      "spec": {"count": "records", "by": "reason", "when": "closed", "split": "none", "only": {"status": "lost"}}},
     {"id": "map", "kind": "map", "title": "What the map turned into"},
-    {"id": "hermes", "kind": "hermes", "title": "What Hermes did"},
+    {"id": "hermes", "kind": "hermes", "title": "What the assistant did"},
     {"id": "owners", "kind": "groups", "title": "Who holds what", "unpinned": True,
      "spec": {"count": "value", "by": "owner", "when": "open", "split": "none", "only": {}}},
     {"id": "months", "kind": "groups", "title": "New {deals} by month", "unpinned": True,
@@ -681,7 +681,7 @@ class Reports:
         if self.desk.sum(won):
             figures.append({"text": self._money(playbook, self.desk.sum(won)), "label": "%s from the map" % playbook.won["label"].lower()})
         if priced:
-            figures.append({"text": "$%.2f" % (cost / 1_000_000), "label": "Hermes's research, estimated"})
+            figures.append({"text": "$%.2f" % (cost / 1_000_000), "label": "The assistant's research, estimated"})
         if lookups:
             figures.append({"text": str(lookups), "label": "paid lookups"})
         point, rest = "", ""
@@ -700,7 +700,7 @@ class Reports:
                 "line": "companies on %s · how many became %s, and how far those got" % ("the map" if len(maps) == 1 else "%d maps" % len(maps), playbook.terms["deals"]),
                 "made": [["Counts", "Companies on every map of this pipeline, not the dismissed ones"],
                          ["Then", "The ones put in the pipeline, how far each got, and which were %s" % playbook.won["label"].lower()],
-                         ["Cost", "What Hermes estimates its own work on the maps cost, as on Map facts. Not an invoice"], ["Which", "All time"]],
+                         ["Cost", "What the assistant estimates its own work on the maps cost, as on Map facts. Not an invoice"], ["Which", "All time"]],
                 "total": {"count": mapped, "value": self.desk.sum(won)}, "squares": mapped <= 60, "period": None, "before": None, "says": [point, rest],
                 **({} if maps else {"empty": "No market map yet. Make one on the Market map tab."})}
 
@@ -740,7 +740,7 @@ class Reports:
         notes = self.store.notes_between(start, end)
         filed = len([note for note in notes if note["deal_id"]])
         actions = self.store.actions_between(start, end)
-        alone = sum(count for actor, count in actions["by"].items() if actor.startswith("Hermes (scheduled)"))
+        alone = sum(count for actor, count in actions["by"].items() if actor.startswith(("Assistant (scheduled)", "Hermes (scheduled)")))
         figures = [{"text": str(proposed), "label": "changes proposed"}, {"text": str(approved), "label": "approved by you"},
                    {"text": str(declined), "label": "declined", "tone": "mute"}, {"text": str(waiting), "label": "waiting for you", "tone": "warn" if waiting else ""},
                    {"text": str(filed), "label": "call notes filed"}]
@@ -754,19 +754,19 @@ class Reports:
             plural = {"new record": "new records", "stage move": "stage moves", "person": "people to add", "invoice": "invoices",
                       "next step": "next steps", "update": "updates"}[kind]
             point = ("The one you declined was a %s." % kind) if declined == 1 else "%d of the %d you declined were %s." % (count, declined, plural)
-            rest = "What Hermes may do unasked is under Setup."
+            rest = "What the assistant may do unasked is under Setup."
         elif approved:
-            point = "You approved everything Hermes proposed that you have decided."
+            point = "You approved everything the assistant proposed that you have decided."
             rest = "%d still waiting on Today." % waiting if waiting else ""
         elif waiting:
             point = "%s waiting for you on Today." % _count(waiting, "proposal is", "proposals are")
         elif not filed and not alone:
-            point = "Hermes proposed nothing in %s." % win["words"]
+            point = "The assistant proposed nothing in %s." % win["words"]
             rest = "It proposes from scheduled jobs: switch them on under Setup."
         return {"draw": "figures", "unit": "records", "rows": [], "legend": [], "figures": figures,
                 "strip": [{"k": "approved", "n": approved, "label": "approved"}, {"k": "declined", "n": declined, "label": "declined"},
                           {"k": "waiting", "n": waiting, "label": "waiting"}],
-                "line": "what Hermes proposed in %s, and what you did with it" % win["words"],
+                "line": "what the assistant proposed in %s, and what you did with it" % win["words"],
                 "made": [["Proposed", "Changes a scheduled job held for your approval, one for each row"],
                          ["Approved, declined", "What you pressed on Today or in Slack"],
                          ["Call notes filed", "Notes from your folders, keys and connections that were put on a record"],
@@ -815,11 +815,11 @@ class Reports:
         deals = self.desk.playbook().terms["deals"]
         return {"stages": "open %s · by stage · now" % deals, "winrate": "the share of closed %s that were won" % deals,
                 "time": "how long open %s have sat in each stage, against its quiet mark" % deals,
-                "map": "what the companies on your maps became", "hermes": "what Hermes proposed, and what you did with it"}[entry["kind"]]
+                "map": "what the companies on your maps became", "hermes": "what the assistant proposed, and what you did with it"}[entry["kind"]]
 
     # -- making, changing and removing --------------------------------------------------------------
     def save(self, args: dict, by: str = "", draft: bool = False) -> dict:
-        """Make a report from the choices, or change one made here. ``draft`` (a report Hermes made) leaves it
+        """Make a report from the choices, or change one made here. ``draft`` (a report the assistant made) leaves it
         waiting for the person to keep; with ``replaces`` it is a new version of that report, not a second one."""
         spec, error = self.clean(args.get("spec") if isinstance(args.get("spec"), dict) else args)
         if error:
@@ -888,10 +888,10 @@ class Reports:
         self._write(saved)
         return {"ok": True, "id": entry["id"]}
 
-    # -- for Hermes ---------------------------------------------------------------------------------
+    # -- for the assistant ---------------------------------------------------------------------------------
     @staticmethod
     def brief(result: dict) -> dict:
-        """A worked-out report as Hermes is handed it: the figures and the sentence, without the list of records."""
+        """A worked-out report as the assistant is handed it: the figures and the sentence, without the list of records."""
         out = {key: result[key] for key in ("id", "title", "line", "says", "figure", "figures", "strip", "months", "empty") if result.get(key)}
         out["says"] = " ".join(part for part in result.get("says") or [] if part)
         out["rows"] = [dict({"label": row["label"], "n": row["n"]}, **{key: row[key] for key in ("count", "value", "mark", "quiet", "left", "before") if row.get(key) not in (None, 0, [], {})},
@@ -1013,6 +1013,6 @@ class Reports:
                  ".none{color:#5b6370}footer{margin-top:22px;color:#5b6370;font-size:12px}@media print{body{background:#fff;padding:0}section{border-color:#bbb}}")
         return ("<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
                 "<title>%s</title><style>%s</style></head><body><main><header><h1>%s</h1><p>%s · %s</p></header>%s"
-                "<footer>Counted by Stoa from the desk's own records on %s. Nothing on this page asks anything of the network.</footer></main></body></html>\n"
+                "<footer>Counted from the desk's own records on %s. Nothing on this page asks anything of the network.</footer></main></body></html>\n"
                 % (esc(title), style, esc(title), esc(playbook.title if hasattr(playbook, "title") else ""), esc(dt.date.today().strftime("%B %d, %Y").replace(" 0", " ")),
                    "".join(parts), esc(dt.date.today().isoformat())))

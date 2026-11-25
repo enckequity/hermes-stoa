@@ -1,10 +1,10 @@
-"""The files the talk box handed to Hermes, and removing them.
+"""The files the talk box handed to the assistant, and removing them.
 
-A file dropped in the page's talk box (a PDF, a Word file, a picture) is given to Hermes through the gateway's
-own attach calls, and Hermes keeps a copy of its own in the profile's home: ``attachments/`` for a file,
-``images/`` for a picture. Hermes clears what it is sent through a messaging platform within a day and what a
+A file dropped in the page's talk box (a PDF, a Word file, a picture) is given to the assistant through the gateway's
+own attach calls, and the assistant keeps a copy of its own in the profile's home: ``attachments/`` for a file,
+``images/`` for a picture. The assistant clears what it is sent through a messaging platform within a day and what a
 browser stages for upload within a week, but nothing clears these two folders. So Stoa keeps a list of the
-copies its own talk box caused, by the path Hermes gave back, and removes them: after a set number of days
+copies its own talk box caused, by the path the assistant gave back, and removes them: after a set number of days
 (seven unless changed), or when a person presses the button.
 
 Only a file on that list is ever removed, and only while it is still the same file in one of those two
@@ -27,7 +27,7 @@ from . import store as st
 log = logging.getLogger("hermes.plugins.stoa")
 LIST = "handed-files.json"
 FOLDERS = ("attachments", "images")
-KEEP_DAYS = 7            # the usual: what Hermes itself gives a browser's staged upload
+KEEP_DAYS = 7            # the usual: what the assistant itself gives a browser's staged upload
 MOST_DAYS = 3650
 MOST_LISTED = 2000       # the list is trimmed past this, oldest first, once their files are gone
 
@@ -39,7 +39,7 @@ class Handed:
 
     # -- where things are -----------------------------------------------------------------------
     def home(self) -> Path:
-        """The Hermes profile home these files are in: the one Hermes built the desk for, else the one the data
+        """The assistant profile home these files are in: the one the assistant built the desk for, else the one the data
         folder sits in (``<home>/plugin-data/stoa``)."""
         home = getattr(self.desk, "home", None)
         return Path(home) if home else self.desk.data_dir.parent.parent
@@ -89,7 +89,7 @@ class Handed:
 
     # -- what is the same file ------------------------------------------------------------------
     def _inside(self, path: Path) -> Optional[Path]:
-        """The folder a path is in, when it is directly reachable under one of Hermes's two (after following the
+        """The folder a path is in, when it is directly reachable under one of the assistant's two (after following the
         folder's own links, so a home that is itself a link still counts)."""
         try:
             resolved = path.resolve()
@@ -115,7 +115,7 @@ class Handed:
 
     # -- the list -------------------------------------------------------------------------------
     def note(self, path: Any, name: Any = "", lane: Any = "") -> dict:
-        """Hermes has just kept a copy of a file the talk box handed it: put it on the list."""
+        """The assistant has just kept a copy of a file the talk box handed it: put it on the list."""
         raw = str(path or "").strip()
         if not raw:
             return {"ok": False, "error": "no path"}
@@ -146,7 +146,7 @@ class Handed:
         return "there" if mark == (entry.get("bytes"), entry.get("modified")) else "changed"
 
     def listing(self) -> dict:
-        """For Setup: the files on the list that are still there, when each goes, and how much Hermes holds in
+        """For Setup: the files on the list that are still there, when each goes, and how much the assistant holds in
         the two folders altogether (counts and sizes only: the other files there are not Stoa's to name)."""
         with self._lock:
             data = self._read()
@@ -188,7 +188,7 @@ class Handed:
         try:
             return self._clear(lambda entry: (st.days_since(entry.get("at") or "") or 0.0) >= days)
         except Exception as exc:
-            log.warning("stoa: could not tidy the files handed to Hermes: %s", exc)
+            log.warning("stoa: could not tidy the files handed to the assistant: %s", exc)
             return {"ok": False, "removed": 0, "left": []}
 
     def _clear(self, due) -> dict:
@@ -217,5 +217,5 @@ class Handed:
                 data["files"], data["removed"] = kept[-MOST_LISTED:], data["removed"] + removed
                 self._write(data)
         if removed:
-            log.info("stoa: removed %d file(s) the talk box had handed to Hermes", removed)
+            log.info("stoa: removed %d file(s) the talk box had handed to the assistant", removed)
         return {"ok": True, "removed": removed, "left": left}

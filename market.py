@@ -5,7 +5,7 @@ or Exa when a key is set) and records what it finds here: companies sorted into 
 checked against the market's requirements with the evidence, what each uses today, and who
 buys. The desk then reads the map back: how rare each requirement is, who holds the market,
 where the segments meet, and the first calls. One click turns a company into a pipeline record.
-No Hermes imports.
+No the assistant imports.
 """
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import hashlib
 import json
 import re
 from collections import Counter
+from pathlib import Path
 from typing import Any, Optional
 
 from . import sources
@@ -349,19 +350,19 @@ class Markets:
         return int(value) if str(value).lstrip("-").isdigit() else 0
 
     def _over_budget(self, market: dict) -> str:
-        """Why Hermes should stop working on this map for now, or "" while it is inside the budget set for it."""
+        """Why the assistant should stop working on this map for now, or "" while it is inside the budget set for it."""
         budget = self._limits(market)["budget"]
         if not budget:
             return ""          # no budget set: nothing to read
         spent = self._count(market["id"], "cost:" + st.today()[:7]) / 1_000_000
         if spent >= budget:
-            return ("This map has used the $%.2f set for Hermes's work on it this month ($%.2f so far). Stop working on it here and "
+            return ("This map has used the $%.2f set for the assistant's work on it this month ($%.2f so far). Stop working on it here and "
                     "tell the person; they can raise the limit under Map facts." % (budget, spent))
         return ""
 
     def set_limits(self, ref: Any, body: dict) -> dict:
         """The limits a person sets on one map: how many companies it may hold, how many paid lookups and searches a
-        month, and how much of Hermes's work a month. 0 means no limit."""
+        month, and how much of the assistant's work a month. 0 means no limit."""
         market = self._market(ref)
         if market is None:
             return {"ok": False, "error": "That map is no longer on the desk."}
@@ -417,7 +418,7 @@ class Markets:
                 "cost": {"since": self.store.meta_get("map:%s:since" % market["id"], "")[:10], "last": self.store.meta_get("map:%s:last" % market["id"], ""),
                          "runs": n("runs"), "calls": calls, "minutes": round(n("secs") / 60, 1),
                          "tokens": {"in": n("input_tokens"), "out": n("output_tokens"), "cache_read": n("cache_read_tokens"), "cache_write": n("cache_write_tokens")},
-                         # None where Hermes had no price for any call: a figure is never made up
+                         # None where the assistant had no price for any call: a figure is never made up
                          "usd": None if calls and unpriced >= calls else round(n("cost") / 1_000_000, 2),
                          "usd_month": round(n("cost:" + month) / 1_000_000, 2), "unpriced": unpriced,
                          "lookups": n("pdl"), "lookups_month": n("pdl:" + month), "searches": n("exa"), "searches_month": n("exa:" + month)},
@@ -717,7 +718,7 @@ class Markets:
         return dict(summary, ok=True)
 
     def room(self, ref: Any) -> Optional[dict]:
-        """For the page: how many more companies this map may take and why Hermes should not be asked for more, or None with no limit in the way."""
+        """For the page: how many more companies this map may take and why the assistant should not be asked for more, or None with no limit in the way."""
         market = self._market(ref)
         if market is None:
             return None
@@ -728,7 +729,7 @@ class Markets:
         return {"companies": max(0, cap - held) if cap else None, "limit": cap, "stop": "budget" if stop else ""}
 
     def _room(self, market: dict) -> str:
-        """What the limits a person set on this map leave room for, in a line Hermes reads before it starts. "" with none set."""
+        """What the limits a person set on this map leave room for, in a line the assistant reads before it starts. "" with none set."""
         limits, month, said = self._limits(market), st.today()[:7], []
         stop = self._over_budget(market)
         if stop:
@@ -737,7 +738,7 @@ class Markets:
             held = len([r for r in self.targets(market["id"]) if r["status"] != "dismissed"])
             said.append("room for %d more companies (limit %d)" % (max(0, limits["companies"] - held), limits["companies"]))
         if limits["budget"]:
-            said.append("$%.2f of the $%.2f set for Hermes's work this month used" % (self._count(market["id"], "cost:" + month) / 1_000_000, limits["budget"]))
+            said.append("$%.2f of the $%.2f set for the assistant's work this month used" % (self._count(market["id"], "cost:" + month) / 1_000_000, limits["budget"]))
         if limits["lookups"]:
             said.append("%d of %d paid lookups this month used" % (self._count(market["id"], "pdl:" + month), limits["lookups"]))
         if limits["searches"]:
@@ -1114,12 +1115,30 @@ class Markets:
         self._refresh(market["id"])
         return {"ok": True, "id": market["id"], "name": name}
 
+    def _trash(self, market_id: str) -> Optional[Path]:
+        """Keep a removed map: its row, its companies and its meta, as JSON in ``trash/`` beside the desk file. A desk
+        held in memory (tests) has no folder and keeps nothing. Refuses (raises) rather than delete without a copy."""
+        if self.store.path == ":memory:":
+            return None
+        prefix = "map:%s:" % market_id
+        with self.store._conn() as conn:
+            snapshot = {"market": [dict(r) for r in conn.execute("SELECT * FROM markets WHERE id = ?", (market_id,))],
+                        "targets": [dict(r) for r in conn.execute("SELECT * FROM targets WHERE market_id = ?", (market_id,))],
+                        "meta": [dict(r) for r in conn.execute("SELECT * FROM meta WHERE substr(k, 1, ?) = ?", (len(prefix), prefix))]}
+        folder = Path(self.store.path).parent / "trash"
+        folder.mkdir(parents=True, exist_ok=True)
+        out = folder / ("map-%s-%s.json" % (st.slugify(market_id) or "map", st.now().replace(":", "")))
+        out.write_text(json.dumps(snapshot, default=str))
+        return out
+
     def remove(self, ref: Any) -> dict:
         """Delete a map and every company on it. Records already made from it stay in the pipeline. This is not on the
-        ledger and cannot be taken back, so only a person at the page does it: no tool action leads here."""
+        ledger, so only a person at the page does it: no tool action leads here. Before anything goes, the map, its
+        companies and its settings are written to ``trash/`` beside the desk file, from which they can be put back."""
         market = self._market(ref)
         if market is None:
             return {"ok": False, "error": "That map is no longer on the desk."}
+        self._trash(market["id"])
         with self.store._conn() as conn:
             companies = conn.execute("SELECT count(*) FROM targets WHERE market_id = ?", (market["id"],)).fetchone()[0]
             kept = conn.execute("SELECT count(*) FROM targets WHERE market_id = ? AND status = 'tracked'", (market["id"],)).fetchone()[0]

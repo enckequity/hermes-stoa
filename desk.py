@@ -1,6 +1,6 @@
 """The desk: everything the tools, the Slack buttons, the slash command and the CLI can do.
 
-No Hermes imports here. ``__init__.register`` hands in the few host services the desk needs
+No the assistant imports here. ``__init__.register`` hands in the few host services the desk needs
 (settings, secrets, the data directory), which keeps this module testable on its own.
 """
 from __future__ import annotations
@@ -41,20 +41,20 @@ LIKELY_NOTES = ("~/Documents/Meeting notes", "~/Documents/Meetings", "~/Document
                 "~/Documents/Plaud", "~/Plaud", "~/Documents/Transcripts", "~/Documents/Obsidian", "~/Obsidian",
                 "~/Library/Mobile Documents/iCloud~md~obsidian/Documents", "~/Documents/Granola", "~/Notes")
 # Where a person's call notes live, and the way from there to the desk. ``route`` is how they arrive: a ``folder`` Stoa
-# reads, a ``key`` for a service with an API (see KEYS), or a ``connection`` Hermes already has. The steps are the tool's
+# reads, a ``key`` for a service with an API (see KEYS), or a ``connection`` the assistant already has. The steps are the tool's
 # own (Plaud's export formats and connector address are from Plaud's help centre and docs), kept general where a menu's
 # exact name could not be confirmed.
 NOTE_TOOLS = (
     {"id": "plaud", "name": "Plaud", "route": "folder", "folder": "~/Documents/Plaud",
      "about": "Plaud has no key for a personal account, so its notes come in as files.",
-     "steps": ["Make a folder for them on the computer Hermes runs on, for example Documents/Plaud.",
-               "In Plaud, open a recording and choose Export. Export the Summary as Markdown or TXT. If you want Hermes to "
+     "steps": ["Make a folder for them on the computer the assistant runs on, for example Documents/Plaud.",
+               "In Plaud, open a recording and choose Export. Export the Summary as Markdown or TXT. If you want the assistant to "
                "see what was said as well, export the Transcript as TXT too.",
                "Save both into that folder. Keep the names Plaud gives them: Stoa sees that a transcript and a summary "
                "belong to one meeting and files them once.",
-               "Add the folder below. A Word file or an SRT is read as well; a PDF is handed to Hermes to read."],
+               "Add the folder below. A Word file or an SRT is read as well; a PDF is handed to the assistant to read."],
      "connection": {"name": "plaud", "address": "https://mcp.plaud.ai/mcp",
-                    "about": "Plaud also has a connector of its own. With it Hermes reads your recordings straight from Plaud, "
+                    "about": "Plaud also has a connector of its own. With it the assistant reads your recordings straight from Plaud, "
                              "with nothing to export."}},
     {"id": "obsidian", "name": "Obsidian", "route": "folder", "folder": "~/Documents/Obsidian",
      "about": "A vault is already a folder of notes.",
@@ -67,9 +67,9 @@ NOTE_TOOLS = (
      "about": "Fireflies has a key, so there is nothing to export."},
     {"id": "other", "name": "Another recorder", "route": "folder", "folder": "~/Documents/Meeting notes",
      "about": "Otter, Fathom, tl;dv, Zoom, Teams, a phone's voice notes: anything that can save a note as a file.",
-     "steps": ["Make a folder for them on the computer Hermes runs on, for example Documents/Meeting notes.",
+     "steps": ["Make a folder for them on the computer the assistant runs on, for example Documents/Meeting notes.",
                "In your recorder, export or download each note as TXT, Markdown or Word (.docx) into that folder. "
-               "A subtitle file (.srt, .vtt) works too, and a PDF is handed to Hermes to read.",
+               "A subtitle file (.srt, .vtt) works too, and a PDF is handed to the assistant to read.",
                "Add the folder below. If your recorder can save there by itself, or a synced folder (iCloud, Dropbox, Drive) "
                "lands on this computer, the desk keeps itself current with no further steps."]},
 )
@@ -78,14 +78,14 @@ NOTE_TOOLS = (
 KEYS = (
     {"id": "exa", "env": EXA_KEY, "name": "Exa", "kind": "Company search",
      "unlocks": "A market map searches for companies directly, from a plain description of who you are after.",
-     "without": "Maps still work without it: Hermes researches with whatever web search it has.",
+     "without": "Maps still work without it: The assistant researches with whatever web search it has.",
      "get": "https://dashboard.exa.ai/api-keys", "where": "the Exa dashboard",
      "steps": "Sign up at exa.ai, open API Keys in the dashboard, create a key and copy it.",
      "cost": "Exa bills each search. A map search asks for at most 15 results.",
      "check": "Runs one search for one result. Exa bills it like any other search: about a cent or less."},
     {"id": "pdl", "env": PDL_KEY, "name": "People Data Labs", "kind": "People and company facts",
      "unlocks": "Enrich fills in a person's title, company and LinkedIn, and a map can name the buyers at a company.",
-     "without": "Records and maps hold what you and Hermes put on them.",
+     "without": "Records and maps hold what you and the assistant put on them.",
      "get": "https://dashboard.peopledatalabs.com/", "where": "the People Data Labs dashboard",
      "steps": "Sign up at peopledatalabs.com, open the dashboard and copy your API key.",
      "cost": "People Data Labs bills each match. Stoa stops at the monthly cap in its settings.",
@@ -125,8 +125,6 @@ AUTONOMY = {
     "routine": {"label": "Handle the routine", "allows": ("log", "update", "done", "person"),
                 "summary": "A scheduled job may also set next steps, fill in facts and add people to a record. "
                            "Stage changes, new records and closing wait for your approval."},
-    "full": {"label": "Run it", "allows": ("log", "update", "done", "person", "add", "move", "close", "reopen", "snooze", "invoice", "group"),
-             "summary": "A scheduled job may make any change itself. Every change is on the log and can be taken back."},
 }
 # Which pipeline the call in hand is about ("" = the first one). Set for the length of one tool call, one page request
 # or one button click, so everything beneath reads and writes that pipeline's file with that pipeline's playbook.
@@ -193,17 +191,17 @@ class Desk:
         self._pipes_lock = threading.Lock()
         self._tour_seen: tuple = (None, {})     # the tour marker as last read: ((path, modified), what it said)
         self.can_configure = True          # False where settings cannot be saved (the page's own stand-in desk)
-        self.home: Optional[Path] = None   # the Hermes profile this desk belongs to, when Hermes built it
+        self.home: Optional[Path] = None   # the assistant profile this desk belongs to, when the assistant built it
         self.slack = None  # set by __init__ when the Slack half is wired
-        self.jobs: Optional[Callable[[], list]] = None     # Hermes's scheduled jobs for this profile, read only; set by __init__
-        self.usage = Meter()                # what each map has cost Hermes to work on, counted from Hermes's own events
+        self.jobs: Optional[Callable[[], list]] = None     # the assistant's scheduled jobs for this profile, read only; set by __init__
+        self.usage = Meter()                # what each map has cost the assistant to work on, counted from the assistant's own events
         self.announce: Callable[[], None] = lambda: None   # tells an open Desktop app or Webapp that the desk changed
         self.desktop_seen = 0.0     # when the Desktop/Webapp half last checked in (it does so while it is open)
         self.markets = Markets(self)
         self.intake = Intake(self)
         self.reports = Reports(self)
         self.database = Database(self)        # accounts, deals and people as rows, and the views kept of them
-        self.handed = Handed(self)            # the files the talk box handed to Hermes, and removing them
+        self.handed = Handed(self)            # the files the talk box handed to the assistant, and removing them
 
     # -- host services --------------------------------------------------------------------------
     @property
@@ -235,11 +233,11 @@ class Desk:
                 store.snapshot(self.data_dir / "backups")
             except Exception as exc:
                 log.warning("stoa: could not keep today's copy of the desk: %s", exc)
-            self.handed.sweep()             # and the files handed to Hermes that have been kept long enough go
+            self.handed.sweep()             # and the files handed to the assistant that have been kept long enough go
         return store
 
     def _handed_summary(self) -> dict:
-        """The files the talk box handed to Hermes that are still there, in one line's worth, for Setup."""
+        """The files the talk box handed to the assistant that are still there, in one line's worth, for Setup."""
         listing = self.handed.listing()
         return {"count": len(listing["files"]), "bytes": listing["bytes"], "keep_days": listing["keep_days"],
                 "folder": listing["folders"][0]["path"] if listing["folders"] else ""}
@@ -775,10 +773,10 @@ class Desk:
         session = session or {}
         if session.get("platform") == "cron" and self.tour():
             return False        # scheduled jobs wait while sample data is on show: they are for the team's own records
-        if not allow:
-            return True
         if session.get("platform", "") in ("", "cli", "tui", "desktop", "local"):
             return True
+        if not allow:           # no chat and no scheduled job until it is named in ``channels``
+            return False
         if session.get("platform") == "cron":        # scheduled jobs have no chat: they are opted in by name
             return "cron" in allow
         return session.get("chat_id", "") in allow
@@ -865,7 +863,7 @@ class Desk:
         return path
 
     def desktop_open(self, session: Optional[dict] = None) -> bool:
-        """Whether this conversation is in the Hermes Desktop app or Webapp with Stoa's half loaded,
+        """Whether this conversation is in the Desktop app or Webapp with Stoa's half loaded,
         where a card or a map can be drawn live in the conversation instead of pasted as text."""
         return (session or {}).get("platform") in ("local", "desktop") and time.time() - self.desktop_seen <= DESKTOP_FRESH
 
@@ -1187,8 +1185,8 @@ class Desk:
         return rows
 
     def automations(self) -> list:
-        """The automations Stoa offers, each with whether Hermes has it switched on. A job made from one carries its
-        title as its name, which is how it is recognised; ``unknown`` where Hermes's jobs cannot be read from here."""
+        """The automations Stoa offers, each with whether the assistant has it switched on. A job made from one carries its
+        title as its name, which is how it is recognised; ``unknown`` where the assistant's jobs cannot be read from here."""
         from . import blueprints
         jobs, known = [], self.jobs is not None
         if known:
@@ -1220,7 +1218,7 @@ class Desk:
 
     def notes_check(self, folder: Any) -> dict:
         """Could Stoa read call notes from this folder? The answer is in words, with what is there: how many notes, of
-        which kinds, how many it hands to Hermes, and how many are recordings with no words yet."""
+        which kinds, how many it hands to the assistant, and how many are recordings with no words yet."""
         text = str(folder or "").strip().strip("\"'").strip()
         if not text:
             return {"ok": False, "message": "Paste the folder's path first."}
@@ -1229,11 +1227,11 @@ class Desk:
             return {"ok": False, "message": "That is not a whole path. It should start with / or ~, like ~/Documents/Meeting notes."}
         try:
             if not path.exists():
-                return {"ok": False, "message": "There is no folder at that path on the computer Hermes runs on. Check the spelling, capitals included."}
+                return {"ok": False, "message": "There is no folder at that path on the computer the assistant runs on. Check the spelling, capitals included."}
             if not path.is_dir():
                 return {"ok": False, "message": "That is a file, not a folder. Use the folder it sits in."}
         except OSError as exc:
-            return {"ok": False, "message": "Hermes is not allowed to look in that folder (%s)." % type(exc).__name__}
+            return {"ok": False, "message": "The assistant is not allowed to look in that folder (%s)." % type(exc).__name__}
         census = sources.folder_census(path)
         count, newest = census["notes"], census["newest"]
         said = []
@@ -1244,7 +1242,7 @@ class Desk:
             said.append("The folder is there, with no notes in it yet. Stoa reads Markdown, text, Word (.docx), subtitle (.srt, .vtt) "
                         "and web-page files, in this folder and up to three folders below it.")
         if census["handed"]:
-            said.append("%d of them %s, which Hermes reads with its own tools." % (census["handed"], "is a PDF" if census["handed"] == 1 else "are PDFs"))
+            said.append("%d of them %s, which the assistant reads with its own tools." % (census["handed"], "is a PDF" if census["handed"] == 1 else "are PDFs"))
         if census["audio"]:
             said.append("%d %s no words yet: export the transcript or summary beside %s." % (
                 census["audio"], "recording has" if census["audio"] == 1 else "recordings have", "it" if census["audio"] == 1 else "them"))
@@ -1271,7 +1269,7 @@ class Desk:
 
     def notes_folder(self, folder: Any, verb: Any = "set") -> dict:
         """Change the folders Stoa reads call notes from: ``add`` one, ``remove`` one, or ``set`` the list to one folder
-        (none, with an empty one). They are one of the plugin's own settings, so they are saved the way Hermes saves
+        (none, with an empty one). They are one of the plugin's own settings, so they are saved the way the assistant saves
         them; where this desk cannot save a setting it says so."""
         if not self.can_configure:
             return {"ok": False, "elsewhere": True, "message": "This page cannot save a setting from here. Open Stoa's settings and paste the path into Meeting notes folder."}
@@ -1299,7 +1297,7 @@ class Desk:
         return dict(check, saved=True, folders=have, message="Saved. " + check["message"])
 
     def note_connections(self) -> list:
-        """Connections of Hermes's own (a connector under Capabilities) that a person has said hold call notes, by the
+        """Connections of the assistant's own (a connector under Capabilities) that a person has said hold call notes, by the
         names they typed. Stoa cannot reach them: the agent can, with that connection's tools, and the notes inbox
         tells it to look there."""
         raw = self.setting("notes_connections", "") or ""
@@ -1312,14 +1310,14 @@ class Desk:
         return out[:6]
 
     def notes_connections(self, names: Any) -> dict:
-        """Save which of Hermes's connections hold call notes (a list of names, or text with commas)."""
+        """Save which of the assistant's connections hold call notes (a list of names, or text with commas)."""
         if not self.can_configure:
             return {"ok": False, "elsewhere": True, "message": "This page cannot save a setting from here. Open Stoa's settings and type the names into Note connections."}
         text = ", ".join(str(n) for n in names) if isinstance(names, (list, tuple)) else str(names or "")
         self._set_config("notes_connections", text)
         kept = self.note_connections()
         return {"ok": True, "connections": kept,
-                "message": ("Hermes will look in %s for call notes on its next sweep." % " and ".join(name.capitalize() for name in kept)) if kept else "No connection is checked for call notes."}
+                "message": ("The assistant will look in %s for call notes on its next sweep." % " and ".join(name.capitalize() for name in kept)) if kept else "No connection is checked for call notes."}
 
     def notes_sources(self) -> dict:
         """Where call notes come from, for Setup: each folder with what it holds, each key, each connection, and the
@@ -1400,7 +1398,7 @@ class Desk:
         notes = (note_sources.get("folders") or [{}])[0]
         reading = ([("%d folders" % len(note_folders)) if len(note_folders) > 1 else note_folders[0]] if note_folders else []) + (
             ["Granola"] if granola else []) + (["Fireflies"] if fireflies else []) + [
-            "%s (through Hermes)" % name for name in note_sources.get("connections") or []]
+            "%s (through the assistant)" % name for name in note_sources.get("connections") or []]
         cap = read("the lookup cap", lambda: _int(self.setting("pdl_monthly_cap", 50), 50, 0, 10 ** 6), 50)
         used = read("lookups used", lambda: _int(self.own_store.meta_get("pdl_calls:" + st.today()[:7], "0"), 0, 0, 10 ** 9), 0)
         allow = read("the chats setting", lambda: self.setting("channels", []) or [], [])
@@ -1418,7 +1416,7 @@ class Desk:
             {"id": "playbook", "done": chosen or real > 0, "title": "Set up your pipeline: what it is for, and its stages",
              "detail": "You are on %s: %s." % (own.title, " → ".join(s["label"] for s in own.stages) + " → " + own.won["label"])},
             {"id": "records", "done": real > 0, "title": "Put your first %s on the desk" % terms["deals"],
-             "detail": ("%d on the desk." % real) if real else "Add one by hand, tell Hermes about one, or drop a CSV on the page."},
+             "detail": ("%d on the desk." % real) if real else "Add one by hand, tell the assistant about one, or drop a CSV on the page."},
             {"id": "keys", "done": bool(have), "title": "Find companies and fill in people",
              "detail": ("Set: %s." % ", ".join(have)) if have
              else "Exa lets a map search for companies; People Data Labs fills in people and names buyers."},
@@ -1427,8 +1425,8 @@ class Desk:
              else "Wherever your call notes are (Plaud, Obsidian, Granola, Fireflies, any recorder), each one is filed on the record it is about."},
             {"id": "slack", "done": bool(slack), "title": "Work from Slack",
              "detail": "Connected: records post as cards with buttons, and !gtm works in Slack." if slack
-             else "Slack is connected in Hermes, on its Messaging page. Once it is, records post there as cards whose buttons move the pipeline."},
-            {"id": "sweep", "done": bool(running) or tally["from_sweeps"] > 0, "title": "Let Hermes keep the desk current",
+             else "Slack is connected in the assistant, on its Messaging page. Once it is, records post there as cards whose buttons move the pipeline."},
+            {"id": "sweep", "done": bool(running) or tally["from_sweeps"] > 0, "title": "Let the assistant keep the desk current",
              "detail": ("Switched on: %s." % ", ".join(running)) if running
              else ("%d entries logged from your inbox, calls and Slack so far." % tally["from_sweeps"]) if tally["from_sweeps"]
              else "Jobs that run on a schedule: a morning brief, and sweeps of your email, calls and notes. What they find waits for your approval."},
@@ -1446,7 +1444,7 @@ class Desk:
              "detail": "Key set." if fireflies else "No key set (FIREFLIES_API_KEY). Optional."},
             {"id": "notes", "label": "Meeting notes folder", "on": bool(notes_dir), "detail": notes_dir or "Not set (notes_dir). Optional."},
             {"id": "google", "label": "Gmail, Calendar and Sheets", "on": None,
-             "detail": "Stoa uses Hermes's own Google tools when they are connected; it holds no Google access itself."},
+             "detail": "Stoa uses the assistant's own Google tools when they are connected; it holds no Google access itself."},
         ]
         rules = [
             {"label": "Where the desk answers",
@@ -1493,7 +1491,7 @@ class Desk:
                      "people": tally["people"], "ledger": tally["ledger"], "archived": tally["archived"],
                      "lists_waiting": tally["lists_waiting"], "exports": str(self.data_dir / "exports"),
                      "backups": read("the daily copies", self.backups, {"folder": "", "count": 0, "newest": ""}),
-                     "files": read("the files handed to Hermes", self._handed_summary, {"count": 0, "bytes": 0, "keep_days": 7, "folder": ""})},
+                     "files": read("the files handed to the assistant", self._handed_summary, {"count": 0, "bytes": 0, "keep_days": 7, "folder": ""})},
             "playbook_sets": {
                 "words": "%s, %s" % (terms["deal"], terms["group"]),
                 "stages": [s["label"] for s in own.stages] + [own.won["label"]],
@@ -1717,15 +1715,6 @@ class Desk:
         return [{"id": deal["id"], "name": deal["name"], "company": deal["company"], "group": deal["grp"], "stage": playbook.label(deal["stage"]),
                  "removed_at": deal.get("archived_at", "")} for deal in self.store.taken_off()]
 
-    def destroy(self, ref: Any, actor: str = "") -> dict:
-        """Delete for good a record that was already taken off the desk: the record, its log and its people's links.
-        There is no way back, so a record still on the desk is refused: it has to be taken off first."""
-        gone = self.store.get(str(ref or "").strip(), archived=True)
-        if gone is None:
-            return {"ok": False, "error": "only a record already taken off the desk can be deleted for good"}
-        self.store.delete(gone["id"], actor=actor or self.actor())
-        return {"ok": True, "action": "destroy", "id": gone["id"], "name": gone["name"]}
-
     def restore(self, ref: Any, actor: str = "") -> dict:
         """Put back a record that was taken off the desk: its add was undone, or a person took it off."""
         ref = str(ref or "").strip()
@@ -1745,7 +1734,7 @@ class Desk:
     # -- what a scheduled job may do by itself ----------------------------------------------------
     def autonomy(self) -> str:
         level = self.own_store.meta_get("autonomy", "ask")
-        return level if level in AUTONOMY else "ask"
+        return level if level in AUTONOMY else "ask"        # a stored "full" from before reads as ask
 
     def set_autonomy(self, level: Any) -> dict:
         """Set by a person, on the Setup tab or at a terminal. There is no tool for it: the agent cannot raise its own."""
@@ -1883,7 +1872,7 @@ class Desk:
             else:
                 return {"ok": False, "error": "A scheduled job cannot %s a record. Say in your reply that you would, and why."
                                               % action}
-        out = self.intake.propose({"rows": [row], "source": "Hermes, on a schedule", "kind": "proposal"}, {"platform": "cron"})
+        out = self.intake.propose({"rows": [row], "source": "The assistant, on a schedule", "kind": "proposal"}, {"platform": "cron"})
         if not out.get("ok"):
             return out
         waiting = (out.get("counts") or {}).get("new", 0) + (out.get("counts") or {}).get("update", 0)
@@ -3685,7 +3674,7 @@ class Desk:
                 out["problems"] = problems
             connections = self.note_connections()
             if connections:
-                # Notes Stoa cannot reach itself, in a tool Hermes is connected to. The agent reads them with that
+                # Notes Stoa cannot reach itself, in a tool the assistant is connected to. The agent reads them with that
                 # connection's own tools and files them here under an id of its own making, so none is filed twice.
                 out["connections"] = connections
                 out["connections_how"] = (
@@ -3697,7 +3686,7 @@ class Desk:
                     % (" and ".join(connections), days))
             if not waiting and not connections and all(str(value).startswith("not set") for value in status.values()):
                 out["hint"] = ("No call-note source is set up. On the Stoa page, Setup has a step for it: a folder your recorder "
-                               "saves notes into, a Granola or Fireflies key, or a connection Hermes already has.")
+                               "saves notes into, a Granola or Fireflies key, or a connection the assistant already has.")
             return out
         if action == "known":
             asked = args.get("notes") or ([args.get("note")] if args.get("note") else [])
@@ -3759,7 +3748,7 @@ class Desk:
                 return {"ok": False, "error": "Fireflies is not set up (FIREFLIES_API_KEY)"}
             return sources.read_fireflies_note(key, note_id, http=self.http)
         if not note_id.startswith("file:"):
-            return {"ok": False, "error": "%s is not a note Stoa can read: it lives in a connection of Hermes's own. Read it with "
+            return {"ok": False, "error": "%s is not a note Stoa can read: it lives in a connection of the assistant's own. Read it with "
                                           "that connection's tools, then file it here with the same id." % note_id}
         note = self._folder_note(note_id)
         if note is None:

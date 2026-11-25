@@ -1,7 +1,7 @@
 (function () {
   "use strict";
-  // Stoa's tab in the Hermes dashboard: set-up and status, on one page. The desk itself (the pipeline, the market
-  // map, the conversation) is worked in the Hermes Desktop app or Webapp, in Slack and in chat; this tab does not
+  // Stoa's tab in the the dashboard: set-up and status, on one page. The desk itself (the pipeline, the market
+  // map, the conversation) is worked in the Desktop app or Webapp, in Slack and in chat; this tab does not
   // mirror it. It says what is set up, how to set up the rest, and what the desk holds, in totals.
   //
   // Plain React.createElement against the host's Plugin SDK: no build step, no bundled libraries, and no network
@@ -90,7 +90,7 @@
       }).catch(function (e) { props.say("Stoa could not test that key: " + why(e)); }).then(function () { setBusy(""); });
     }
     return h("div", null,
-      h("p", { className: "stoa-p" }, "Stoa works without any key. Each one adds something. A key is kept by Hermes, on its Keys page; Stoa reads it when it needs it and never shows it."),
+      h("p", { className: "stoa-p" }, "Stoa works without any key. Each one adds something. A key is kept by the assistant, on its Keys page; Stoa reads it when it needs it and never shows it."),
       props.keys.map(function (row) {
         var result = results[row.id];
         return h("div", { className: "stoa-key", key: row.id },
@@ -132,7 +132,7 @@
       }));
     }
     return h("div", null,
-      h("p", { className: "stoa-p" }, "Each note is filed on the record it is about, with the next step it implies. Notes come from folders on the computer Hermes runs on (an Obsidian folder, or wherever a recorder such as Plaud exports to), from Granola or Fireflies with a key, or from a connector Hermes already has. The Stoa page has the steps for each tool and shows what would be picked up."),
+      h("p", { className: "stoa-p" }, "Each note is filed on the record it is about, with the next step it implies. Notes come from folders on the computer the assistant runs on (an Obsidian folder, or wherever a recorder such as Plaud exports to), from Granola or Fireflies with a key, or from a connector the assistant already has. The Stoa page has the steps for each tool and shows what would be picked up."),
       folders.length ? h("div", { className: "stoa-rows" }, folders.map(function (row) {
         return h("div", { className: "stoa-row", key: row.folder },
           h("span", null, h("b", null, row.folder), h("small", null, row.message)),
@@ -145,13 +145,13 @@
           onChange: function (e) { setFolder(e.target.value); setFound(null); } }),
         h(Btn, { disabled: busy || !folder.trim(), onClick: check }, "Check"),
         h(Btn, { kind: "primary", disabled: busy || !folder.trim() || notes.can_save === false, onClick: function () { save(folder.trim(), "add"); } }, "Add folder")),
-      h("p", { className: "stoa-p" }, "On a Mac, to copy a folder's path: in Finder, right-click the folder, hold the Option key and choose Copy as Pathname. Stoa reads Markdown, text, Word and subtitle files, three folders deep; a PDF is handed to Hermes to read."),
+      h("p", { className: "stoa-p" }, "On a Mac, to copy a folder's path: in Finder, right-click the folder, hold the Option key and choose Copy as Pathname. Stoa reads Markdown, text, Word and subtitle files, three folders deep; a PDF is handed to the assistant to read."),
       found ? h("p", { className: "stoa-p", "data-tone": found.ok ? "good" : "bad" }, found.message || (found.ok ? plural(found.count || 0, "note", "notes") + " found there." : "Stoa cannot read that folder.")) : null,
-      notes.can_save === false ? h("p", { className: "stoa-p" }, "This page cannot save the setting here. Ask Hermes: “Set Stoa's notes folder to " + (folder.trim() || "…") + "”.") : null,
+      notes.can_save === false ? h("p", { className: "stoa-p" }, "This page cannot save the setting here. Ask the assistant: “Set Stoa's notes folder to " + (folder.trim() || "…") + "”.") : null,
       h("div", { className: "stoa-btns" },
         h(Btn, { kind: "ghost", disabled: busy, title: "Tries Documents, Plaud, Obsidian and Notes, and offers any that hold notes. It counts the notes and opens none.", onClick: look }, "Look for a folder")),
       h("p", { className: "stoa-p" }, [notes.granola ? "Granola: a key is set, so its notes are read too." : "", notes.fireflies ? "Fireflies: a key is set, so its meetings are read too." : "",
-        (notes.connections || []).length ? "Through Hermes: " + notes.connections.join(", ") + "." : "",
+        (notes.connections || []).length ? "Through the assistant: " + notes.connections.join(", ") + "." : "",
         !notes.granola && !notes.fireflies ? "For Granola or Fireflies, add its key under step 3." : ""].filter(Boolean).join(" ")));
   }
 
@@ -159,7 +159,7 @@
     var jobs = props.jobs || [], auto = props.autonomy;
     var words = { on: "On", paused: "Paused", off: "Off", unknown: "Not known from here" };
     return h("div", null,
-      h("p", { className: "stoa-p" }, "Jobs Hermes can run on a schedule. To switch one on, type ", h("code", null, "/blueprint"), " in a Hermes chat and pick it; Hermes asks when it should run and where to report. Pausing, changing or removing one is done on the dashboard's Cron page."),
+      h("p", { className: "stoa-p" }, "Jobs the assistant can run on a schedule. To switch one on, type ", h("code", null, "/blueprint"), " in a the assistant chat and pick it; the assistant asks when it should run and where to report. Pausing, changing or removing one is done on the dashboard's Cron page."),
       h("div", { className: "stoa-rows" }, jobs.map(function (job) {
         return h("div", { className: "stoa-row", key: job.name },
           h("span", null, h("b", null, job.title), h("small", null, job.description)),
@@ -183,19 +183,19 @@
       h(Step, { n: 1, step: by.playbook },
         h("p", { className: "stoa-p" }, "The pipeline is on ", h("b", null, data.playbook.title), (data.playbook.shape_title ? " (" + data.playbook.shape_title.toLowerCase() + ")" : "") + ". Its stages:"),
         h("p", { className: "stoa-stages" }, (sets.stages || []).map(function (label, i) { return h("span", { key: i }, label); })),
-        h("p", { className: "stoa-p" }, "To change what the pipeline is for or rename its stages, open Stoa in the Hermes Desktop app or Webapp and go to Setup → Edit stages. Or tell Hermes what your business does and it sets the stages for you.")),
+        h("p", { className: "stoa-p" }, "To change what the pipeline is for or rename its stages, open Stoa in the Desktop app or Webapp and go to Setup → Edit stages. Or tell the assistant what your business does and it sets the stages for you.")),
       h(Step, { n: 2, step: by.records },
         h("p", { className: "stoa-p" }, "Records are added where the desk is worked, in any of these ways:"),
         h("ul", { className: "stoa-how" },
-          h("li", null, h("b", null, "Tell Hermes."), " “We are starting a Staff Backend search for Northwind. Add Dana Whitfield, call her Friday.”"),
+          h("li", null, h("b", null, "Tell the assistant."), " “We are starting a Staff Backend search for Northwind. Add Dana Whitfield, call her Friday.”"),
           h("li", null, h("b", null, "Drop a list on the Stoa page."), " A CSV of leads or candidates. Nothing is written until you press Apply."),
           h("li", null, h("b", null, "Add one by hand."), " + New at the top of the Stoa page."),
           h("li", null, h("b", null, "Map a market."), " “We sell a fraud prevention tool to fintechs. Who should we go after?” One press puts a company from the map in your pipeline."))),
       h(Step, { n: 3, step: by.keys }, h(Keys, { keys: data.keys || [], say: props.say })),
       h(Step, { n: 4, step: by.notes }, h(Notes, { notes: data.notes, say: props.say, refresh: props.refresh })),
       h(Step, { n: 5, step: by.slack },
-        h("p", { className: "stoa-p" }, data.slack ? "Hermes is in your Slack. Records post as cards whose buttons move the pipeline, and !gtm shows the board. Try !gtm map."
-          : "Slack is connected in Hermes, not in Stoa. Open Channels, choose Slack and follow its steps. Once Hermes is in your Slack there is nothing more to do: records post as cards whose buttons move the pipeline, and !gtm shows the board."),
+        h("p", { className: "stoa-p" }, data.slack ? "The assistant is in your Slack. Records post as cards whose buttons move the pipeline, and !gtm shows the board. Try !gtm map."
+          : "Slack is connected in the assistant, not in Stoa. Open Channels, choose Slack and follow its steps. Once the assistant is in your Slack there is nothing more to do: records post as cards whose buttons move the pipeline, and !gtm shows the board."),
         h("div", { className: "stoa-btns" }, h(Go, { to: "/channels", kind: data.slack ? "" : "primary", title: "The dashboard's own page for messaging platforms" }, "Open Channels"))),
       h(Step, { n: 6, step: by.sweep }, h(Jobs, { jobs: data.automations, autonomy: data.autonomy, say: props.say, refresh: props.refresh })));
   }
@@ -212,8 +212,8 @@
           h(Fig, { n: t.activities, label: "log entries", sub: t.lists_waiting ? plural(t.lists_waiting, "list", "lists") + " waiting for review" : "calls, emails, notes and moves" }))),
       h(Section, { title: "This month", note: "paid work, for " + new Date(o.month + "-15T12:00:00").toLocaleDateString(undefined, { month: "long", year: "numeric" }) },
         h("div", { className: "stoa-figs" },
-          h(Fig, { n: s.usd_month === null ? "–" : usd(s.usd_month), label: "Hermes's work on maps",
-            sub: s.usd_month === null ? (s.runs ? "the model in use has no price Hermes knows" : "nothing counted yet") : "Hermes's own estimate, not an invoice · " + usd(s.usd) + " in all" }),
+          h(Fig, { n: s.usd_month === null ? "–" : usd(s.usd_month), label: "The assistant's work on maps",
+            sub: s.usd_month === null ? (s.runs ? "the model in use has no price the assistant knows" : "nothing counted yet") : "The assistant's own estimate, not an invoice · " + usd(s.usd) + " in all" }),
           h(Fig, { n: s.lookups_month, label: "People Data Labs lookups", sub: s.lookup_cap ? "of the " + s.lookup_cap + " a month allowed" : "no monthly cap set" }),
           h(Fig, { n: s.searches_month, label: "Exa searches", sub: "made through Stoa for a map" }))));
   }
@@ -247,9 +247,9 @@
     };
     return h(Section, { title: "Market maps", note: rows.length ? "limits are set on the Stoa page, under Map facts" : "" },
       o.tour ? h("p", { className: "stoa-p" }, "Sample data is on show, so your own maps are not listed. Leave the tour to see them.")
-        : !rows.length ? h("p", { className: "stoa-p" }, "No map yet. In a Hermes chat, or on the Stoa page's Market map tab, say what you sell and who you are after; Hermes researches it and saves the map.")
+        : !rows.length ? h("p", { className: "stoa-p" }, "No map yet. In a the assistant chat, or on the Stoa page's Market map tab, say what you sell and who you are after; the assistant researches it and saves the map.")
         : h("div", { className: "stoa-scroll" }, h("table", { className: "stoa-table" },
-          h("thead", null, h("tr", null, ["Map", "Companies", "In pipeline", "Buyers named", "Hermes's work", "This month", "Lookups", "Searches", "Limits"].map(function (label, i) {
+          h("thead", null, h("tr", null, ["Map", "Companies", "In pipeline", "Buyers named", "The assistant's work", "This month", "Lookups", "Searches", "Limits"].map(function (label, i) {
             return h("th", { key: label, "data-num": i >= 1 && i <= 7 ? "1" : "0" }, label);
           }))),
           h("tbody", null, rows.map(function (row) {
@@ -282,11 +282,11 @@
     }
     return h(Section, { title: "Your data" },
       h("dl", { className: "stoa-dl" },
-        h("dt", null, "Where it is kept"), h("dd", null, "SQLite files on the machine Hermes runs on, in ", h("code", null, o.folder), " (" + size(o.totals.size) + " in all). Nothing is kept anywhere else."),
+        h("dt", null, "Where it is kept"), h("dd", null, "SQLite files on the machine the assistant runs on, in ", h("code", null, o.folder), " (" + size(o.totals.size) + " in all). Nothing is kept anywhere else."),
         h("dt", null, "Daily copies"), h("dd", null, d.backups && d.backups.count ? d.backups.count + " kept in " : "None yet. They are kept in ", h("code", null, (d.backups && d.backups.folder) || ""), d.backups && d.backups.newest ? ", the newest from " + day(d.backups.newest) + "." : "."),
         h("dt", null, "Exports and saved maps"), h("dd", null, h("code", null, d.exports)),
         d.files ? h(React.Fragment, null, h("dt", null, "Files dropped in the talk box"), h("dd", null,
-          d.files.count ? plural(d.files.count, "copy", "copies") + " (" + size(d.files.bytes) + ") kept by Hermes in " : "No copies there now. Hermes keeps them in ", h("code", null, d.files.folder),
+          d.files.count ? plural(d.files.count, "copy", "copies") + " (" + size(d.files.bytes) + ") kept by the assistant in " : "No copies there now. The assistant keeps them in ", h("code", null, d.files.folder),
           d.files.keep_days ? ". Stoa removes each after " + plural(d.files.keep_days, "day", "days") + "." : ". They stay until you remove them on the Stoa page, under Setup.")) : null,
         h("dt", null, "History"), h("dd", null, plural(d.ledger, "change", "changes") + " on the ledger, which Undo works from" + (d.archived ? "; " + plural(d.archived, "record", "records") + " taken off the desk and archived, not erased" : "") + "."),
         data.tour ? h(React.Fragment, null, h("dt", null, "Sample data"), h("dd", null, "On show: " + data.tour.title + ". It lives in a file of its own, and your desk comes back when you leave.")) : null,
@@ -340,7 +340,7 @@
         h("div", null,
           h("div", { className: "stoa-eyebrow" }, "Stoa" + (data ? " · " + data.version : "")),
           h("h2", { className: "stoa-title" }, "Setup and status"),
-          h("p", { className: "stoa-sub" }, "The desk is worked in the Hermes Desktop app or Webapp (Stoa in the sidebar), in Slack, and in any chat with /gtm. This tab is where you set it up and see what it holds."))),
+          h("p", { className: "stoa-sub" }, "The desk is worked in the Desktop app or Webapp (Stoa in the sidebar), in Slack, and in any chat with /gtm. This tab is where you set it up and see what it holds."))),
       body,
       toast ? h("div", { className: "stoa-toast", role: "status" }, toast) : null);
   }

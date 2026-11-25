@@ -1,13 +1,13 @@
-"""What a map has cost Hermes to work on, counted per map from what Hermes tells a plugin.
+"""What a map has cost the assistant to work on, counted per map from what the assistant tells a plugin.
 
-Hermes hands a plugin two things this needs: every model call's token counts as it finishes (the
+The assistant hands a plugin two things this needs: every model call's token counts as it finishes (the
 ``post_api_request`` hook) and the end of each turn (``post_llm_call``). The map tool says which map a turn
 worked on. A turn's calls are added up and, when the turn ends, written against that map: how many turns and
-model calls, the tokens, the seconds, and what Hermes itself estimates the calls cost from the provider's
-price list. That figure is Hermes's estimate, not an invoice.
+model calls, the tokens, the seconds, and what the assistant itself estimates the calls cost from the provider's
+price list. That figure is the assistant's estimate, not an invoice.
 
 Nothing here calls out anywhere, and no prompt, reply or tool result is read or kept: only the counts. No
-Hermes imports at module level, so the tests run without Hermes.
+The assistant imports at module level, so the tests run without the assistant.
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ TOKENS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tok
 
 
 def hermes_price(model: Any, provider: Any, base_url: Any, usage: dict) -> Optional[int]:
-    """What Hermes estimates one model call cost, in millionths of a dollar. None where it has no price for the model."""
+    """What the assistant estimates one model call cost, in millionths of a dollar. None where it has no price for the model."""
     try:
         from agent.usage_pricing import CanonicalUsage, estimate_usage_cost
         names = {f.name for f in dataclasses.fields(CanonicalUsage)} - {"raw_usage"}

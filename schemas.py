@@ -524,7 +524,7 @@ GTM_REPORT = {
     "name": "gtm_report",
     "description": (
         "The Stoa desk's reports: figures Stoa counts itself from the desk's records (pipeline by stage, win rate, time in "
-        "stage, where records come from, why they were lost, what the market map turned into, what Hermes proposed and "
+        "stage, where records come from, why they were lost, what the market map turned into, what the assistant proposed and "
         "what the person did with it), and the ones made here. Use it when someone asks how the pipeline is doing, for a "
         "number, a breakdown or a trend: read the report and say what it shows; never add records up yourself. "
         "action='list' names every report. 'read' gives one report's figures and its one-line reading (`report`: its id "

@@ -84,7 +84,7 @@ new, what would change on a record already there, and what is already there, bef
 written. If a row comes back `unclear`, ask which record it is and propose again with its id as
 `record`.
 
-## In the Hermes Desktop app and the Webapp
+## In the assistant Desktop app and the Webapp
 
 There the team has the Stoa pane open beside this conversation, and it redraws whenever you
 change the desk. Two things follow:
@@ -101,15 +101,15 @@ change the desk. Two things follow:
 
 ## Automations and `/blueprint`
 
-`/blueprint` is Hermes's own command for switching on a scheduled job from a ready-made
+`/blueprint` is the assistant's own command for switching on a scheduled job from a ready-made
 template. It is not a Stoa tool and it has nothing to do with the playbook: a playbook is how a
 pipeline works (stages, fields, drafts); a blueprint is a job that runs on a schedule. Stoa adds
-seven to Hermes's list: `stoa:morning-brief`, `stoa:notes-sweep`, `stoa:activity-sweep`,
+seven to the assistant's list: `stoa:morning-brief`, `stoa:notes-sweep`, `stoa:activity-sweep`,
 `stoa:market-watch`, `stoa:sheet-mirror`, `stoa:sheet-pull` and `stoa:friday-review`.
 
 You cannot run a command yourself. When someone asks you to switch one on, or a message is only
 `/blueprint`, tell them to type `/blueprint stoa:<name>` in an ordinary chat (in Slack, the
-command as Hermes offers it there) and name the one that fits what they asked for. Do not answer
+command as the assistant offers it there) and name the one that fits what they asked for. Do not answer
 with the playbook, and do not set up a scheduled job by other means in its place unless they ask.
 
 ## When a button was clicked
@@ -154,7 +154,7 @@ Three things to know about where a note comes from:
   them together, the summary first, under their file names. File the meeting once.
 - **A PDF.** When `read` answers with `read_with_your_own_tool`, Stoa could not open the note: read
   those files with your own file tool, then file the note here as usual.
-- **Notes in a tool Hermes is connected to** (Plaud's connector, for one). When the inbox carries
+- **Notes in a tool the assistant is connected to** (Plaud's connector, for one). When the inbox carries
   `connections`, those notes are not in the inbox. Use that connection's own tools to list what is
   recent, name each `<connection>:<its id there>`, ask `gtm_notes(action="known", notes=[...])`
   which are new, read each new one with the connection's tools, and `file` or `skip` it here under
@@ -163,7 +163,7 @@ Three things to know about where a note comes from:
 ## Activity sweep (email, calls, Slack)
 
 Stoa has no mail or chat code of its own. You do this with whatever the person has connected to
-Hermes: Gmail, a calendar or call recorder, Slack search. If none of those tools is available to
+The assistant: Gmail, a calendar or call recorder, Slack search. If none of those tools is available to
 you, say so in one line and stop.
 
 1. With your own tools, find what happened in the window you were given: email sent or received,
@@ -218,9 +218,9 @@ you, say so in one line and stop.
   the record off the desk without destroying it: `gtm_deal(action="restore", deal="<name>")` puts
   it back.
 - **Deleting.** A person deletes a record with Delete on its page. That too takes it off the desk
-  without destroying it, and `restore` puts it back; only they can delete it for good, from Your
-  data in Setup. You cannot delete a record: asked to, say where the button is, or close the
-  record as lost if it should simply be retired.
+  without destroying it, and `restore` puts it back. Nothing deletes a record for good. You cannot
+  take a record off the desk yourself: asked to, say where the button is, or close the record as
+  lost if it should simply be retired.
 
 ## Money: invoices, delivery and the forecast
 
@@ -403,31 +403,20 @@ will miscount, and the person's page shows the real figure beside your answer).
 
 ## Email
 
-You write drafts; people send them. If Gmail is connected in this session (a Gmail tool, or the
-Google Workspace skill), save an email you drafted as a Gmail draft addressed to the right person
-on the record and say that it is in their drafts. Never send. Without Gmail, give the draft in the
-chat.
+You write drafts; people send them. Never send, and never read a mail token or credential file.
 
-Saving the draft, the way that works:
+Saving the draft:
 
-1. If a tool that creates a Gmail draft is listed, use it.
-2. Otherwise load the Google Workspace skill. Its command-line wrapper can send, search and reply
-   but may have no draft command: check its `gmail --help`. Never use `gmail send` in its place.
-3. With no draft command, say that you are about to save a draft in their Gmail, then run a
-   short Python script with `python`, the Hermes environment's own interpreter, which has Google's
-   libraries. Not `python3`: that is often a system Python without them
-   (`ModuleNotFoundError: google.oauth2`). Not raw HTTP calls to the Gmail API: those fail on
-   certificates. The script reads the token the skill uses (`google_token.json` in the Hermes
-   home), then `Credentials.from_authorized_user_info(...)`, `build("gmail", "v1", ...)`,
-   `users().getProfile(userId="me")` (stop if that is not the mailbox the person means), an
-   `EmailMessage` with To, From (that address), Subject and the body, and
-   `users().drafts().create(userId="me", body={"message": {"raw": <the message, base64url>}})`.
-4. If Hermes asks the person to approve the command, that is theirs to decide: wait for the
-   answer, and never pick a way of running it in order to avoid being asked.
-5. Read it back (`users().drafts().get`, and its labels are `["DRAFT"]`) before you say it is
-   saved.
-6. If the person refuses, or a step fails twice, stop: give the draft in the chat and say plainly
-   that it is not in Gmail. Do not write "draft in Gmail" into a next step until the draft exists.
+1. Use the connected mail app: search the app tools (`COMPOSIO_SEARCH_TOOLS`) for creating a
+   Gmail draft (`GMAIL_CREATE_EMAIL_DRAFT`) and run it (`COMPOSIO_MULTI_EXECUTE_TOOL`) with To (the
+   right person on the record), Subject and the body. Never run a send tool in its place.
+2. If no mail app is connected, or the draft tool is not offered, give the draft in the chat and
+   say it is not in their mailbox. Do not write a script or call a mail API directly, and do not
+   open token files such as `google_token.json`.
+3. If the person is asked to approve the call, that is theirs to decide: wait for the answer.
+4. Say it is saved only after the tool returned the draft (its id). If it fails twice, stop, give
+   the draft in the chat and say plainly that it is not in their mailbox. Do not write "draft
+   saved" into a next step until the draft exists.
 
 ## Enrichment costs money
 
@@ -438,8 +427,8 @@ entered.
 
 ## Google Sheets
 
-The records live on the desk, not in a Sheet. When Google is connected to you (the
-google-workspace skill, or any tool that reads and writes Sheets), you keep a Sheet in step:
+The records live on the desk, not in a Sheet. When Google Sheets is connected (the
+connected Sheets app, found with `COMPOSIO_SEARCH_TOOLS`), you keep a Sheet in step:
 
 **Desk to Sheet** ("mirror the desk to my sheet"). Call `gtm_export(action="table")`. Write
 `columns` as the first row and `rows` beneath it into a tab named `Stoa` of their Sheet, starting

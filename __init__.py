@@ -1,4 +1,4 @@
-"""Stoa: a go-to-market desk for small teams, inside Hermes.
+"""Stoa: a go-to-market desk for small teams, inside the assistant.
 
     στοά, the covered walk beside the agora where the day's business was done.
 
@@ -26,6 +26,8 @@ def _home() -> Path:
     return Path(get_hermes_home())
 
 
+SCHEDULED = "Assistant (scheduled)"     # the actor a scheduled job writes on the ledger (before: "Hermes (scheduled)")
+
 def _data_dir() -> Path:
     from plugins.plugin_storage import plugin_data_dir
     return plugin_data_dir(PLUGIN)
@@ -34,9 +36,9 @@ def _data_dir() -> Path:
 def _secret_reader(home: Path):
     """A way to read this profile's secrets from anywhere the plugin runs.
 
-    Inside a chat turn Hermes has the profile's secret scope installed and ``get_secret`` just works.
+    Inside a chat turn the assistant has the profile's secret scope installed and ``get_secret`` just works.
     A Slack button click and the web tab arrive outside any turn; on a gateway that serves several
-    profiles nothing says whose keys apply there, and ``get_secret`` refuses. Hermes's own background
+    profiles nothing says whose keys apply there, and ``get_secret`` refuses. The assistant's own background
     work handles that by installing the profile's scope around the call, and so does this.
     """
     def read(name: str):
@@ -59,7 +61,7 @@ def _session() -> dict:
         return {}
     platform = (get_session_env("HERMES_SESSION_PLATFORM") or "").lower()
     if str(get_session_env("HERMES_CRON_SESSION") or "").strip().lower() in ("1", "true", "yes", "on"):
-        # A scheduled run. Hermes gives it no platform (its delivery target is not a sender) and marks the run
+        # A scheduled run. The assistant gives it no platform (its delivery target is not a sender) and marks the run
         # itself instead; read as it stands, it would pass for someone at a terminal and nothing would be held.
         platform = "cron"
     return {"platform": platform,
@@ -146,8 +148,13 @@ def _tool(fn, desk=None, quiet=False, name=""):
     return handler
 
 
+def _no_injection(*_args, **_kwargs) -> bool:
+    """The desk never injects a message into a chat to start a turn by itself."""
+    return False
+
+
 def _jobs_reader(home: Path):
-    """A way to read this profile's scheduled jobs from Hermes: each one's name, whether it is on, its schedule and
+    """A way to read this profile's scheduled jobs from the assistant: each one's name, whether it is on, its schedule and
     when it runs next. Read only; Setup uses it to say which of Stoa's automations are switched on."""
     def read() -> list:
         from cron import jobs as cron_jobs
@@ -161,12 +168,12 @@ def _jobs_reader(home: Path):
 def build_desk(get_config, set_config) -> Desk:
     """A desk that belongs to the profile in scope right now.
 
-    Hermes loads a plugin once per profile, with that profile's home in scope, so the data folder is
+    The assistant loads a plugin once per profile, with that profile's home in scope, so the data folder is
     resolved here and kept: later calls can arrive with no profile in scope at all (a button click).
     """
     home, data = _home(), _data_dir()
     desk = Desk(data_dir=lambda: data, get_config=get_config, set_config=set_config, get_secret=_secret_reader(home),
-                actor=lambda: "Hermes (scheduled)" if _session().get("platform") == "cron" else _session().get("actor", ""))
+                actor=lambda: SCHEDULED if _session().get("platform") == "cron" else _session().get("actor", ""))
     desk.home = home
     desk.jobs = _jobs_reader(home)
     return desk
@@ -181,12 +188,12 @@ def register(ctx) -> None:
     LIVE_DESKS.append(desk)
     del LIVE_DESKS[:-4]
 
-    # What a map costs Hermes to work on: Hermes reports each model call's token counts and the end of each turn,
+    # What a map costs the assistant to work on: The assistant reports each model call's token counts and the end of each turn,
     # and the desk's meter counts them against the map the turn worked on. Counts only; no prompt or reply is read.
     try:
         ctx.register_hook("post_api_request", desk.usage.on_api)
         ctx.register_hook("post_llm_call", desk.usage.on_turn_end)
-    except Exception as exc:      # an older Hermes without these hooks: the map still works, its cost just is not counted
+    except Exception as exc:      # an older the assistant without these hooks: the map still works, its cost just is not counted
         import logging
         logging.getLogger("hermes.plugins.stoa").info("stoa: model-call hooks are not available here (%s); map costs are not counted", exc)
 
@@ -211,7 +218,7 @@ def register(ctx) -> None:
 
     # -- Slack cards and their buttons ----------------------------------------------------------
     from .slackdesk import ACTIONS, SlackDesk
-    slack = SlackDesk(desk, ctx.inject_message)
+    slack = SlackDesk(desk, _no_injection)        # never starts a turn on its own; a follow-up stays parked on the record
     desk.slack = slack
     ctx.register_platform_handler("slack", slack.wire)
     ctx.register_slack_action_handler(ACTIONS, slack.on_action)
@@ -246,4 +253,4 @@ def register(ctx) -> None:
     # -- automations the team can switch on from /blueprint -------------------------------------
     from .blueprints import BLUEPRINTS
     for blueprint in BLUEPRINTS:
-        ctx.register_automation_blueprint(blueprint["name"], **{key: value for key, value in blueprint.items() if key != "name"})
+        ctx.register_automation_blueprint(blueprint["name"], **{key: value for key, value in blueprint.items() if key not in ("name", "gate")})

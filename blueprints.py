@@ -1,6 +1,7 @@
 """The automations a team can switch on from /blueprint.
 
-Kept as data, so the Setup tab lists exactly the ones ``register`` hands to Hermes.
+Kept as data, so the Setup tab lists exactly the ones ``register`` hands over. Each with a ``gate`` runs with
+``gate.py`` as its pre-run script (installed as that file name), so the model wakes only when there is work.
 """
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ SHEET = {"name": "sheet", "type": "text", "label": "Which Google Sheet? (its lin
 BLUEPRINTS = [
     dict(
         name="morning-brief",
+        gate="stoa_gate_morning-brief.py",
         title="Pipeline morning brief",
         description="Each weekday: what is due, what has gone quiet, and what moved, from the Stoa desk.",
         category="work",
@@ -23,6 +25,7 @@ BLUEPRINTS = [
     ),
     dict(
         name="notes-sweep",
+        gate="stoa_gate_notes-sweep.py",
         title="File meeting notes",
         description="A few times a day: read new call notes, file them on the right record, and propose next steps.",
         category="work",
@@ -38,6 +41,7 @@ BLUEPRINTS = [
     ),
     dict(
         name="activity-sweep",
+        gate="stoa_gate_activity-sweep.py",
         title="Log email, call and Slack activity",
         description="A few times a day: find new email, calls and messages with people on the desk, log them, and ask before any stage changes.",
         category="work",
@@ -52,6 +56,7 @@ BLUEPRINTS = [
     ),
     dict(
         name="market-watch",
+        gate="stoa_gate_market-watch.py",
         title="Market watch",
         description="Once a week: look for companies that newly fit one of your market maps and add the best few.",
         category="work",
@@ -67,6 +72,7 @@ BLUEPRINTS = [
     ),
     dict(
         name="sheet-mirror",
+        gate="stoa_gate_sheet-mirror.py",
         title="Mirror the desk to a Google Sheet",
         description="A few times a day: write the whole pipeline to a tab of your Google Sheet, for everyone who lives in Sheets.",
         category="work",
@@ -91,6 +97,7 @@ BLUEPRINTS = [
     ),
     dict(
         name="friday-review",
+        gate="stoa_gate_friday-review.py",
         title="Friday pipeline review",
         description="Every Friday: the week in the pipeline, what is stuck, and the three records to push on Monday.",
         category="work",

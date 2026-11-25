@@ -108,7 +108,7 @@ def _run(desk, args, command) -> None:
         elif not name and len(desk.markets.list_markets()) != 1:
             maps = desk.markets.list_markets()
             print("\n".join("%s — %d companies, %d in the pipeline" % (m["name"], m["companies"], m["in_pipeline"]) for m in maps)
-                  or "No market maps yet. Ask Hermes to map a market for you.")
+                  or "No market maps yet. Ask the assistant to map a market for you.")
         else:
             print(desk.slash("map " + name))
     elif command == "playbooks":

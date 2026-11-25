@@ -1,7 +1,7 @@
 """The desk's storage: one SQLite file holding deals, the people on them, the log, and an append-only
 ledger of every change (what it replaced and what it left), which is what an undo reads.
 
-Pure standard library and no Hermes imports, so it can be tested anywhere. ``Store`` takes a path
+Pure standard library and no the assistant imports, so it can be tested anywhere. ``Store`` takes a path
 (or ``:memory:``) and opens a short-lived connection per operation: tool handlers, Slack button
 clicks and the CLI all run on different threads and processes.
 """
@@ -219,7 +219,7 @@ ADDED_COLUMNS = {
               "close_on": "TEXT NOT NULL DEFAULT ''", "delivery": "TEXT NOT NULL DEFAULT ''",
               # a few lines kept on the record itself, edited in place (the log is what happened; this is what to know)
               "notes": "TEXT NOT NULL DEFAULT ''", "phone": "TEXT NOT NULL DEFAULT ''"},
-    "intakes": {"origin": "TEXT NOT NULL DEFAULT 'list'"},    # list: rows someone sent. proposal: changes Hermes suggests
+    "intakes": {"origin": "TEXT NOT NULL DEFAULT 'list'"},    # list: rows someone sent. proposal: changes the assistant suggests
     # the month a client's invoice covers (YYYY-MM), for billing that is by the month rather than by the record
     "invoices": {"period": "TEXT NOT NULL DEFAULT ''"},
     # how a client is billed: hourly or a monthly retainer, the rate, the hours, who the invoice goes to (JSON)

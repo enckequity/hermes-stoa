@@ -1,6 +1,6 @@
 """The Slack half: posts cards and answers their buttons.
 
-Hermes hands the plugin its own ``slack_bolt.AsyncApp`` through
+The assistant hands the plugin its own ``slack_bolt.AsyncApp`` through
 ``ctx.register_platform_handler("slack", ...)``; cards are posted and updated with that app's
 client, so the plugin never sees or stores a Slack token. Button clicks arrive through
 ``ctx.register_slack_action_handler``.
@@ -27,7 +27,7 @@ HANDOFF_SETTLE = 8  # seconds between the agent opening the record and its draft
 
 
 NOT_ALLOWED = ("Not allowed: these buttons work for the person this was posted for, or for the people your team has "
-               "listed in the Stoa plugin's `slack_users` setting.")
+               "listed in the desk's `slack_users` setting.")
 
 
 class SlackDesk:
@@ -296,7 +296,7 @@ class SlackDesk:
     async def _begin(self, deal_id: str, followup: str, channel: str, ts: str, thread: str,
                      user_id: str, actor: str, team: str) -> str:
         """Give the writing task to the agent without ever losing it. Returns where it stands:
-        ``drafting`` (handed over), ``waiting`` (Hermes would not start a turn), or ``same`` (this
+        ``drafting`` (handed over), ``waiting`` (The assistant would not start a turn), or ``same`` (this
         very task is already being drafted: a second press of the button, which changes nothing).
 
         The task is parked on the record first. The agent's first step in any turn about the record
@@ -312,8 +312,8 @@ class SlackDesk:
         return "waiting"
 
     async def _follow(self, state: str, deal_id: str, followup: str, hint: str, channel: str, thread: str) -> None:
-        """After the card is redrawn: say how to ask when Hermes refused, and keep an eye on a
-        hand-off it accepted. Hermes says yes before it has routed the turn, and a turn that never
+        """After the card is redrawn: say how to ask when the assistant refused, and keep an eye on a
+        hand-off it accepted. The assistant says yes before it has routed the turn, and a turn that never
         starts makes no sound."""
         if state == "waiting":
             await self._say(channel, thread, hint)
@@ -344,7 +344,7 @@ class SlackDesk:
             log.debug("stoa: hand-off check failed", exc_info=True)
 
     async def _hand_off(self, followup: str, channel: str, ts: str, thread: str, user_id: str, actor: str, team: str) -> bool:
-        """Give the writing task to the agent. Hermes lets a plugin continue a conversation a
+        """Give the writing task to the agent. The assistant lets a plugin continue a conversation a
         person started, not open one, so the first choice is the session the card was posted
         from; next, the card's thread, which works once someone has spoken there."""
         session_key = await asyncio.to_thread(self.desk.store.card_session, channel, ts)

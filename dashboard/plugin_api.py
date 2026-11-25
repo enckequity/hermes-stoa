@@ -1,4 +1,4 @@
-"""Backend for the Stoa dashboard tab. Mounted by Hermes at ``/api/plugins/stoa/``.
+"""Backend for the Stoa dashboard tab. Mounted by the assistant at ``/api/plugins/stoa/``.
 
 Every handler is a plain ``def`` so FastAPI runs it in a worker thread, off the event loop. The
 tab reads one ``/state`` document on a short poll and posts small, deterministic actions; nothing
@@ -136,7 +136,7 @@ def _profile_desk():
     with _own_desks_lock:
         if str(home) not in _own_desks:
             built = package.build_desk(_settings, lambda key, value: None)
-            built.can_configure = False     # no way to save a setting from here: the page hands that to Hermes
+            built.can_configure = False     # no way to save a setting from here: the page hands that to the assistant
             _own_desks[str(home)] = built
         return _own_desks[str(home)]
 
@@ -363,19 +363,14 @@ def remove(deal_id: str) -> dict:
 
 @router.get("/removed")
 def removed() -> dict:
-    """The records taken off the desk, to be put back or deleted for good."""
+    """The records taken off the desk, to be put back."""
     return {"ok": True, "records": desk().removed()}
 
 
 @router.post("/deal/{deal_id}/destroy")
 def destroy(deal_id: str) -> dict:
-    """Delete for good a record already taken off the desk. Nothing brings it back."""
-    d = desk()
-    result = d.destroy(deal_id, actor="dashboard")
-    if not result.get("ok"):
-        raise HTTPException(400, result.get("error") or "that record cannot be deleted")
-    d.announce()
-    return result
+    """Deleting for good is turned off: a record taken off the desk stays archived and can always be put back."""
+    raise HTTPException(410, "Deleting for good is turned off. The record stays off the desk and can be put back.")
 
 
 @router.post("/deal/{deal_id}/restore")
@@ -742,14 +737,14 @@ def report_act(report_id: str, body: dict = Body(...)) -> dict:
 
 @router.get("/files")
 def files() -> dict:
-    """The files the talk box handed to Hermes that are still on this machine, when each goes, and how much Hermes
+    """The files the talk box handed to the assistant that are still on this machine, when each goes, and how much the assistant
     holds in its two folders (counts and sizes; no file of another chat is named)."""
     return desk().handed.listing()
 
 
 @router.post("/files/handed")
 def files_handed(body: dict = Body(...)) -> dict:
-    """The page says Hermes has just kept a copy of a file its talk box handed over, at the path Hermes gave back.
+    """The page says the assistant has just kept a copy of a file its talk box handed over, at the path the assistant gave back.
     It is listed only if it is a plain file in this profile's attachments or images folder."""
     return desk().handed.note(body.get("path"), body.get("name"), body.get("lane"))
 
@@ -801,7 +796,7 @@ def notes_preview() -> dict:
 
 @router.post("/notes/connections")
 def notes_connections(body: dict = Body(...)) -> dict:
-    """Save which of Hermes's own connections hold call notes (names only)."""
+    """Save which of the assistant's own connections hold call notes (names only)."""
     result = desk().notes_connections(body.get("connections"))
     if result.get("ok"):
         desk().announce()
@@ -837,7 +832,7 @@ def tour(body: dict = Body(...)) -> dict:
 
 @router.post("/playbook")
 def use_playbook(body: dict = Body(...)) -> dict:
-    """Switch the active playbook. Where this page cannot save a setting, it says so and the page asks Hermes instead."""
+    """Switch the active playbook. Where this page cannot save a setting, it says so and the page asks the assistant instead."""
     d = desk()
     name = str((body or {}).get("name") or "")
     if not d.can_configure and d.current()["first"]:        # the first pipeline's playbook is a plugin setting; another's is kept with it
@@ -920,10 +915,10 @@ def intake_file(body: dict = Body(...)) -> dict:
     counts = result.get("counts") or {}
     waiting = bool(counts.get("new") or counts.get("update"))
     named = str((body or {}).get("name") or "that list")
-    if result.get("unread"):        # no column reads as a name: the page hands the file to Hermes to read instead
+    if result.get("unread"):        # no column reads as a name: the page hands the file to the assistant to read instead
         return {"ok": True, "id": result.get("id"), "counts": counts, "waiting": False, "unread": True,
                 "columns": result.get("columns") or [], "problems": result.get("problems") or [],
-                "headline": "Stoa could not tell which column of %s holds the name, so Hermes is reading it." % named}
+                "headline": "Stoa could not tell which column of %s holds the name, so the assistant is reading it." % named}
     return {"ok": True, "id": result.get("id"), "counts": counts, "waiting": waiting, "problems": result.get("problems") or [],
             "kept": result.get("kept_as_note") or [],
             "headline": (d.intake.headline(d.store.intake_get(result["id"])) + ". It is waiting for your approval on Today.") if waiting

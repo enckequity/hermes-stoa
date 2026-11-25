@@ -157,7 +157,7 @@ class Intake:
         if len(rows) > MAX_ROWS:
             return {"ok": False, "error": "at most %d rows at a time; send the rest as a second list" % MAX_ROWS}
         playbook = self.desk.playbook()
-        # A proposal is a change Hermes suggests from what it found; a list is rows somebody sent. A
+        # A proposal is a change the assistant suggests from what it found; a list is rows somebody sent. A
         # declined proposal is remembered, and each one is approved or declined by itself.
         proposal = (str(args.get("kind") or "").lower() == "proposal" or session.get("platform") == "cron"
                     or any(isinstance(row, dict) and row.get("evidence") for row in rows))
