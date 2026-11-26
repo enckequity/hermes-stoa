@@ -92,8 +92,8 @@ class Gate(unittest.TestCase):
     def test_market_watch_needs_a_map(self):
         self.desk.store.count()
         self.assertEqual(self.run_gate("market-watch"), SKIP)
-        self.desk.markets.define({"name": "Payments", "rows": "companies", "segments": ["Payments"]})
-        self.desk.markets.add({"market": "Payments", "companies": [{"company": "Ironbridge", "segment": "Payments", "fit": 4}]})
+        self.desk.market({"action": "define", "name": "Payments", "brief": "Card processors.", "segments": ["Payments"]})
+        self.desk.market({"action": "add", "companies": [{"company": "Ironbridge", "segment": "Payments", "fit": 4}]})
         self.assertIn("1 market maps", self.run_gate("market-watch"))
 
     def test_sheet_mirror_wakes_once_per_change(self):
@@ -186,9 +186,10 @@ class NoHardDelete(unittest.TestCase):
         self.assertNotIn("/destroy'", (ROOT / "desktop" / "plugin.js").read_text())
 
     def test_a_removed_map_is_kept_in_trash(self):
-        self.desk.markets.define({"name": "Payments", "rows": "companies", "segments": ["Payments"]})
-        added = self.desk.markets.add({"market": "Payments", "companies": [{"company": "Ironbridge", "segment": "Payments", "fit": 4}]})
-        market_id = added.get("id") or self.desk.markets.list_markets()[0]["id"]
+        self.desk.market({"action": "define", "name": "Payments", "brief": "Card processors.", "segments": ["Payments"]})
+        added = self.desk.market({"action": "add", "companies": [{"company": "Ironbridge", "segment": "Payments", "fit": 4}]})
+        self.assertTrue(added["ok"], added)
+        market_id = self.desk.markets.list_markets()[0]["id"]
         self.assertTrue(self.desk.markets.remove(market_id)["ok"])
         kept = list((Path(self.tmp.name) / "trash").glob("map-*.json"))
         self.assertEqual(len(kept), 1)

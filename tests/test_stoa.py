@@ -181,7 +181,8 @@ class DeskTests(unittest.TestCase):
         self.assertIn("Next: Send JD", got["card"])
 
     def test_channel_allowlist(self):
-        self.assertTrue(self.desk.allowed({"platform": "slack", "chat_id": "C1"}))
+        self.assertFalse(self.desk.allowed({"platform": "slack", "chat_id": "C1"}))    # this fork: empty means local surfaces only
+        self.assertTrue(self.desk.allowed({"platform": "cli"}))
         desk = make_desk(self.tmp.name, config={"channels": ["C1"]})
         self.assertTrue(desk.allowed({"platform": "slack", "chat_id": "C1"}))
         self.assertFalse(desk.allowed({"platform": "slack", "chat_id": "D9"}))
@@ -945,7 +946,7 @@ class MarketTests(unittest.TestCase):
         desk = make_desk(self.tmp.name, config={"channels": ["C1"]})
         self.assertFalse(desk.allowed({"platform": "cron", "chat_id": ""}))
         self.assertTrue(make_desk(self.tmp.name, config={"channels": ["C1", "cron"]}).allowed({"platform": "cron"}))
-        self.assertTrue(make_desk(self.tmp.name).allowed({"platform": "cron"}))
+        self.assertFalse(make_desk(self.tmp.name).allowed({"platform": "cron"}))       # this fork: not until it is named
 
     def test_first_calls_fall_back_to_the_strongest_fits(self):
         self.define()
@@ -1661,7 +1662,7 @@ class TourTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.desk = make_desk(self.tmp.name, playbook="agency", secrets={"PDL_API_KEY": "k"})
+        self.desk = make_desk(self.tmp.name, playbook="agency", secrets={"PDL_API_KEY": "k"}, config={"channels": ["C1", "cron"]})
         self.mine = self.desk.deal({"action": "add", "name": "A real opportunity", "value": 5000})["deal"]
 
     def files(self):
@@ -2658,8 +2659,9 @@ class CashTests(unittest.TestCase):
         self.assertEqual([item["changes"][0]["field"] for item in self.desk.intake.queue()], ["Payment", "Invoice"])
         self.desk.set_autonomy("routine")
         self.assertTrue(self.desk.guard("gtm_invoice", {"action": "pay", "deal": self.site}, job)["ok"])      # held again (the same one: left out as waiting)
-        self.desk.set_autonomy("full")
-        self.assertIsNone(self.desk.guard("gtm_invoice", {"action": "pay", "deal": self.site}, job))
+        self.assertFalse(self.desk.set_autonomy("full")["ok"])                       # this fork: there is no level that runs it
+        self.assertTrue(self.desk.guard("gtm_invoice", {"action": "pay", "deal": self.site}, job)["ok"])
+        self.assertEqual(self.desk.store.invoices(self.site)[0]["state"], "sent")
 
     def test_the_sample_tours_have_money_in_them(self):
         for which in ("recruiting", "saas"):
@@ -2933,9 +2935,8 @@ class GroupTests(unittest.TestCase):
             self.desk.set_autonomy(level)
             self.assertFalse(self.desk.guard("gtm_group", {"action": "set", "group": self.search, "status": "closed"}, cron)["ok"])
             self.assertFalse(self.desk.guard("gtm_contact", {"action": "add", "group": self.search, "name": "X"}, cron)["ok"])
-        self.desk.set_autonomy("full")
-        self.assertIsNone(self.desk.guard("gtm_group", {"action": "set", "group": self.search, "status": "closed"}, cron))
-        self.assertIsNone(self.desk.guard("gtm_contact", {"action": "add", "group": self.search, "name": "X"}, cron))
+        self.assertFalse(self.desk.set_autonomy("full")["ok"])                       # this fork: no level lets a job change a group
+        self.assertFalse(self.desk.guard("gtm_group", {"action": "set", "group": self.search, "status": "closed"}, cron)["ok"])
         self.assertIsNone(self.desk.guard("gtm_group", {"action": "set", "group": self.search}, {"platform": "slack"}))
 
     def test_a_copy_of_the_file_is_kept_once_a_day(self):
@@ -3174,7 +3175,7 @@ class ApprovalTests(unittest.TestCase):
         self.assertEqual(self.desk.store.get(self.dana)["stage"], "screened")
         item = self.desk.intake.queue()[0]
         self.assertEqual((item["source"], item["changes"][0]["to"], item["case"], item["evidence"][0]["text"]),
-                         ("Hermes, on a schedule", "Submitted", "She said yes.", "Yes please."))
+                         ("The assistant, on a schedule", "Submitted", "She said yes.", "Yes please."))
         for tool, args in (("gtm_intake", {"action": "apply"}), ("gtm_intake", {"action": "discard"}), ("gtm_export", {"action": "import", "path": "x.csv"}),
                            ("gtm_market", {"action": "track", "target": "x"}), ("gtm_playbook", {"action": "use", "name": "agency"}),
                            ("gtm_playbook", {"action": "stages", "stages": ["Found", "Called"]}),
@@ -3196,10 +3197,12 @@ class ApprovalTests(unittest.TestCase):
         self.assertIsNone(self.desk.guard("gtm_deal", {"action": "update", "deal": self.dana, "next_step": "Call"}, job))
         self.assertIsNone(self.desk.guard("gtm_contact", {"action": "add", "deal": self.dana, "name": "X"}, job))
         self.assertTrue(self.desk.guard("gtm_deal", {"action": "move", "deal": self.dana, "stage": "next"}, job)["held"])
-        self.desk.set_autonomy("full")
-        self.assertIsNone(self.desk.guard("gtm_deal", {"action": "close", "deal": self.dana, "outcome": "won"}, job))
+        self.assertFalse(self.desk.set_autonomy("full")["ok"])                       # this fork: routine is the widest
+        self.assertTrue(self.desk.guard("gtm_deal", {"action": "close", "deal": self.dana, "outcome": "won"}, job)["held"])
         self.assertEqual(self.desk.guard("gtm_intake", {"action": "apply"}, job)["ok"], False)        # approving is never a job's
-        self.assertEqual(self.desk.setup()["autonomy"]["level"], "full")
+        self.assertEqual(self.desk.setup()["autonomy"]["level"], "routine")
+        self.desk.own_store.meta_set("autonomy", "full")                              # a level stored before this fork
+        self.assertEqual(self.desk.autonomy(), "ask")
         self.assertNotIn("autonomy", json.dumps([schemas.GTM_DEAL, schemas.GTM_PLAYBOOK, schemas.GTM_INTAKE, schemas.GTM_CONTACT]).lower()
                          .replace("autonomy setting", ""))                                            # no tool sets it
 
@@ -4065,7 +4068,7 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(self.call("gtm_notes", action="skip", note=note)["ok"])
         self.assertEqual(waiting(pipeline="My practice"), [])
 
-    def test_a_person_deletes_a_record_puts_it_back_or_deletes_it_for_good(self):
+    def test_a_person_deletes_a_record_and_puts_it_back_never_for_good(self):
         made = self.call("gtm_deal", action="add", name="Thornbury Glass", company="Thornbury Glass", note="Met at the fair.")
         deal = made["deal"]["id"]
         gone = self.desk.remove(deal, actor="dashboard")
@@ -4088,12 +4091,10 @@ class PipelineTests(unittest.TestCase):
         undone = self.call("gtm_deal", action="undo", deal=deal)
         self.assertTrue(undone["ok"], undone)
         self.assertNotIn("next_step", self.call("gtm_deal", action="get", deal=deal)["deal"])
-        # For good: only a record already off the desk, and then it is nowhere.
-        self.assertFalse(self.desk.destroy(deal)["ok"])
+        # This fork has no delete for good: a record taken off can always be put back.
+        self.assertFalse(hasattr(self.desk, "destroy"))
         self.desk.remove(deal)
-        self.assertTrue(self.desk.destroy(deal)["ok"])
-        self.assertEqual(self.desk.removed(), [])
-        self.assertFalse(self.call("gtm_deal", action="restore", deal="Thornbury Glass")["ok"])
+        self.assertTrue(self.call("gtm_deal", action="restore", deal="Thornbury Glass")["ok"])
         # The agent has no way to delete one, and is told so.
         from stoa import schemas as described
         self.assertNotIn("remove", described.GTM_DEAL["parameters"]["properties"]["action"]["enum"])
@@ -4207,14 +4208,15 @@ class PipelineTests(unittest.TestCase):
         self.call("gtm_deal", action="add", name="Rosa Lind", company="Ledgerline")
         self.call("gtm_deal", action="add", name="Visa retainer", company="Visa", pipeline="My practice")
         with self.desk.on("p2"):
-            self.desk.set_autonomy("full")
-            self.assertEqual(self.desk.autonomy(), "full")
+            self.desk.set_autonomy("routine")
+            self.assertEqual(self.desk.autonomy(), "routine")
         self.assertEqual(self.desk.autonomy(), "ask")
+        self.ctx.settings["channels"] = ["cron"]                                  # this fork: scheduled jobs are named to use it
         self.session(platform="cron")
-        held = self.call("gtm_deal", action="move", deal="Rosa Lind", stage="next")
+        held = self.call("gtm_deal", action="update", deal="Rosa Lind", next_step="Call")
         self.assertTrue(held.get("held"), held)                                   # the first pipeline asks first
-        done = self.call("gtm_deal", action="move", deal="Visa retainer", stage="next", pipeline="My practice")
-        self.assertEqual((done.get("held"), done["deal"]["stage_label"]), (None, "Intro call"))    # the second was told to run
+        done = self.call("gtm_deal", action="update", deal="Visa retainer", next_step="Call", pipeline="My practice")
+        self.assertEqual((done.get("held"), done.get("ok")), (None, True))        # the second handles the routine
         self.assertFalse(self.call("gtm_playbook", action="add_pipeline", pipeline_name="Sneaky", playbook="agency")["ok"])
         self.assertEqual(len(self.desk.pipelines()), 2)                           # a scheduled job opens no pipelines
         again = stoa.build_desk(self.ctx.get_config, self.ctx.set_config)         # the next time Hermes starts
@@ -4370,7 +4372,7 @@ class RegisterTests(unittest.TestCase):
         self.assertEqual((held["ok"], held["held"], desk.store.get(made)["stage"]), (True, True, "sourced"))
         logged = json.loads(self.ctx.tools["gtm_deal"]({"action": "log", "deal": made, "kind": "email", "text": "She replied.", "ref": "gmail:1"}))
         self.assertTrue(logged["ok"])
-        self.assertEqual(desk.store.activities(made, limit=1)[0]["actor"], "Hermes (scheduled)")
+        self.assertEqual(desk.store.activities(made, limit=1)[0]["actor"], "Assistant (scheduled)")
         self.assertEqual(json.loads(self.ctx.tools["gtm_intake"]({"action": "apply"}))["ok"], False)
         self.assertTrue(json.loads(self.ctx.tools["gtm_contact"]({"action": "match", "emails": ["a@b.example"]}))["ok"])
         self.session(platform="slack", chat_id="C1")
@@ -4915,7 +4917,7 @@ console.log(JSON.stringify(out))"""
         self.assertEqual(self.desk.store.find("Dana Whitfield")["stage"], "submitted")
         unread = self.api.intake_file({"name": "mystery.csv", "text": "Col A,Col B\nApex,apex.example\n"})
         self.assertEqual((unread["unread"], unread["waiting"]), (True, False))
-        self.assertIn("Hermes is reading it", unread["headline"])
+        self.assertIn("the assistant is reading it", unread["headline"])
         tabbed = self.api.intake_file({"name": "people.tsv", "text": "Name\tCompany\nBen Okoro\tHarbor Systems\n"})
         self.assertEqual(tabbed["counts"]["new"], 1)
         again = self.api.intake_file({"name": "again.csv", "text": "Name,Company\nAda Quill,Fathom Data\n"})
@@ -5458,6 +5460,9 @@ class FakeApp:
         self.client = FakeClient()
 
 
+SLACK_CHANNELS = ("C1", "C2", "D1", "D9", "cron")     # the chats the Slack tests press and post in, named (this fork)
+
+
 class SlackClickGuardTests(unittest.IsolatedAsyncioTestCase):
     """A button moves a stage, applies a list and can spend a paid lookup. It is taken only from the
     person the message was posted for, or from someone the team has listed, in a chat the desk is in."""
@@ -5465,7 +5470,7 @@ class SlackClickGuardTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.settings = {}
+        self.settings = {"channels": list(SLACK_CHANNELS)}     # this fork: an empty list means local surfaces only
         self.wire(self.settings)
 
     def wire(self, config):
@@ -5516,12 +5521,12 @@ class SlackClickGuardTests(unittest.IsolatedAsyncioTestCase):
         await asyncio.to_thread(self.desk.card, {"deal": "dana", "channel": "C1"}, {"platform": "cron"})     # a scheduled job posted it
         await self.press("U1", "stoa_advance", self.dana["id"] + "|screened")
         self.assertEqual(self.stage(), "screened")
-        self.wire({"slack_users": "U7, U8"})                                             # the team lists who may
+        self.wire({"slack_users": "U7, U8", "channels": list(SLACK_CHANNELS)})                                             # the team lists who may
         await self.press("U8", "stoa_advance", self.dana["id"] + "|screened")
         self.assertEqual(self.stage(), "submitted")
 
     async def test_with_a_list_only_the_people_on_it_can_press(self):
-        self.wire({"slack_users": ["U7"]})
+        self.wire({"slack_users": ["U7"], "channels": list(SLACK_CHANNELS)})
         asked = {"platform": "slack", "chat_id": "C1", "user_id": "U1"}
         await asyncio.to_thread(self.desk.card, {"deal": "dana"}, asked)
         await self.press("U1", "stoa_advance", self.dana["id"] + "|screened")           # asked for it, but is not on the team's list
@@ -5570,7 +5575,7 @@ class SlackTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.desk = make_desk(self.tmp.name, config={"slack_users": ["U1"]})      # these tests press as U1, who is on the team's list
+        self.desk = make_desk(self.tmp.name, config={"slack_users": ["U1"], "channels": list(SLACK_CHANNELS)})      # these tests press as U1, who is on the team's list
         fixture.load(self.desk)
         self.injected = []
         self.accept = True
@@ -6175,7 +6180,7 @@ class ReportTests(unittest.TestCase):
         counts = {row["key"]: row["count"] for row in result["rows"]}
         self.assertEqual((counts["pipeline"], counts["late"], counts["won"]), (2, 1, 1))
         self.assertEqual(counts["mapped"], len([t for t in self.desk.markets.targets(market["id"]) if t["status"] != "dismissed"]))
-        self.assertEqual([figure["label"] for figure in result["figures"]][-2:], ["Hermes's research, estimated", "paid lookups"])
+        self.assertEqual([figure["label"] for figure in result["figures"]][-2:], ["The assistant's research, estimated", "paid lookups"])
         self.assertEqual(result["says"], ["About $0.75 of research for each candidate the map put in the pipeline", "plus 3 paid lookups."])
         self.assertEqual(len(self.row(result, "In the pipeline")["records"]), 2)
 
