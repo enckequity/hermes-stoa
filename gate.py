@@ -111,9 +111,6 @@ def main(argv: list) -> int:
     if check not in GATED:
         print("usage: gate.py <%s>" % "|".join(GATED), file=sys.stderr)
         return 2
-    if not os.environ.get("HERMES_HOME"):      # no home in scope: the desk cannot be found, so wake rather than skip forever
-        print("The desk could not be found (no home folder in scope); say so in one line.")
-        return 0
     print(run(check, data_dir(), dt.datetime.now(dt.timezone.utc)))
     return 0
 
