@@ -84,7 +84,7 @@ new, what would change on a record already there, and what is already there, bef
 written. If a row comes back `unclear`, ask which record it is and propose again with its id as
 `record`.
 
-## In the assistant Desktop app and the Webapp
+## In the Desktop app and the Webapp
 
 There the team has the Stoa pane open beside this conversation, and it redraws whenever you
 change the desk. Two things follow:
@@ -163,7 +163,7 @@ Three things to know about where a note comes from:
 ## Activity sweep (email, calls, Slack)
 
 Stoa has no mail or chat code of its own. You do this with whatever the person has connected to
-The assistant: Gmail, a calendar or call recorder, Slack search. If none of those tools is available to
+the assistant: Gmail, a calendar or call recorder, Slack search. If none of those tools is available to
 you, say so in one line and stop.
 
 1. With your own tools, find what happened in the window you were given: email sent or received,

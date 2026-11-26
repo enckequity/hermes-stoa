@@ -21,7 +21,7 @@ let rest = null // ctx.rest, set in register()
 let storage = null // ctx.storage, set in register()
 // The talk box is a thin shell over the assistant's own parts wherever the app hands them to a plugin: the model menu the
 // real chat box uses, the app's message renderer, and the gateway's own way of attaching a file. Each is looked up
-// rather than assumed, so on a the assistant without one the page falls back to its own plain version instead of breaking.
+// rather than assumed, so on an assistant without one the page falls back to its own plain version instead of breaking.
 const { ModelCatalogMenu, ModelMenuCloseContext, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, MessageTextContent } = SDK
 const APP_MENU = Boolean(ModelCatalogMenu && ModelMenuCloseContext && DropdownMenu && DropdownMenuContent && DropdownMenuItem && DropdownMenuTrigger)
 
@@ -199,7 +199,7 @@ async function track(target, sessionId, pipe) {
 }
 
 // -- a command typed on the page ----------------------------------------------------------------------
-// A line that starts with "/" is a the assistant command (/blueprint, /gtm today). The app's own chat box runs those. The
+// A line that starts with "/" is an assistant command (/blueprint, /gtm today). The app's own chat box runs those. The
 // desk's talk box cannot: it hands every line to the agent as words, where "/blueprint" means nothing. So a command
 // is taken to a new chat, typed there and left for the person to send.
 const isCommand = line => /^\/[a-z][\w:-]*(\s|$)/i.test(String(line || '').trim())      // "/gtm today" is one; "/Users/me/list.csv" is a path
@@ -517,7 +517,7 @@ async function takeFile(file) {
       const text = await file.text()
       const result = await rest('/intake', { method: 'POST', body: { name: file.name, text } })
       refresh()
-      if (result.unread) { // the desk could not tell which column is the name: The assistant reads it, and asks if it cannot tell either
+      if (result.unread) { // the desk could not tell which column is the name: the assistant reads it, and asks if it cannot tell either
         if (text.length > 60000) return host.notify({ kind: 'info', message: 'Stoa could not tell which column of ' + file.name + ' holds the name. It is too long for the box here: press "Open the conversation" and drop it there.' })
         host.notify({ kind: 'info', message: result.headline })
         return say('Stoa could not tell which column of this list holds the name. Read it, work out which column is which, and put it on the desk as a list for my review. If you cannot tell, ask me.', { name: file.name, text })
@@ -2727,7 +2727,7 @@ function ModelPickApp({ lane }) {
             talk.busy ? h('div', { key: 'busy', className: 'stoa-sub', style: { padding: '6px 10px' } }, 'The assistant is answering; a change waits until it is done.') : null] }))))
 }
 
-/** The same choice on a the assistant whose app does not hand a plugin its model menu: a plain list of every model the assistant names. */
+/** The same choice on an assistant whose app does not hand a plugin its model menu: a plain list of every model the assistant names. */
 function ModelPickPlain({ lane = 'desk' }) {
   const picked = useValue($model)[lane]
   const talk = useValue($talk)
@@ -3399,7 +3399,7 @@ const BY_HAND = ['Drag a card to another column to move it; drop it on the last 
   'Press a stage in the funnel to pick out its column on the board; press it again to let go.', 'Press a company name on a record, or Companies on the pipeline, for everything at that company.',
   'Press a card or a row to open the record: advance it, mark the step done, snooze it, or edit any fact.', 'Drop a CSV anywhere on the page. It comes back as a review; nothing is written until you apply.',
   'Use the microphone in the box at the foot of the page to dictate.']
-const TYPED = [['/gtm', 'the board, in any the assistant chat'], ['/gtm today', 'what needs you, most pressing first'],
+const TYPED = [['/gtm', 'the board, in any chat'], ['/gtm today', 'what needs you, most pressing first'],
   ['/gtm cash', 'won, invoiced, collected, overdue, and the forecast'], ['/gtm brief', 'the morning brief'], ['/gtm <name>', 'one record as a card'],
   ['/gtm map', 'your market map'], ['!gtm …', 'the same in Slack, which keeps the slash for itself'], ['/blueprint', 'switch on an automation'], ['hermes stoa status', 'in a terminal: what is connected']]
 const ALWAYS = ['Keeps one ledger: every change to a record or a person, what it replaced and what it left. Lines are never altered.',
@@ -3586,7 +3586,7 @@ function NotesSources({ setup }) {
           h('span', { className: 'stoa-eyebrow' }, 'Or with nothing to export'),
           h('p', { style: { margin: '4px 0 6px' } }, tool.connection.about + ' In the assistant, open Capabilities, then Connectors, add a connector with this address, and sign in to ' + tool.name + ' when it asks: ',
             h('code', { className: 'stoa-code' }, tool.connection.address)),
-          h('p', { className: 'stoa-sub', style: { margin: '0 0 6px' } }, 'Then tell Stoa to have the assistant look there on each notes sweep. This way is new: The assistant reads the notes with the connector\'s own tools, so how well it works depends on that connector.'),
+          h('p', { className: 'stoa-sub', style: { margin: '0 0 6px' } }, 'Then tell Stoa to have the assistant look there on each notes sweep. This way is new: the assistant reads the notes with the connector\'s own tools, so how well it works depends on that connector.'),
           h('div', { className: 'stoa-btns', style: { margin: 0 } },
             h(Btn, { onClick: () => host.navigate('/capabilities') }, 'Open Capabilities'),
             connections.includes(tool.connection.name)
@@ -3637,11 +3637,11 @@ function NotesSources({ setup }) {
                 waiting.notes.map(note => h('div', { key: note.id, className: 'stoa-noterow' },
                   h('span', { className: 'stoa-num' }, day(note.when)),
                   h('span', { className: 'stoa-grow', style: { minWidth: 0 } }, h('span', { className: 'stoa-name', style: { display: 'block', overflowWrap: 'anywhere' } }, note.title),
-                    h('span', { className: 'stoa-sub' }, [where[note.source] || note.source, note.parts > 1 ? note.parts + ' files, read as one' : '', note.handed ? 'a PDF: The assistant reads it' : ''].filter(Boolean).join(' · '))),
+                    h('span', { className: 'stoa-sub' }, [where[note.source] || note.source, note.parts > 1 ? note.parts + ' files, read as one' : '', note.handed ? 'a PDF: the assistant reads it' : ''].filter(Boolean).join(' · '))),
                   h('span', { className: 'stoa-notematch', 'data-on': note.suggested.length ? '1' : '0' }, note.suggested.length
                     ? [h('b', { key: 'n' }, note.suggested[0].name), h('small', { key: 'w' }, note.suggested[0].why)]
                     : h('small', null, 'no record matched yet')))),
-                h('p', { key: 'unmatched', className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'A note with no match is still read: The assistant works out who it is about from what it says, and asks before adding anyone new.'),
+                h('p', { key: 'unmatched', className: 'stoa-sub', style: { margin: '8px 0 0' } }, 'A note with no match is still read: the assistant works out who it is about from what it says, and asks before adding anyone new.'),
                 h('div', { key: 'go', className: 'stoa-btns' },
                   h(Btn, { kind: 'primary', title: 'Sends the assistant a line asking it to read and file the waiting notes. It proposes stage changes; it does not make them.', onClick: fileNow }, 'Have the assistant file them now'),
                   h(Btn, { kind: 'quiet', onClick: () => queryClient.invalidateQueries({ queryKey: ['stoa', 'notes-preview'] }) }, 'Look again'))]
@@ -4086,7 +4086,7 @@ function Autonomy({ setup }) {
       .then(() => setBusy(false))
   }
   return h('div', null,
-    h('div', { className: 'stoa-sub', style: { marginBottom: 8 } }, 'In a chat, the assistant does what you ask. This is for the jobs that run when you are not there. Only you can change it here: The assistant has no way to.'),
+    h('div', { className: 'stoa-sub', style: { marginBottom: 8 } }, 'In a chat, the assistant does what you ask. This is for the jobs that run when you are not there. Only you can change it here: the assistant has no way to.'),
     auto.levels.map(level => h('button', { type: 'button', key: level.id, className: 'stoa-level', 'data-on': level.id === auto.level ? '1' : '0', disabled: busy,
       'aria-pressed': level.id === auto.level, onClick: () => pick(level.id) },
     h(Lamp, { on: level.id === auto.level }),

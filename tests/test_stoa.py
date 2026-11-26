@@ -5460,7 +5460,7 @@ class FakeApp:
         self.client = FakeClient()
 
 
-SLACK_CHANNELS = ("C1", "C2", "D1", "D9", "cron")     # the chats the Slack tests press and post in, named (this fork)
+SLACK_CHANNELS = ("C1", "C2", "C9", "D1", "D9", "cron")     # the chats the Slack tests press and post in, named (this fork)
 
 
 class SlackClickGuardTests(unittest.IsolatedAsyncioTestCase):

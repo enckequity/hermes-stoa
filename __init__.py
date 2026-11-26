@@ -188,12 +188,12 @@ def register(ctx) -> None:
     LIVE_DESKS.append(desk)
     del LIVE_DESKS[:-4]
 
-    # What a map costs the assistant to work on: The assistant reports each model call's token counts and the end of each turn,
+    # What a map costs the assistant to work on: the assistant reports each model call's token counts and the end of each turn,
     # and the desk's meter counts them against the map the turn worked on. Counts only; no prompt or reply is read.
     try:
         ctx.register_hook("post_api_request", desk.usage.on_api)
         ctx.register_hook("post_llm_call", desk.usage.on_turn_end)
-    except Exception as exc:      # an older the assistant without these hooks: the map still works, its cost just is not counted
+    except Exception as exc:      # an older engine without these hooks: the map still works, its cost just is not counted
         import logging
         logging.getLogger("hermes.plugins.stoa").info("stoa: model-call hooks are not available here (%s); map costs are not counted", exc)
 

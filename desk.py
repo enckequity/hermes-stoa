@@ -78,7 +78,7 @@ NOTE_TOOLS = (
 KEYS = (
     {"id": "exa", "env": EXA_KEY, "name": "Exa", "kind": "Company search",
      "unlocks": "A market map searches for companies directly, from a plain description of who you are after.",
-     "without": "Maps still work without it: The assistant researches with whatever web search it has.",
+     "without": "Maps still work without it: the assistant researches with whatever web search it has.",
      "get": "https://dashboard.exa.ai/api-keys", "where": "the Exa dashboard",
      "steps": "Sign up at exa.ai, open API Keys in the dashboard, create a key and copy it.",
      "cost": "Exa bills each search. A map search asks for at most 15 results.",
@@ -126,6 +126,9 @@ AUTONOMY = {
                 "summary": "A scheduled job may also set next steps, fill in facts and add people to a record. "
                            "Stage changes, new records and closing wait for your approval."},
 }
+# An update that touches any of these is held for a person even at "routine" (this fork): a scheduled job may set next steps
+# and fill in contact facts, not rename, regroup, reassign, re-price, re-source or move a record's delivery or close date.
+ROUTINE_HELD_FIELDS = ("name", "company", "group", "value", "owner", "source", "close_on", "delivery")
 # Which pipeline the call in hand is about ("" = the first one). Set for the length of one tool call, one page request
 # or one button click, so everything beneath reads and writes that pipeline's file with that pipeline's playbook.
 PIPELINE: contextvars.ContextVar = contextvars.ContextVar("stoa_pipeline", default="")
@@ -773,7 +776,7 @@ class Desk:
         session = session or {}
         if session.get("platform") == "cron" and self.tour():
             return False        # scheduled jobs wait while sample data is on show: they are for the team's own records
-        if session.get("platform", "") in ("", "cli", "tui", "desktop", "local"):
+        if session.get("platform", "") in ("", "cli", "tui", "desktop", "dashboard", "local"):
             return True
         if not allow:           # no chat and no scheduled job until it is named in ``channels``
             return False
@@ -1789,6 +1792,8 @@ class Desk:
                                          % AUTONOMY[self.autonomy()]["label"]}
         if tool == "gtm_deal":
             action = action or "get"
+            if action == "update" and any((args or {}).get(key) is not None for key in ROUTINE_HELD_FIELDS):
+                return self.hold(action, args or {})        # what a record is, whose it is, its money and its group: a person's
             if action == "get" or action in allows:
                 return None
             if action in ("undo", "restore"):
@@ -3450,6 +3455,10 @@ class Desk:
                    else "no Slack channel was given")
             return {"ok": True, "posted": False, "card": text,
                     "note": "%s, so here is the card as text. Show it to the user as is." % why}
+        if not self.allowed({"platform": "slack", "chat_id": channel}):      # this fork: only a chat named in channels
+            return {"ok": True, "posted": False, "card": text,
+                    "note": "That chat is not one the desk is allowed in (the channels setting), so nothing was posted. "
+                            "Here is the card as text. Show it to the user as is."}
         # A card posted into the conversation that asked for it goes in that conversation's thread
         # and remembers the session, so a later button click can hand the writing back to it.
         here = session.get("platform") == "slack" and channel == session.get("chat_id")

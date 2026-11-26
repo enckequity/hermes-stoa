@@ -159,7 +159,7 @@
     var jobs = props.jobs || [], auto = props.autonomy;
     var words = { on: "On", paused: "Paused", off: "Off", unknown: "Not known from here" };
     return h("div", null,
-      h("p", { className: "stoa-p" }, "Jobs the assistant can run on a schedule. To switch one on, type ", h("code", null, "/blueprint"), " in a the assistant chat and pick it; the assistant asks when it should run and where to report. Pausing, changing or removing one is done on the dashboard's Cron page."),
+      h("p", { className: "stoa-p" }, "Jobs the assistant can run on a schedule. To switch one on, type ", h("code", null, "/blueprint"), " in a chat and pick it; the assistant asks when it should run and where to report. Pausing, changing or removing one is done on the dashboard's Cron page."),
       h("div", { className: "stoa-rows" }, jobs.map(function (job) {
         return h("div", { className: "stoa-row", key: job.name },
           h("span", null, h("b", null, job.title), h("small", null, job.description)),
@@ -247,7 +247,7 @@
     };
     return h(Section, { title: "Market maps", note: rows.length ? "limits are set on the Stoa page, under Map facts" : "" },
       o.tour ? h("p", { className: "stoa-p" }, "Sample data is on show, so your own maps are not listed. Leave the tour to see them.")
-        : !rows.length ? h("p", { className: "stoa-p" }, "No map yet. In a the assistant chat, or on the Stoa page's Market map tab, say what you sell and who you are after; the assistant researches it and saves the map.")
+        : !rows.length ? h("p", { className: "stoa-p" }, "No map yet. In an assistant chat, or on the Stoa page's Market map tab, say what you sell and who you are after; the assistant researches it and saves the map.")
         : h("div", { className: "stoa-scroll" }, h("table", { className: "stoa-table" },
           h("thead", null, h("tr", null, ["Map", "Companies", "In pipeline", "Buyers named", "The assistant's work", "This month", "Lookups", "Searches", "Limits"].map(function (label, i) {
             return h("th", { key: label, "data-num": i >= 1 && i <= 7 ? "1" : "0" }, label);

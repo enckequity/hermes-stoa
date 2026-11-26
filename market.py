@@ -1115,16 +1115,16 @@ class Markets:
         self._refresh(market["id"])
         return {"ok": True, "id": market["id"], "name": name}
 
-    def _trash(self, market_id: str) -> Optional[Path]:
+    def _trash(self, market_id: str, conn) -> Optional[Path]:
         """Keep a removed map: its row, its companies and its meta, as JSON in ``trash/`` beside the desk file. A desk
         held in memory (tests) has no folder and keeps nothing. Refuses (raises) rather than delete without a copy."""
         if self.store.path == ":memory:":
             return None
         prefix = "map:%s:" % market_id
-        with self.store._conn() as conn:
-            snapshot = {"market": [dict(r) for r in conn.execute("SELECT * FROM markets WHERE id = ?", (market_id,))],
-                        "targets": [dict(r) for r in conn.execute("SELECT * FROM targets WHERE market_id = ?", (market_id,))],
-                        "meta": [dict(r) for r in conn.execute("SELECT * FROM meta WHERE substr(k, 1, ?) = ?", (len(prefix), prefix))]}
+        snapshot = {"market": [dict(r) for r in conn.execute("SELECT * FROM markets WHERE id = ?", (market_id,))],
+                    "targets": [dict(r) for r in conn.execute("SELECT * FROM targets WHERE market_id = ?", (market_id,))],
+                    "meta": [dict(r) for r in conn.execute("SELECT * FROM meta WHERE substr(k, 1, ?) = ?", (len(prefix), prefix))],
+                    "cards": [dict(r) for r in conn.execute("SELECT * FROM cards WHERE deal_id = ?", ("map:" + market_id,))]}
         folder = Path(self.store.path).parent / "trash"
         folder.mkdir(parents=True, exist_ok=True)
         out = folder / ("map-%s-%s.json" % (st.slugify(market_id) or "map", st.now().replace(":", "")))
@@ -1138,14 +1138,15 @@ class Markets:
         market = self._market(ref)
         if market is None:
             return {"ok": False, "error": "That map is no longer on the desk."}
-        self._trash(market["id"])
-        with self.store._conn() as conn:
+        with self.store._conn(write=True) as conn:      # the copy and the delete in one transaction: nothing added between is lost
+            self._trash(market["id"], conn)
             companies = conn.execute("SELECT count(*) FROM targets WHERE market_id = ?", (market["id"],)).fetchone()[0]
             kept = conn.execute("SELECT count(*) FROM targets WHERE market_id = ? AND status = 'tracked'", (market["id"],)).fetchone()[0]
             conn.execute("DELETE FROM targets WHERE market_id = ?", (market["id"],))
             conn.execute("DELETE FROM markets WHERE id = ?", (market["id"],))
             prefix = "map:%s:" % market["id"]
             conn.execute("DELETE FROM meta WHERE substr(k, 1, ?) = ?", (len(prefix), prefix))
+            conn.execute("DELETE FROM cards WHERE deal_id = ?", ("map:" + market["id"],))
         return {"ok": True, "id": market["id"], "name": market["name"], "companies": companies, "in_pipeline": kept}
 
     def restore(self, refs: list) -> dict:
@@ -1243,6 +1244,9 @@ class Markets:
                             "draws the live map there, with a button on each company. Then add your reading in a few lines."}
         if slack is None or not slack.available or not channel:
             return {"ok": True, "posted": False, "map": text, "note": "Slack is not available here, so show this map as text."}
+        if not self.desk.allowed({"platform": "slack", "chat_id": channel}):     # this fork: only a chat named in channels
+            return {"ok": True, "posted": False, "map": text,
+                    "note": "That chat is not one the desk is allowed in (the channels setting), so nothing was posted. Show this map as text."}
         here = session.get("platform") == "slack" and channel == session.get("chat_id")
         result = slack.post_map(channel, market["id"], session.get("thread_id") or "" if here else "",
                                 session.get("session_key") or "" if here else "",

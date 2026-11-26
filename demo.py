@@ -578,11 +578,12 @@ def summary(desk, which: str = "") -> str:
 
 
 def clear(desk) -> int:
-    """Remove every sample record and both sample maps (and anything added to the pipeline from them)."""
+    """Take every sample record and both sample maps off the desk. Nothing is destroyed (this fork has no delete for
+    good): records are archived as ``remove`` does, so ``restore`` puts any back, and a map goes to ``trash/`` first."""
     store = desk.store
     doomed = [d for d in store.list(status="all") if d["source"] == SOURCE]
     for deal in doomed:
-        store.delete(deal["id"])
+        store.take_off(deal["id"], actor="sample data removed")
     for intake in store.intake_list("open", limit=50):
         if intake["source"] == PROPOSAL_SOURCE:
             store.intake_finish(intake["id"], "discarded", {"reason": "sample data removed"})
@@ -592,9 +593,6 @@ def clear(desk) -> int:
             continue
         for target in desk.markets.targets(market["id"]):
             if target["deal_id"]:
-                store.delete(target["deal_id"])
-        with store._conn() as conn:
-            conn.execute("DELETE FROM targets WHERE market_id = ?", (market["id"],))
-            conn.execute("DELETE FROM markets WHERE id = ?", (market["id"],))
-            conn.execute("DELETE FROM cards WHERE deal_id = ?", ("map:" + market["id"],))
+                store.take_off(target["deal_id"], actor="sample data removed")
+        desk.markets.remove(market["id"])
     return len(doomed)

@@ -198,6 +198,48 @@ class NoHardDelete(unittest.TestCase):
         self.assertEqual([t["company"] for t in snapshot["targets"]], ["Ironbridge"])
 
 
+
+class ReviewFixes(unittest.TestCase):
+    """The independent review's blocking findings: no delete through sample tidy, a routine job cannot regroup or re-price,
+    and nothing is posted to a chat that is not named in channels."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.desk = make_desk(self.tmp.name, playbook="b2b-sales")
+
+    def test_tidying_samples_archives_and_can_be_put_back(self):
+        from stoa import demo
+        made = self.desk.store.add("Ada Lovelace", "lead", source=demo.SOURCE)
+        self.assertEqual(self.desk.tidy_samples()["removed"], 1)
+        self.assertEqual([d["id"] for d in self.desk.removed()], [made["id"]])
+        self.assertTrue(self.desk.restore(made["id"])["ok"])
+
+    def test_a_routine_job_cannot_regroup_or_reprice(self):
+        deal = self.desk.store.add("Ada Lovelace", "lead")
+        self.desk.set_autonomy("routine")
+        cron = {"platform": "cron"}
+        self.assertIsNone(self.desk.guard("gtm_deal", {"action": "update", "deal": deal["id"], "next_step": "Call"}, cron))
+        for key, value in (("group", "Other"), ("value", 9000), ("owner", "x"), ("source", "stoa-demo"), ("delivery", "next"), ("name", "Y")):
+            held = self.desk.guard("gtm_deal", {"action": "update", "deal": deal["id"], key: value}, cron)
+            self.assertIsNotNone(held, key)                                   # not run: held, or nothing a proposal can carry
+        self.assertEqual(self.desk.store.get(deal["id"])["grp"], deal["grp"])
+
+    def test_no_post_to_a_chat_not_named(self):
+        class Slack:
+            available = True
+            posted = []
+
+            def post_card(self, *a, **k):
+                self.posted.append(a)
+                return {"ok": True, "ts": "1"}
+        self.desk.slack = Slack()
+        self.desk.store.add("Ada Lovelace", "lead")
+        out = self.desk.card({"deal": "Ada", "channel": "C_ANY"}, {"platform": "cli"})
+        self.assertFalse(out["posted"])
+        self.assertEqual(Slack.posted, [])
+
+
 class NeutralText(unittest.TestCase):
     RUNTIME = ["*.py", "dashboard/plugin_api.py", "dashboard/dist/index.js", "desktop/plugin.js", "skills/*/SKILL.md",
                "playbooks/*.yaml", "plugin.yaml"]

@@ -34,13 +34,15 @@ def data_dir() -> Path:
 
 def desks(data: Path) -> list:
     """Every pipeline's file: desk.db and pipe-*.db."""
+    if data.exists() and not os.access(data, os.R_OK | os.X_OK):
+        raise PermissionError(str(data))        # a folder the gate cannot search: wake, so the run reports it
     if not data.is_dir():
         return []
     return [p for p in [data / "desk.db", *sorted(data.glob("pipe-*.db"))] if p.is_file()]
 
 
 def _read(path: Path, sql: str, args: tuple = ()) -> int:
-    conn = sqlite3.connect("file:%s?mode=ro" % path, uri=True, timeout=5)
+    conn = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True, timeout=5)
     try:
         row = conn.execute(sql, args).fetchone()
         return int((row or [0])[0] or 0)
@@ -109,6 +111,9 @@ def main(argv: list) -> int:
     if check not in GATED:
         print("usage: gate.py <%s>" % "|".join(GATED), file=sys.stderr)
         return 2
+    if not os.environ.get("HERMES_HOME"):      # no home in scope: the desk cannot be found, so wake rather than skip forever
+        print("The desk could not be found (no home folder in scope); say so in one line.")
+        return 0
     print(run(check, data_dir(), dt.datetime.now(dt.timezone.utc)))
     return 0
 
